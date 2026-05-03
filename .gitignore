@@ -1,6 +1,14 @@
 .venv
 runs/
 __pycache__/
-*.png
 action_embeddings_cache/
-*.mp4
+*.py[cod]
+
+# OS/editor artifacts
+.DS_Store
+
+# Local simulation/runtime artifacts
+pol_env/Tribes/img_step_*.png
+pol_env/Tribes/game_recording_*.mp4
+pol_env/Tribes/py/polytopia_simulator.log
+pol_env/Tribes/game_moves_*.json

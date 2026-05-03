@@ -1,5 +1,17 @@
 ## Quickstart
 
+> Note: canonical project-level docs now live at repository root (`README.md`) and `docs/`.
+> This file is kept for Tribes-specific setup details.
+
+## Attribution
+
+This Tribes integration is part of a forked codebase and is built on major upstream contributions.
+
+- Upstream repository: `https://github.com/ClaireBookworm/polytopia_rl`
+- Current fork/project: `https://github.com/NeoLorenzo/PolyVision`
+
+Please retain upstream credit and license notices when modifying or redistributing this code.
+
 ### 1) Compile Java Code First
 Before running the Java environment, you need to compile the source code:
 

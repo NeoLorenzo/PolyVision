@@ -1,6 +1,5 @@
 import gymnasium as gym
 import numpy as np
-import torch
 from gymnasium.envs.registration import register
 from .gym_env import TribesGymEnv, make_default_env
 
