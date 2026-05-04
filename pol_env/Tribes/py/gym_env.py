@@ -46,7 +46,7 @@ class TribesGymEnv:
         done = bool(self._env.isDone())
 
         current_spt = self._compute_spt_from_obs(obs, tribe_id=0)
-        reward = float(current_spt)
+        reward = float(current_spt - prev_spt)
         self._last_spt = current_spt
 
         scores = list(self._env.getScores())

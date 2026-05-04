@@ -2,6 +2,40 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Learning-003] - 2026-05-04
+
+### Scope
+- This update series is reserved exclusively for training/learning improvements to help the bot learn faster and more reliably.
+- No gameplay-rule expansion is planned in this section; changes should focus on optimization, exploration, reward-learning behavior, and policy stability.
+
+### Planned Focus Areas
+- PPO learning-curve tuning (entropy behavior, policy/value balance, and stability controls).
+- Action-selection learning quality under masked discrete actions.
+- Reward-shaping and telemetry-guided learning diagnostics to reduce SPT plateaus.
+- Hyperparameter iteration for better economy-growth behavior within the fixed Turn-10 horizon.
+
+### Implemented
+- Updated reward progression signal in `pol_env/Tribes/py/gym_env.py`:
+  - changed per-step reward from absolute `SPT` to `delta_spt` (`current_spt - previous_spt`)
+  - keeps `info["spt"]` and `info["delta_spt"]` telemetry intact
+- Added village-expansion milestone rewards in `pol_env/Tribes/py/register_env.py`:
+  - `FIRST_EXPANSION_BONUS = +1.0` when city count reaches `starting_city_count + 1`
+  - `SECOND_EXPANSION_BONUS = +2.0` when city count reaches `starting_city_count + 2`
+  - milestone bonuses are one-time per episode and tracked with:
+    - `_first_expansion_rewarded`
+    - `_second_expansion_rewarded`
+- Added Turn-10 hard-failure penalty in `pol_env/Tribes/py/register_env.py`:
+  - `SECOND_VILLAGE_BY_T10_PENALTY = -3.0`
+  - applied when wrapper horizon truncates at Turn 10 and city count is still at baseline (`current_city_count <= starting_city_count`)
+- Added reward diagnostics in wrapper `info` for monitoring and debugging:
+  - `info["city_count"]`
+  - `info["starting_city_count"]`
+  - `info["reward_adjustment"]`
+- Added helper method in wrapper:
+  - `_get_city_count(obs)` derives city count from `obs["tribe"]["citiesID"]`
+- Added wrapper episode-state initialization for milestone logic:
+  - sets `_starting_city_count`, `_last_city_count`, and milestone flags after deterministic Bardur opening on reset
+
 ## [Phase1-Stability-002] - 2026-05-04
 
 ### Added

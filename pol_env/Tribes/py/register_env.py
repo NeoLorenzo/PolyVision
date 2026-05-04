@@ -8,6 +8,9 @@ from .gym_env import TribesGymEnv, make_default_env
 class TribesGymWrapper(gym.Env):
     PHASE1_LEVEL_FILE = "levels/phase1_12x12_2bardur.csv"
     MAX_TURNS = 10
+    SECOND_VILLAGE_BY_T10_PENALTY = -3.0
+    FIRST_EXPANSION_BONUS = 1.0
+    SECOND_EXPANSION_BONUS = 2.0
     ALLOWED_ACTION_TYPES = {
         "END_TURN",
         "MOVE",
@@ -27,6 +30,10 @@ class TribesGymWrapper(gym.Env):
         self.verbose_resets = os.environ.get("POLYVISION_VERBOSE_RESETS", "0").lower() in ("1", "true", "yes", "on")
         self.render_mode = "rgb_array"        # Initialize the environment to get the actual action space size
         self._turn_count = 0
+        self._starting_city_count = 1
+        self._last_city_count = 1
+        self._first_expansion_rewarded = False
+        self._second_expansion_rewarded = False
         try:
             obs = self.tribes_env.reset(self.level_file, seed=42)
             
@@ -58,6 +65,10 @@ class TribesGymWrapper(gym.Env):
         obs = self.tribes_env.reset(self.level_file, seed or 42)
         self._turn_count = 0
         obs = self._apply_bardur_opening(obs)
+        self._starting_city_count = self._get_city_count(obs)
+        self._last_city_count = self._starting_city_count
+        self._first_expansion_rewarded = False
+        self._second_expansion_rewarded = False
         
         # Log action space info for debugging
         action_count = self.tribes_env.action_space_n
@@ -99,9 +110,24 @@ class TribesGymWrapper(gym.Env):
             self._turn_count += 1
 
         obs, reward, done, info = self.tribes_env.step(selected_raw_action)
+        current_city_count = self._get_city_count(obs)
+        reward_adjustment = 0.0
+
+        if (not self._first_expansion_rewarded) and current_city_count >= self._starting_city_count + 1:
+            reward_adjustment += self.FIRST_EXPANSION_BONUS
+            self._first_expansion_rewarded = True
+
+        if (not self._second_expansion_rewarded) and current_city_count >= self._starting_city_count + 2:
+            reward_adjustment += self.SECOND_EXPANSION_BONUS
+            self._second_expansion_rewarded = True
+
         # Phase 1 override: ignore Java terminal state and control horizon purely in Python.
         terminated = False
         truncated = self._turn_count >= self.MAX_TURNS
+        if truncated and current_city_count <= self._starting_city_count:
+            reward_adjustment += self.SECOND_VILLAGE_BY_T10_PENALTY
+
+        reward = float(reward) + reward_adjustment
 
         info["valid_actions"] = len(allowed_indices)
         info["raw_valid_actions"] = raw_count
@@ -109,9 +135,13 @@ class TribesGymWrapper(gym.Env):
         info["selected_raw_action"] = selected_raw_action
         info["selected_action_type"] = selected_action_type
         info["turn_count"] = self._turn_count
+        info["city_count"] = current_city_count
+        info["reward_adjustment"] = float(reward_adjustment)
+        info["starting_city_count"] = int(self._starting_city_count)
         info["action_mask"] = action_mask
         info["java_done"] = bool(done)
         info["terminated_overridden"] = True
+        self._last_city_count = current_city_count
 
         return self._dict_to_array(obs), reward, terminated, truncated, info
 
@@ -169,6 +199,12 @@ class TribesGymWrapper(gym.Env):
         obs, _, _, _ = self.tribes_env.step(idx)
 
         return obs
+
+    def _get_city_count(self, obs):
+        tribe_info = obs.get("tribe", {})
+        if isinstance(tribe_info, dict):
+            return len(tribe_info.get("citiesID", []))
+        return 0
     
     def _dict_to_array(self, obs_dict):
         # convert your complex dict observation to flat array
