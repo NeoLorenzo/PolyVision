@@ -2,6 +2,39 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Learning-005] - 2026-05-04
+
+### Scope
+- Learning-only iteration focused on expanding the hard-coded opening routine to improve early-game efficiency before policy control takes over.
+- No gameplay-rule expansion; this phase is limited to deterministic opening optimization, opening validation, and related telemetry.
+
+### Planned Focus Areas
+- Expand the deterministic Bardur opening beyond the current baseline sequence to better position early exploration and village capture tempo.
+- Prioritize opening actions that increase early economy and map-control readiness before Turn 2 actions.
+- Add stricter fail-fast validation for each required opening action so invalid opening states surface immediately during reset.
+- Add opening diagnostics to track which scripted opening steps succeeded, which failed, and at what action index.
+- Keep the opening logic modular so alternative opening variants can be tested and benchmarked in future learning iterations.
+
+### Implemented
+- Updated `pol_env/Tribes/py/register_env.py` `_apply_bardur_opening(...)` to run a scripted opening through the start of Turn 2 before RL takes over.
+- Added robust move parsing for Java `repr` strings using regex (`re.findall`) to extract unit/current/destination coordinates from `MOVE` actions.
+- Added nested move-scoring helper `score_move(...)` with weighted incentives for:
+  - diagonal movement,
+  - center-directed movement (distance-to-center reduction),
+  - unit dispersion (distance from a second unit when available).
+- Implemented explicit Turn 0 / Turn 1 state-machine sequence:
+  - Turn 0: `ANIMAL` harvest x2 -> `LEVEL_UP WORKSHOP` -> best-scored `MOVE` -> `END_TURN`
+  - Turn 1: ensure Bardur active -> best-scored warrior `MOVE` -> `WARRIOR` spawn/train action -> `END_TURN`
+  - End: fast-forward to Bardur active again and return obs at start of Turn 2.
+- Added defensive helper logic to improve reset stability:
+  - `ensure_bardur_turn(...)` to safely skip non-Bardur turns via `END_TURN`,
+  - try/except fallbacks around scored move execution so blocked/malformed actions are skipped instead of crashing.
+- Added explicit opener horizon bookkeeping:
+  - sets wrapper `_turn_count = 2` after scripted opening completes so RL starts from Turn 2.
+- Removed Turn-0 no-move penalty from active reward shaping in `pol_env/Tribes/py/register_env.py`:
+  - deleted `T0_NO_MOVE_PENALTY` usage and telemetry field emission
+  - rationale: Turn 0 through Turn 2 are now scripted, so this penalty no longer reflects policy behavior.
+
 ## [Phase1-Learning-004] - 2026-05-04
 
 ### Scope

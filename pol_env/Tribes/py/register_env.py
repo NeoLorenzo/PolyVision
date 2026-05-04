@@ -2,6 +2,7 @@ import gymnasium as gym
 import numpy as np
 import os
 import math
+import re
 from gymnasium.envs.registration import register
 from .gym_env import TribesGymEnv, make_default_env
 
@@ -21,7 +22,6 @@ class TribesGymWrapper(gym.Env):
     VISIBLE_VILLAGE_NEGLECT_GRACE_TURNS = 3
     VISIBLE_VILLAGE_NEGLECT_BASE = 0.30
     VISIBLE_VILLAGE_NEGLECT_K = 0.45
-    T0_NO_MOVE_PENALTY = -3.0
     ALLOWED_ACTION_TYPES = {
         "END_TURN",
         "MOVE",
@@ -141,7 +141,6 @@ class TribesGymWrapper(gym.Env):
 
         second_village_delay_penalty = 0.0
         visible_village_neglect_penalty = 0.0
-        t0_no_move_penalty = 0.0
 
         visible_uncaptured_village = self._has_visible_uncaptured_village(obs)
         has_second_village = current_city_count >= (self._starting_city_count + 1)
@@ -163,14 +162,10 @@ class TribesGymWrapper(gym.Env):
                     self.VISIBLE_VILLAGE_NEGLECT_BASE * math.exp(self.VISIBLE_VILLAGE_NEGLECT_K * overdue)
                 )
 
-            if current_turn == 1 and not self._moved_on_t0 and self._has_legal_move_action():
-                t0_no_move_penalty = self.T0_NO_MOVE_PENALTY
-
             self._turn_exploration_reward_accum = 0.0
 
         reward_adjustment += second_village_delay_penalty
         reward_adjustment += visible_village_neglect_penalty
-        reward_adjustment += t0_no_move_penalty
 
         # Phase 1 override: ignore Java terminal state and control horizon purely in Python.
         terminated = False
@@ -196,7 +191,6 @@ class TribesGymWrapper(gym.Env):
         info["reward_capture_decay_bonus"] = float(capture_decay_bonus)
         info["reward_second_village_delay_penalty"] = float(second_village_delay_penalty)
         info["reward_visible_village_neglect_penalty"] = float(visible_village_neglect_penalty)
-        info["reward_t0_no_move_penalty"] = float(t0_no_move_penalty)
         info["action_mask"] = action_mask
         info["java_done"] = bool(done)
         info["terminated_overridden"] = True
@@ -219,10 +213,7 @@ class TribesGymWrapper(gym.Env):
         return mask, allowed_indices
 
     def _apply_bardur_opening(self, obs):
-        """Force deterministic T0 opening: harvest 2 animals, then choose Workshop level-up.
-
-        This executes directly against the Java bridge before the agent takes any action.
-        """
+        """Force deterministic opening through the start of Turn 2."""
         def find_action_idx(predicate):
             legal = self.tribes_env.list_actions()
             for idx, act in enumerate(legal):
@@ -230,10 +221,156 @@ class TribesGymWrapper(gym.Env):
                     return idx
             return None
 
-        # 1) Harvest animal #1
-        idx = find_action_idx(
-            lambda a: a.get("type") == "RESOURCE_GATHERING" and "ANIMAL" in a.get("repr", "")
-        )
+        def parse_move_repr(action_repr):
+            # Supports common formats such as:
+            # "MOVE by unit U to X : Y" or "MOVE by unit U from A : B to X : Y".
+            if not isinstance(action_repr, str):
+                return None
+            nums = [int(n) for n in re.findall(r"-?\d+", action_repr)]
+            if len(nums) < 3:
+                return None
+            unit_id = nums[0]
+            if len(nums) >= 5:
+                current_x, current_y, dest_x, dest_y = nums[-4], nums[-3], nums[-2], nums[-1]
+            else:
+                current_x, current_y, dest_x, dest_y = None, None, nums[-2], nums[-1]
+            return unit_id, current_x, current_y, dest_x, dest_y
+
+        def get_unit_pos_from_obs(local_obs, unit_id):
+            units = local_obs.get("unit", {})
+            if not isinstance(units, dict):
+                return None
+            for key, unit in units.items():
+                if not isinstance(unit, dict):
+                    continue
+                try:
+                    key_as_int = int(key)
+                except Exception:
+                    key_as_int = None
+                if key_as_int == unit_id:
+                    return int(unit.get("x", -1)), int(unit.get("y", -1))
+            return None
+
+        def get_capital_pos(local_obs):
+            try:
+                tribes = local_obs.get("tribes", {})
+                city_map = local_obs.get("city", {})
+                tribe0 = tribes.get("0", {}) if isinstance(tribes, dict) else {}
+                capital_id = tribe0.get("capitalID", None) if isinstance(tribe0, dict) else None
+                if capital_id is None:
+                    return None
+                city = city_map.get(str(capital_id), None) if isinstance(city_map, dict) else None
+                if isinstance(city, dict):
+                    return int(city.get("x", -1)), int(city.get("y", -1))
+            except Exception:
+                return None
+            return None
+
+        def score_move(action_repr, capital_x, capital_y, other_unit_pos=None):
+            parsed = parse_move_repr(action_repr)
+            if parsed is None:
+                return -1e9
+
+            _, current_x, current_y, dest_x, dest_y = parsed
+            score = 0.0
+
+            # Reward 1: diagonal movement.
+            if current_x is not None and current_y is not None:
+                if abs(dest_x - current_x) > 0 and abs(dest_y - current_y) > 0:
+                    score += 3.0
+
+            # Reward 2: move toward map center (or away from capital if center unknown).
+            board = obs.get("board", {})
+            terrain = board.get("terrain", [])
+            map_size = len(terrain) if terrain else 15
+            center = (map_size - 1) / 2.0
+            if current_x is not None and current_y is not None:
+                current_dist_center = abs(current_x - center) + abs(current_y - center)
+                dest_dist_center = abs(dest_x - center) + abs(dest_y - center)
+                score += max(0.0, current_dist_center - dest_dist_center) * 1.0
+            else:
+                # Fallback center-pressure using distance away from capital/edge.
+                score += abs(dest_x - capital_x) * 0.2 + abs(dest_y - capital_y) * 0.2
+
+            # Reward 3: dispersion from other unit position.
+            if other_unit_pos is not None:
+                ox, oy = other_unit_pos
+                score += (abs(dest_x - ox) + abs(dest_y - oy)) * 0.7
+
+            return score
+
+        def ensure_bardur_turn(local_obs):
+            # Fast-forward non-Bardur turns with END_TURN so scripted actions always
+            # execute for tribe 0. Defensive caps prevent infinite loops.
+            for _ in range(6):
+                try:
+                    if int(local_obs.get("activeTribeID", -1)) == 0:
+                        return local_obs
+                except Exception:
+                    return local_obs
+                idx = find_action_idx(lambda a: a.get("type") == "END_TURN")
+                if idx is None:
+                    return local_obs
+                local_obs, _, _, _ = self.tribes_env.step(idx)
+            return local_obs
+
+        def choose_and_execute_best_move(local_obs, target_unit_id=None, other_unit_pos=None):
+            legal = self.tribes_env.list_actions()
+            move_candidates = []
+            for idx, act in enumerate(legal):
+                if act.get("type") != "MOVE":
+                    continue
+                parsed = parse_move_repr(act.get("repr", ""))
+                if parsed is None:
+                    continue
+                unit_id = parsed[0]
+                if target_unit_id is not None and unit_id != target_unit_id:
+                    continue
+                move_candidates.append((idx, act, parsed))
+            if not move_candidates:
+                return local_obs
+
+            capital_pos = get_capital_pos(local_obs)
+            if capital_pos is None:
+                capital_pos = (0, 0)
+            cap_x, cap_y = capital_pos
+
+            best = None
+            best_score = -1e18
+            for idx, act, parsed in move_candidates:
+                try:
+                    unit_id, cur_x, cur_y, _, _ = parsed
+                    if (cur_x is None or cur_y is None) and unit_id is not None:
+                        fallback_pos = get_unit_pos_from_obs(local_obs, unit_id)
+                        if fallback_pos is not None:
+                            act_repr = act.get("repr", "")
+                            # Augment repr-like context by replacing missing current.
+                            # score_move will still parse destination from repr.
+                            sc = score_move(act_repr, cap_x, cap_y, other_unit_pos=other_unit_pos)
+                            sc += 0.5  # slight bump when we can recover unit identity
+                        else:
+                            sc = score_move(act.get("repr", ""), cap_x, cap_y, other_unit_pos=other_unit_pos)
+                    else:
+                        sc = score_move(act.get("repr", ""), cap_x, cap_y, other_unit_pos=other_unit_pos)
+                    if sc > best_score:
+                        best_score = sc
+                        best = idx
+                except Exception:
+                    continue
+
+            if best is None:
+                return local_obs
+            try:
+                new_obs, _, _, _ = self.tribes_env.step(best)
+                return new_obs
+            except Exception:
+                return local_obs
+
+        # ---- Turn 0 ----
+        obs = ensure_bardur_turn(obs)
+
+        # Harvest 1
+        idx = find_action_idx(lambda a: a.get("type") == "RESOURCE_GATHERING" and "ANIMAL" in a.get("repr", ""))
         if idx is None:
             actions_debug = self.tribes_env.list_actions()
             print("DEBUG_T0_ACTIONS_START")
@@ -243,21 +380,73 @@ class TribesGymWrapper(gym.Env):
             raise RuntimeError("Bardur opening failed: missing first ANIMAL harvest action.")
         obs, _, _, _ = self.tribes_env.step(idx)
 
-        # 2) Harvest animal #2
-        idx = find_action_idx(
-            lambda a: a.get("type") == "RESOURCE_GATHERING" and "ANIMAL" in a.get("repr", "")
-        )
+        # Harvest 2
+        idx = find_action_idx(lambda a: a.get("type") == "RESOURCE_GATHERING" and "ANIMAL" in a.get("repr", ""))
         if idx is None:
             raise RuntimeError("Bardur opening failed: missing second ANIMAL harvest action.")
         obs, _, _, _ = self.tribes_env.step(idx)
 
-        # 3) Choose Workshop on city level-up
-        idx = find_action_idx(
-            lambda a: a.get("type") == "LEVEL_UP" and "WORKSHOP" in a.get("repr", "")
-        )
+        # Level-up workshop
+        idx = find_action_idx(lambda a: a.get("type") == "LEVEL_UP" and "WORKSHOP" in a.get("repr", ""))
         if idx is None:
             raise RuntimeError("Bardur opening failed: missing WORKSHOP level-up action.")
         obs, _, _, _ = self.tribes_env.step(idx)
+
+        # Best move for starting warrior.
+        try:
+            obs = choose_and_execute_best_move(obs)
+        except Exception:
+            pass
+
+        # End Turn 0.
+        idx = find_action_idx(lambda a: a.get("type") == "END_TURN")
+        if idx is None:
+            raise RuntimeError("Bardur opening failed: missing END_TURN on Turn 0.")
+        obs, _, _, _ = self.tribes_env.step(idx)
+
+        # ---- Turn 1 ----
+        obs = ensure_bardur_turn(obs)
+
+        # Move first warrior again.
+        first_unit_id = None
+        try:
+            own_units = []
+            for key, unit in (obs.get("unit", {}) or {}).items():
+                if isinstance(unit, dict) and int(unit.get("tribeId", -1)) == 0:
+                    own_units.append((int(key), int(unit.get("x", -1)), int(unit.get("y", -1))))
+            own_units.sort(key=lambda t: t[0])
+            if own_units:
+                first_unit_id = own_units[0][0]
+        except Exception:
+            first_unit_id = None
+
+        try:
+            obs = choose_and_execute_best_move(obs, target_unit_id=first_unit_id)
+        except Exception:
+            pass
+
+        # Train/spawn second warrior.
+        idx = find_action_idx(
+            lambda a: (
+                a.get("type") in ("SPAWN", "TRAIN")
+                and "WARRIOR" in a.get("repr", "")
+            )
+        )
+        if idx is None:
+            # Fallback: any warrior spawn-like action.
+            idx = find_action_idx(lambda a: "WARRIOR" in a.get("repr", ""))
+        if idx is not None:
+            obs, _, _, _ = self.tribes_env.step(idx)
+
+        # End Turn 1.
+        idx = find_action_idx(lambda a: a.get("type") == "END_TURN")
+        if idx is None:
+            raise RuntimeError("Bardur opening failed: missing END_TURN on Turn 1.")
+        obs, _, _, _ = self.tribes_env.step(idx)
+
+        # Bring environment to Bardur turn (start of Turn 2 for our side).
+        obs = ensure_bardur_turn(obs)
+        self._turn_count = 2
 
         return obs
 
