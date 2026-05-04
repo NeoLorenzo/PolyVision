@@ -2,9 +2,63 @@
 
 All notable changes to this project are documented in this file.
 
-## [Phase1-Telemetry-001] - 2026-05-04
+## [Phase1-Stability-002] - 2026-05-04
 
 ### Added
+- Added masked-action support to PPO policy sampling in `py_rl/cleanrl/cleanrl/ppo.py`:
+  - `Agent.get_action_and_value(..., action_mask=...)` now accepts a mask tensor
+  - invalid action logits are set to `-1e8` before `Categorical(...)`
+  - prevents policy entropy/gradient pollution from illegal actions
+- Added vector-info action-mask extraction utility in PPO:
+  - reads `infos["action_mask"]` and optional `infos["_action_mask"]`
+  - falls back to all-valid mask when absent
+- Added Phase 1 diagnostic telemetry in PPO for dashboard debugging:
+  - `charts/mean_valid_actions`
+  - `charts/non_endturn_rate`
+  - `charts/mean_delta_spt`
+  - `charts/episode_end_spt`
+- Added Java level generation helper tooling for fixed-map workflows:
+  - `pol_env/Tribes/src/core/levelgen/GenerateLevelCli.java`
+  - `pol_env/Tribes/py/generate_fixed_map.py`
+  - enables seed-based map generation and freezing to CSV for reproducible training
+
+### Changed
+- Updated PPO rollout loop to feed action masks into action sampling:
+  - initializes mask from `envs.reset(...)->infos`
+  - refreshes mask every step from `envs.step(...)->infos`
+- Added deterministic Bardur Turn-0 heuristic opening in `pol_env/Tribes/py/register_env.py`:
+  - on reset, executes:
+    - `RESOURCE_GATHERING` (ANIMAL) x2
+    - `LEVEL_UP` with `WORKSHOP`
+  - agent starts from post-opening state (economy head start)
+  - reset now fails fast with explicit errors if expected opening actions are unavailable
+- Consolidated training map set to a single fixed CSV:
+  - retained only `pol_env/Tribes/levels/phase1_12x12_2bardur.csv`
+  - removed all other map CSVs under `pol_env/Tribes/levels/`
+- Updated Phase 1 wrapper default map:
+  - `PHASE1_LEVEL_FILE` now points to `levels/phase1_12x12_2bardur.csv`
+- Updated economic action whitelist in `pol_env/Tribes/py/register_env.py`:
+  - added `CAPTURE` so village settlement/city capture can be chosen by policy
+
+### Current Training Observation
+- Current long-run behavior still plateaus near `SPT = 4` by Turn 10:
+  - `charts/episode_end_spt` flat around 4
+  - `charts/mean_delta_spt` flat around 0
+  - `charts/non_endturn_rate` decreases over training despite legal action count rising
+- Interpretation:
+  - the policy is not yet converting exploration/movement into economy growth within the 10-turn horizon
+  - additional iteration on map layout, horizon pressure, and policy exploration is still needed
+
+## [Phase1-MVP-001] - 2026-05-04
+
+### Added
+- Added strict Phase 1 level file:
+  - `pol_env/Tribes/levels/phase1_bardur_drylands.csv`
+  - Bardur capital (`c:2`) plus a distant dummy enemy capital (`c:1`) to keep Java game state alive
+  - drylands-style terrain only (no shallow/deep water tiles)
+- Added quick verification script:
+  - `test_phase1_constraints.py`
+  - validates turn-10 truncation and whitelist-constrained action execution
 - Added custom PPO telemetry in `py_rl/cleanrl/cleanrl/ppo.py`:
   - logs `charts/custom_spt_return` from `infos["spt"]` whenever an env episode ends (`truncations` or `terminations`)
   - fallback extraction from `infos["final_info"][env_idx]["spt"]` when direct vector key is unavailable
@@ -18,32 +72,6 @@ All notable changes to this project are documented in this file.
     - `runs/<run_name>/model_checkpoint_<global_step>.cleanrl_model`
   - final model save remains:
     - `runs/<run_name>/ppo.cleanrl_model` (or custom `--model-path`)
-
-### Validation
-- Ran smoke test:
-  - `python py_rl/cleanrl/cleanrl/ppo.py --env-id Tribes-v0 --num-envs 4 --total-timesteps 4096 --no-track --save-model`
-  - output included `model_saved=runs\Tribes-v0__ppo__1__1777901078\ppo.cleanrl_model`
-- Verified TensorBoard event tags in smoke run:
-  - `charts/custom_spt_return` present with 149 scalar points
-  - confirms custom SPT telemetry is being emitted even when default episodic stats are absent
-
-### Documentation
-- Updated `docs/TRAINING.md` with:
-  - checkpointing usage for long runs
-  - tracked 5,000,000-step launch command with online W&B sync
-
-## [Phase1-Strict-001] - 2026-05-04
-
-### Added
-- Added strict Phase 1 level file:
-  - `pol_env/Tribes/levels/phase1_bardur_drylands.csv`
-  - single-player start with Bardur capital (`c:2`)
-  - drylands-style terrain only (no shallow/deep water tiles)
-- Added quick verification script:
-  - `test_phase1_constraints.py`
-  - exercises one environment to confirm:
-    - episode truncation at turn 10
-    - executed actions are constrained by whitelist mapping
 
 ### Changed
 - Updated `pol_env/Tribes/py/register_env.py` to enforce strict Phase 1 wrapper constraints:
@@ -69,6 +97,19 @@ All notable changes to this project are documented in this file.
 - Updated `pol_env/Tribes/py/register_env.py` fail-fast behavior:
   - removed synthetic `NO_OP` fallback path
   - wrapper now raises `RuntimeError` when Java returns zero legal actions
+
+### Validation
+- Ran smoke test:
+  - `python py_rl/cleanrl/cleanrl/ppo.py --env-id Tribes-v0 --num-envs 4 --total-timesteps 4096 --no-track --save-model`
+  - output included `model_saved=runs\Tribes-v0__ppo__1__1777901078\ppo.cleanrl_model`
+- Verified TensorBoard event tags in smoke run:
+  - `charts/custom_spt_return` present with 149 scalar points
+  - confirms custom SPT telemetry is being emitted even when default episodic stats are absent
+
+### Documentation
+- Updated `docs/TRAINING.md` with:
+  - checkpointing usage for long runs
+  - tracked 5,000,000-step launch command with online W&B sync
 
 ## [Preflight-002] - 2026-05-04
 
