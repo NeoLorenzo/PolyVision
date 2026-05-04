@@ -2,6 +2,80 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Learning-004] - 2026-05-04
+
+### Scope
+- Learning-only iteration (v2) for Phase 1 reward design and exploration pressure.
+- No gameplay-rule expansion; changes stay focused on reward shaping, diagnostics, and policy learning behavior.
+
+### Planned Reward Updates
+- Add early-turn exploration incentive:
+  - small positive reward for newly revealed tiles, with strict per-turn cap
+  - reward applies only through Turn 10 horizon and is intended to bootstrap movement/exploration decisions
+- Add time-decayed village-capture bonus:
+  - village capture reward is strongest early and decays each turn toward Turn 10
+  - keeps capture objective strong while prioritizing earlier tempo gains
+- Add time-escalating penalty for delayed second village:
+  - no penalty before Turn 3
+  - penalty starts at Turn 3 and scales up each turn through Turn 10 if second village has not been secured
+
+### Planned Conditional Constraints
+- Add visible-village neglect penalty:
+  - when at least one capturable/visible village exists and city count is still below 2,
+    apply a delayed penalty if village remains uncaptured for multiple turns
+  - include counter reset behavior when village ownership changes or visibility is lost
+- Add opening-tempo guardrail:
+  - apply a strong penalty if the initial unit does not move on Turn 0 when a legal move exists
+  - treat blocked/no-legal-move cases as exempt to avoid false penalties
+
+### Planned Telemetry
+- Add diagnostic info fields to support reward attribution and tuning:
+  - explored tile delta (per step and cumulative)
+  - first/second village capture turn
+  - turns since first visible uncaptured village
+  - initial-unit moved on T0 (boolean)
+  - per-component reward breakdown (exploration, capture decay bonus, delay penalty, neglect penalty, opening penalty)
+
+### Implemented
+- Updated `pol_env/Tribes/py/register_env.py` with Phase 1 learning-v2 reward shaping:
+  - exploration reward for newly visited own-unit tiles:
+    - `EXPLORATION_REWARD_PER_NEW_TILE = 0.02`
+    - per-turn cap `EXPLORATION_REWARD_CAP_PER_TURN = 0.20`
+  - time-decayed village capture bonus:
+    - `CAPTURE_REWARD_BASE = 1.5`
+    - exponential decay `exp(-0.35 * turn_count)`
+    - applied when city count increases
+  - time-escalating second-village delay penalty:
+    - starts at Turn 3 when still on baseline city count
+    - scales by `SECOND_VILLAGE_DELAY_BASE * exp(0.35 * (turn_count - 3))`
+  - visible-village neglect penalty:
+    - tracks consecutive end-turns with visible uncaptured village while still below second village
+    - grace window `VISIBLE_VILLAGE_NEGLECT_GRACE_TURNS = 3`
+    - penalty escalates exponentially after grace window
+  - Turn-0 opening guardrail:
+    - applies `T0_NO_MOVE_PENALTY = -3.0` if no `MOVE` is taken before first end-turn and a legal move existed
+  - preserved prior hard-failure horizon penalty:
+    - `SECOND_VILLAGE_BY_T10_PENALTY = -3.0` if episode reaches Turn 10 with only baseline city count
+- Added wrapper helper/state for shaping logic:
+  - `_get_owned_unit_tiles(...)`
+  - `_compute_exploration_reward(...)`
+  - `_has_visible_uncaptured_village(...)`
+  - `_has_legal_move_action(...)`
+  - per-episode shaping state reset on `reset(...)`
+- Updated observation parsing in wrapper to match live schema:
+  - city count and scalar features now read from `obs["tribes"]["0"]`
+  - uses `star` key (not `stars`) from tribe payload
+- Added reward-attribution telemetry keys in `info`:
+  - `reward_exploration`
+  - `reward_capture_decay_bonus`
+  - `reward_second_village_delay_penalty`
+  - `reward_visible_village_neglect_penalty`
+  - `reward_t0_no_move_penalty`
+  - plus shaping state telemetry:
+    - `visible_uncaptured_village`
+    - `visible_village_streak_turns`
+    - `moved_on_t0`
+
 ## [Phase1-Learning-003] - 2026-05-04
 
 ### Scope

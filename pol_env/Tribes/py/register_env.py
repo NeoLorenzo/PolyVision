@@ -1,6 +1,7 @@
 import gymnasium as gym
 import numpy as np
 import os
+import math
 from gymnasium.envs.registration import register
 from .gym_env import TribesGymEnv, make_default_env
 
@@ -9,8 +10,18 @@ class TribesGymWrapper(gym.Env):
     PHASE1_LEVEL_FILE = "levels/phase1_12x12_2bardur.csv"
     MAX_TURNS = 10
     SECOND_VILLAGE_BY_T10_PENALTY = -3.0
-    FIRST_EXPANSION_BONUS = 1.0
-    SECOND_EXPANSION_BONUS = 2.0
+
+    # Phase1-Learning-004 shaping (learning-only; no gameplay-rule changes).
+    EXPLORATION_REWARD_PER_NEW_TILE = 0.02
+    EXPLORATION_REWARD_CAP_PER_TURN = 0.20
+    CAPTURE_REWARD_BASE = 1.5
+    CAPTURE_REWARD_DECAY_K = 0.35
+    SECOND_VILLAGE_DELAY_BASE = 0.10
+    SECOND_VILLAGE_DELAY_K = 0.35
+    VISIBLE_VILLAGE_NEGLECT_GRACE_TURNS = 3
+    VISIBLE_VILLAGE_NEGLECT_BASE = 0.30
+    VISIBLE_VILLAGE_NEGLECT_K = 0.45
+    T0_NO_MOVE_PENALTY = -3.0
     ALLOWED_ACTION_TYPES = {
         "END_TURN",
         "MOVE",
@@ -32,8 +43,10 @@ class TribesGymWrapper(gym.Env):
         self._turn_count = 0
         self._starting_city_count = 1
         self._last_city_count = 1
-        self._first_expansion_rewarded = False
-        self._second_expansion_rewarded = False
+        self._seen_owned_unit_tiles = set()
+        self._turn_exploration_reward_accum = 0.0
+        self._moved_on_t0 = False
+        self._visible_village_streak_turns = 0
         try:
             obs = self.tribes_env.reset(self.level_file, seed=42)
             
@@ -67,8 +80,10 @@ class TribesGymWrapper(gym.Env):
         obs = self._apply_bardur_opening(obs)
         self._starting_city_count = self._get_city_count(obs)
         self._last_city_count = self._starting_city_count
-        self._first_expansion_rewarded = False
-        self._second_expansion_rewarded = False
+        self._seen_owned_unit_tiles = self._get_owned_unit_tiles(obs)
+        self._turn_exploration_reward_accum = 0.0
+        self._moved_on_t0 = False
+        self._visible_village_streak_turns = 0
         
         # Log action space info for debugging
         action_count = self.tribes_env.action_space_n
@@ -111,15 +126,51 @@ class TribesGymWrapper(gym.Env):
 
         obs, reward, done, info = self.tribes_env.step(selected_raw_action)
         current_city_count = self._get_city_count(obs)
+        current_turn = int(self._turn_count)
         reward_adjustment = 0.0
 
-        if (not self._first_expansion_rewarded) and current_city_count >= self._starting_city_count + 1:
-            reward_adjustment += self.FIRST_EXPANSION_BONUS
-            self._first_expansion_rewarded = True
+        exploration_reward = self._compute_exploration_reward(obs)
+        reward_adjustment += exploration_reward
 
-        if (not self._second_expansion_rewarded) and current_city_count >= self._starting_city_count + 2:
-            reward_adjustment += self.SECOND_EXPANSION_BONUS
-            self._second_expansion_rewarded = True
+        capture_decay_bonus = 0.0
+        if current_city_count > self._last_city_count:
+            n_new_cities = current_city_count - self._last_city_count
+            for _ in range(max(0, n_new_cities)):
+                capture_decay_bonus += self.CAPTURE_REWARD_BASE * math.exp(-self.CAPTURE_REWARD_DECAY_K * current_turn)
+        reward_adjustment += capture_decay_bonus
+
+        second_village_delay_penalty = 0.0
+        visible_village_neglect_penalty = 0.0
+        t0_no_move_penalty = 0.0
+
+        visible_uncaptured_village = self._has_visible_uncaptured_village(obs)
+        has_second_village = current_city_count >= (self._starting_city_count + 1)
+
+        if selected_action_type == "END_TURN":
+            if current_turn >= 3 and not has_second_village:
+                second_village_delay_penalty = -(
+                    self.SECOND_VILLAGE_DELAY_BASE * math.exp(self.SECOND_VILLAGE_DELAY_K * (current_turn - 3))
+                )
+
+            if visible_uncaptured_village and not has_second_village:
+                self._visible_village_streak_turns += 1
+            else:
+                self._visible_village_streak_turns = 0
+
+            if self._visible_village_streak_turns > self.VISIBLE_VILLAGE_NEGLECT_GRACE_TURNS:
+                overdue = self._visible_village_streak_turns - self.VISIBLE_VILLAGE_NEGLECT_GRACE_TURNS
+                visible_village_neglect_penalty = -(
+                    self.VISIBLE_VILLAGE_NEGLECT_BASE * math.exp(self.VISIBLE_VILLAGE_NEGLECT_K * overdue)
+                )
+
+            if current_turn == 1 and not self._moved_on_t0 and self._has_legal_move_action():
+                t0_no_move_penalty = self.T0_NO_MOVE_PENALTY
+
+            self._turn_exploration_reward_accum = 0.0
+
+        reward_adjustment += second_village_delay_penalty
+        reward_adjustment += visible_village_neglect_penalty
+        reward_adjustment += t0_no_move_penalty
 
         # Phase 1 override: ignore Java terminal state and control horizon purely in Python.
         terminated = False
@@ -138,10 +189,20 @@ class TribesGymWrapper(gym.Env):
         info["city_count"] = current_city_count
         info["reward_adjustment"] = float(reward_adjustment)
         info["starting_city_count"] = int(self._starting_city_count)
+        info["visible_uncaptured_village"] = bool(visible_uncaptured_village)
+        info["visible_village_streak_turns"] = int(self._visible_village_streak_turns)
+        info["moved_on_t0"] = bool(self._moved_on_t0)
+        info["reward_exploration"] = float(exploration_reward)
+        info["reward_capture_decay_bonus"] = float(capture_decay_bonus)
+        info["reward_second_village_delay_penalty"] = float(second_village_delay_penalty)
+        info["reward_visible_village_neglect_penalty"] = float(visible_village_neglect_penalty)
+        info["reward_t0_no_move_penalty"] = float(t0_no_move_penalty)
         info["action_mask"] = action_mask
         info["java_done"] = bool(done)
         info["terminated_overridden"] = True
         self._last_city_count = current_city_count
+        if selected_action_type == "MOVE" and self._turn_count == 0:
+            self._moved_on_t0 = True
 
         return self._dict_to_array(obs), reward, terminated, truncated, info
 
@@ -201,10 +262,63 @@ class TribesGymWrapper(gym.Env):
         return obs
 
     def _get_city_count(self, obs):
-        tribe_info = obs.get("tribe", {})
-        if isinstance(tribe_info, dict):
-            return len(tribe_info.get("citiesID", []))
+        tribes = obs.get("tribes", {})
+        if isinstance(tribes, dict):
+            tribe0 = tribes.get("0", {})
+            if isinstance(tribe0, dict):
+                return len(tribe0.get("citiesID", []))
         return 0
+
+    def _get_owned_unit_tiles(self, obs):
+        out = set()
+        units = obs.get("unit", {})
+        if not isinstance(units, dict):
+            return out
+        for unit in units.values():
+            if not isinstance(unit, dict):
+                continue
+            if int(unit.get("tribeId", -1)) != 0:
+                continue
+            x = int(unit.get("x", -1))
+            y = int(unit.get("y", -1))
+            if x >= 0 and y >= 0:
+                out.add((x, y))
+        return out
+
+    def _compute_exploration_reward(self, obs):
+        current_tiles = self._get_owned_unit_tiles(obs)
+        new_tiles = current_tiles.difference(self._seen_owned_unit_tiles)
+        self._seen_owned_unit_tiles.update(current_tiles)
+
+        remaining_cap = max(0.0, self.EXPLORATION_REWARD_CAP_PER_TURN - self._turn_exploration_reward_accum)
+        raw_reward = len(new_tiles) * self.EXPLORATION_REWARD_PER_NEW_TILE
+        granted = min(remaining_cap, raw_reward)
+        self._turn_exploration_reward_accum += granted
+        return granted
+
+    def _has_visible_uncaptured_village(self, obs):
+        board = obs.get("board", {})
+        terrain = board.get("terrain", [])
+        city_ids = board.get("cityID", [])
+        if not terrain or not city_ids:
+            return False
+
+        for i in range(len(terrain)):
+            row_t = terrain[i]
+            row_c = city_ids[i] if i < len(city_ids) else []
+            for j in range(len(row_t)):
+                t_val = int(row_t[j])
+                c_val = int(row_c[j]) if j < len(row_c) else -1
+                if t_val == 4 and c_val == -1:
+                    return True
+        return False
+
+    def _has_legal_move_action(self):
+        legal_actions = self.tribes_env.list_actions()
+        for act in legal_actions:
+            if act.get("type") == "MOVE":
+                return True
+        return False
     
     def _dict_to_array(self, obs_dict):
         # convert your complex dict observation to flat array
@@ -229,13 +343,15 @@ class TribesGymWrapper(gym.Env):
             features.extend(np.array(city_ids).flatten())
             
         # Add tribe information
-        tribe_info = obs_dict.get("tribe", {})
-        if isinstance(tribe_info, dict):
-            # Add some key tribe stats as features
-            features.append(tribe_info.get("stars", 0))
-            features.append(tribe_info.get("score", 0))
-            features.append(len(tribe_info.get("citiesID", [])))
-            features.append(tribe_info.get("nKills", 0))
+        tribes_info = obs_dict.get("tribes", {})
+        if isinstance(tribes_info, dict):
+            tribe0 = tribes_info.get("0", {})
+            if isinstance(tribe0, dict):
+                # Add some key tribe stats as features
+                features.append(tribe0.get("star", 0))
+                features.append(tribe0.get("score", 0))
+                features.append(len(tribe0.get("citiesID", [])))
+                features.append(tribe0.get("nKills", 0))
             
         # Add game state info
         features.append(obs_dict.get("tick", 0))
