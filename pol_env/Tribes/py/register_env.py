@@ -1,5 +1,6 @@
 import gymnasium as gym
 import numpy as np
+import os
 from gymnasium.envs.registration import register
 from .gym_env import TribesGymEnv, make_default_env
 
@@ -8,6 +9,7 @@ class TribesGymWrapper(gym.Env):
     def __init__(self, level_file="levels/SampleLevel.csv"):
         self.tribes_env = make_default_env()
         self.level_file = level_file
+        self.verbose_resets = os.environ.get("POLYVISION_VERBOSE_RESETS", "0").lower() in ("1", "true", "yes", "on")
         self.render_mode = "rgb_array"        # Initialize the environment to get the actual action space size
         try:
             obs = self.tribes_env.reset(self.level_file, seed=42)
@@ -41,7 +43,8 @@ class TribesGymWrapper(gym.Env):
         
         # Log action space info for debugging
         action_count = self.tribes_env.action_space_n
-        print(f"Reset: Available actions = {action_count}")
+        if self.verbose_resets:
+            print(f"Reset: Available actions = {action_count}")
         
         # convert your dict obs to numpy array here
         return self._dict_to_array(obs), {"valid_actions": action_count}

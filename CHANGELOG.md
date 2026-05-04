@@ -2,6 +2,69 @@
 
 All notable changes to this project are documented in this file.
 
+## [Preflight-002] - 2026-05-04
+
+### Added (Async + Benchmark)
+- Added dependency lock file at repository root:
+  - `requirements-lock.txt` (captured via `python -m pip freeze`)
+  - records exact package versions used in the validated local run environment
+- Updated `docs/TRAINING.md` with:
+  - preflight sanity command for async PPO smoke run
+  - recommended `requirements-lock.txt` workflow for reproducibility
+
+### Validation
+- Completed short end-to-end async PPO sanity run:
+  - command: `python py_rl/cleanrl/cleanrl/ppo.py --total-timesteps 6144 --num-steps 64 --no-track --no-capture-video --startup-jitter-min-s 0.1 --startup-jitter-max-s 2.0`
+  - result: exit code `0`
+  - observed SPS progression: `766 -> 1192`
+- Completed JVM orphan-process cleanup check around training run:
+  - captured Java PIDs before and after run
+  - result: `JAVA_NEW=` (no new lingering Java process IDs after `envs.close()`)
+- Confirmed warnings cleanup from Tyro typing updates:
+  - no `wandb_entity` / `target_kl` None-type parser warnings in sanity run after `Optional[...]` fix
+
+### Added
+- Added `py_rl/cleanrl/cleanrl/benchmark_async_vector_envs.py`:
+  - runs a quick throughput matrix for `num_envs` in `[12, 16, 20]`
+  - executes `ppo.py` with Async settings and startup jitter
+  - parses `SPS` output and reports `tail_avg_sps`, `all_avg_sps`, and `peak_sps`
+  - auto-sets `POLYVISION_VERBOSE_RESETS=0` for cleaner benchmark logs
+
+### Changed
+- Updated `py_rl/cleanrl/cleanrl/ppo.py` to use true parallel stepping:
+  - replaced `gym.vector.SyncVectorEnv(...)` with `gym.vector.AsyncVectorEnv(...)`
+  - configured multiprocessing context as `context="spawn"` for Windows-safe worker startup
+- Added randomized startup jitter in `ppo.py` env factory to reduce JVM launch storms:
+  - each worker sleeps a random delay before creating the env
+  - default jitter range: `0.1s` to `2.0s`
+  - exposed as CLI args:
+    - `--startup-jitter-min-s`
+    - `--startup-jitter-max-s`
+- Updated `pol_env/Tribes/py/register_env.py` reset logging behavior:
+  - `Reset: Available actions = ...` now prints only when `POLYVISION_VERBOSE_RESETS=1`
+  - default behavior is quiet (`POLYVISION_VERBOSE_RESETS=0`)
+- Fixed Windows JVM classpath joining in `pol_env/Tribes/py/gym_env.py`:
+  - replaced hardcoded `":"` separator with `os.pathsep`
+  - resolves `JavaPackage object is not callable` startup failure when loading `core.game.PythonEnv` on Windows
+- Updated `py_rl/cleanrl/cleanrl/ppo.py` defaults and typing:
+  - changed `Args.num_envs` default from `4` to `12` for Phase 1 local throughput
+  - changed `Args.wandb_entity` to `Optional[str]`
+  - changed `Args.target_kl` to `Optional[float]`
+  - removes Tyro warnings caused by `None` defaults on non-optional typed fields
+
+### Benchmark
+- Executed async throughput benchmark (`py_rl/cleanrl/cleanrl/benchmark_async_vector_envs.py`) on 2026-05-04 with:
+  - `AsyncVectorEnv(context="spawn")`
+  - startup jitter `0.1s` to `2.0s`
+  - `num_envs` in `[12, 16, 20]`
+- Results:
+  - `num_envs=12`: `tail_avg_sps=1561`, `all_avg_sps=1377`, `peak_sps=1596`
+  - `num_envs=16`: `tail_avg_sps=1172`, `all_avg_sps=1097`, `peak_sps=1194`
+  - `num_envs=20`: `tail_avg_sps=1058`, `all_avg_sps=937`, `peak_sps=1117`
+- Justification for defaulting to `num_envs=12`:
+  - best sustained throughput (`tail_avg_sps`) and best peak SPS in benchmark
+  - higher env counts degraded throughput due JVM/process overhead in this architecture
+
 ## [Preflight-001] - 2026-05-03
 
 ### Added

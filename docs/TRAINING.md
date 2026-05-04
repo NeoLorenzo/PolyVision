@@ -12,6 +12,11 @@ pip install -r pol_env/Tribes/py/requirements.txt
 pip install -r py_rl/requirements.txt
 ```
 
+Optional but recommended after setup:
+```bash
+python -m pip freeze > requirements-lock.txt
+```
+
 ## Baseline PPO Run (Current Default)
 
 Run from repo root:
@@ -23,6 +28,19 @@ python py_rl/cleanrl/cleanrl/ppo.py --total-timesteps 5000 --num-steps 32 --trac
 Notes:
 - Uses `Tribes-v0` env id by default in this forked script.
 - Writes TensorBoard logs under `runs/`.
+
+## Preflight Sanity Check (Recommended Before MVP Runs)
+
+Run a short async smoke train to confirm environment, bridge, and multiprocessing health:
+
+```bash
+python py_rl/cleanrl/cleanrl/ppo.py --total-timesteps 6144 --num-steps 64 --no-track --no-capture-video --startup-jitter-min-s 0.1 --startup-jitter-max-s 2.0
+```
+
+Expected result:
+- completes with exit code `0`
+- prints increasing `SPS` values
+- no lingering Java worker processes after completion
 
 ## Custom Polyvision Variants
 
@@ -64,6 +82,7 @@ For experiments you want to compare:
 - set explicit `--seed`
 - keep `--num-envs`, `--num-steps`, and `--total-timesteps` fixed
 - record command + commit hash + config in experiment notes
+- keep `requirements-lock.txt` updated when dependency versions change
 
 ## MVP Alignment Reminder
 

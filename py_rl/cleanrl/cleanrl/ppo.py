@@ -3,6 +3,7 @@ import os
 import random
 import time
 from dataclasses import dataclass
+from typing import Optional
 
 import gymnasium as gym
 import numpy as np
@@ -46,7 +47,7 @@ class Args:
     """if toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "cleanRL"
     """the wandb's project name"""
-    wandb_entity: str = None
+    wandb_entity: Optional[str] = None
     """the entity (team) of wandb's project"""
     capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
@@ -59,7 +60,7 @@ class Args:
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
-    num_envs: int = 4
+    num_envs: int = 12
     """the number of parallel game environments"""
     num_steps: int = 128
     """the number of steps to run in each environment per policy rollout"""
@@ -85,8 +86,12 @@ class Args:
     """coefficient of the value function"""
     max_grad_norm: float = 0.5
     """the maximum norm for the gradient clipping"""
-    target_kl: float = None
+    target_kl: Optional[float] = None
     """the target KL divergence threshold"""
+    startup_jitter_min_s: float = 0.1
+    """minimum randomized startup delay (seconds) before each env launches its JVM"""
+    startup_jitter_max_s: float = 2.0
+    """maximum randomized startup delay (seconds) before each env launches its JVM"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -97,8 +102,11 @@ class Args:
     """the number of iterations (computed in runtime)"""
 
 
-def make_env(env_id, idx, capture_video, run_name):
+def make_env(env_id, idx, capture_video, run_name, startup_jitter_min_s=0.1, startup_jitter_max_s=2.0):
     def thunk():
+        # Spread out JVM launches to avoid a process-creation boot storm.
+        startup_delay = random.uniform(startup_jitter_min_s, startup_jitter_max_s)
+        time.sleep(startup_delay)
         if capture_video and idx == 0:
             env = gym.make(env_id, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
@@ -179,8 +187,19 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # env setup
-    envs = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, i, args.capture_video, run_name) for i in range(args.num_envs)],
+    envs = gym.vector.AsyncVectorEnv(
+        [
+            make_env(
+                args.env_id,
+                i,
+                args.capture_video,
+                run_name,
+                args.startup_jitter_min_s,
+                args.startup_jitter_max_s,
+            )
+            for i in range(args.num_envs)
+        ],
+        context="spawn",
     )
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 

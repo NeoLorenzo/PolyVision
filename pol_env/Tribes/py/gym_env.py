@@ -18,7 +18,7 @@ class TribesGymEnv:
     def __init__(self, classpath_out: str, json_jar: str, port: int = None) -> None:
         # Launch a JVM with the proper classpath if no external gateway is provided.
         if port is None:
-            classpath = f"{classpath_out}:{json_jar}"
+            classpath = os.pathsep.join([classpath_out, json_jar])
             # Set working directory to the Tribes directory so Java can find terrainProbs.json
             tribes_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
             port = launch_gateway(classpath=classpath, die_on_exit=True, cwd=tribes_dir)

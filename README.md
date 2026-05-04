@@ -69,6 +69,7 @@ Polyvision extends that foundation with project-specific roadmap, evaluation pri
 - Phase 1 implementation spec: `docs/MVP_PHASE1_SPEC.md`
 - Testing guide: `docs/TESTING.md`
 - Training guide: `docs/TRAINING.md`
+- Hardware training profile: `docs/HARDWARE_TRAINING_PROFILE.md`
 - Tribes-specific setup details: `pol_env/Tribes/README.md`
 
 ### Quickstart (Recommended)
