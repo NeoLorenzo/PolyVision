@@ -151,12 +151,74 @@ class Agent(nn.Module):
     def get_value(self, x):
         return self.critic(x)
 
-    def get_action_and_value(self, x, action=None):
+    def get_action_and_value(self, x, action=None, action_mask=None):
         logits = self.actor(x)
+        if action_mask is not None:
+            # Mask invalid actions by pushing logits to a very large negative value.
+            # action_mask is expected to be 1 for valid actions, 0 for invalid.
+            logits = logits.masked_fill(action_mask <= 0, -1e8)
         probs = Categorical(logits=logits)
         if action is None:
             action = probs.sample()
         return action, probs.log_prob(action), probs.entropy(), self.critic(x)
+
+
+def _extract_vector_action_mask(infos, num_envs, action_dim, device):
+    """Extracts action masks from vectorized infos dict.
+
+    Returns a tensor of shape [num_envs, action_dim] with 1.0 for valid actions and 0.0 for invalid.
+    Falls back to all-ones if mask is unavailable.
+    """
+    mask = np.ones((num_envs, action_dim), dtype=np.float32)
+    if infos is not None and "action_mask" in infos:
+        raw_mask = infos["action_mask"]
+        valid_mask = infos.get("_action_mask", None)
+        if valid_mask is None:
+            arr = np.asarray(raw_mask, dtype=np.float32)
+            if arr.ndim == 1:
+                arr = np.tile(arr, (num_envs, 1))
+            if arr.shape[0] == num_envs and arr.shape[1] == action_dim:
+                mask = arr
+        else:
+            arr = np.asarray(raw_mask, dtype=np.float32)
+            vmask = np.asarray(valid_mask, dtype=bool)
+            if arr.ndim == 2 and vmask.ndim == 1 and len(vmask) == num_envs:
+                for i in range(num_envs):
+                    if vmask[i]:
+                        mask[i] = arr[i]
+    return torch.tensor(mask, dtype=torch.float32, device=device)
+
+
+def _extract_vector_field(infos, key, num_envs, default_value=None):
+    """Extract a per-env field from Gymnasium vector infos with optional validity mask.
+
+    Returns a Python list of length num_envs with values or default_value.
+    """
+    out = [default_value for _ in range(num_envs)]
+    if infos is None or key not in infos:
+        return out
+
+    raw = infos[key]
+    mask_key = f"_{key}"
+    valid_mask = infos.get(mask_key, None)
+
+    try:
+        if valid_mask is None:
+            if len(raw) == num_envs:
+                for i in range(num_envs):
+                    out[i] = raw[i]
+            else:
+                # Broadcast scalar/singleton-like values.
+                for i in range(num_envs):
+                    out[i] = raw
+        else:
+            if len(raw) == num_envs and len(valid_mask) == num_envs:
+                for i in range(num_envs):
+                    if valid_mask[i]:
+                        out[i] = raw[i]
+    except Exception:
+        pass
+    return out
 
 
 if __name__ == "__main__":
@@ -225,11 +287,25 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
-    next_obs, _ = envs.reset(seed=args.seed)
+    next_obs, reset_infos = envs.reset(seed=args.seed)
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
+    next_action_mask = _extract_vector_action_mask(
+        reset_infos,
+        args.num_envs,
+        envs.single_action_space.n,
+        device,
+    )
 
     for iteration in range(1, args.num_iterations + 1):
+        # Per-iteration diagnostics for dashboard clarity.
+        iter_valid_actions_sum = 0.0
+        iter_valid_actions_count = 0
+        iter_non_endturn_count = 0
+        iter_action_count = 0
+        iter_delta_spt_sum = 0.0
+        iter_delta_spt_count = 0
+
         # Annealing the rate if instructed to do so.
         if args.anneal_lr:
             frac = 1.0 - (iteration - 1.0) / args.num_iterations
@@ -244,7 +320,7 @@ if __name__ == "__main__":
 
             # ALGO LOGIC: action logic
             with torch.no_grad():
-                action, logprob, _, value = agent.get_action_and_value(next_obs)
+                action, logprob, _, value = agent.get_action_and_value(next_obs, action_mask=next_action_mask)
                 values[step] = value.flatten()
             actions[step] = action
             logprobs[step] = logprob
@@ -254,6 +330,34 @@ if __name__ == "__main__":
             next_done = np.logical_or(terminations, truncations)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
+            next_action_mask = _extract_vector_action_mask(
+                infos,
+                args.num_envs,
+                envs.single_action_space.n,
+                device,
+            )
+
+            # ---- Custom diagnostics from wrapper infos ----
+            valid_actions_values = _extract_vector_field(infos, "valid_actions", args.num_envs, default_value=None)
+            for v in valid_actions_values:
+                if v is not None:
+                    iter_valid_actions_sum += float(v)
+                    iter_valid_actions_count += 1
+
+            selected_action_type_values = _extract_vector_field(
+                infos, "selected_action_type", args.num_envs, default_value=None
+            )
+            for a_type in selected_action_type_values:
+                if a_type is not None:
+                    iter_action_count += 1
+                    if str(a_type) != "END_TURN":
+                        iter_non_endturn_count += 1
+
+            delta_spt_values = _extract_vector_field(infos, "delta_spt", args.num_envs, default_value=None)
+            for dspt in delta_spt_values:
+                if dspt is not None:
+                    iter_delta_spt_sum += float(dspt)
+                    iter_delta_spt_count += 1
 
             # Custom Phase-1 telemetry:
             # Log SPT for envs that just ended (typically via truncation at turn horizon).
@@ -280,6 +384,7 @@ if __name__ == "__main__":
 
                     if spt_value is not None:
                         writer.add_scalar("charts/custom_spt_return", float(spt_value), global_step)
+                        writer.add_scalar("charts/episode_end_spt", float(spt_value), global_step)
 
             if "final_info" in infos:
                 for info in infos["final_info"]:
@@ -335,7 +440,10 @@ if __name__ == "__main__":
                 end = start + args.minibatch_size
                 mb_inds = b_inds[start:end]
 
-                _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions.long()[mb_inds])
+                _, newlogprob, entropy, newvalue = agent.get_action_and_value(
+                    b_obs[mb_inds],
+                    b_actions.long()[mb_inds],
+                )
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
 
@@ -393,6 +501,24 @@ if __name__ == "__main__":
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
+        if iter_valid_actions_count > 0:
+            writer.add_scalar(
+                "charts/mean_valid_actions",
+                iter_valid_actions_sum / iter_valid_actions_count,
+                global_step,
+            )
+        if iter_action_count > 0:
+            writer.add_scalar(
+                "charts/non_endturn_rate",
+                iter_non_endturn_count / iter_action_count,
+                global_step,
+            )
+        if iter_delta_spt_count > 0:
+            writer.add_scalar(
+                "charts/mean_delta_spt",
+                iter_delta_spt_sum / iter_delta_spt_count,
+                global_step,
+            )
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 

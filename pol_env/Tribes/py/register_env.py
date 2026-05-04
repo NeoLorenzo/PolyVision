@@ -6,11 +6,12 @@ from .gym_env import TribesGymEnv, make_default_env
 
 # wrapper to make it gym-compatible
 class TribesGymWrapper(gym.Env):
-    PHASE1_LEVEL_FILE = "levels/phase1_bardur_drylands.csv"
+    PHASE1_LEVEL_FILE = "levels/phase1_12x12_2bardur.csv"
     MAX_TURNS = 10
     ALLOWED_ACTION_TYPES = {
         "END_TURN",
         "MOVE",
+        "CAPTURE",
         "EXAMINE",
         "RESOURCE_GATHERING",
         "CLEAR_FOREST",
@@ -56,6 +57,7 @@ class TribesGymWrapper(gym.Env):
     def reset(self, seed=None, options=None):
         obs = self.tribes_env.reset(self.level_file, seed or 42)
         self._turn_count = 0
+        obs = self._apply_bardur_opening(obs)
         
         # Log action space info for debugging
         action_count = self.tribes_env.action_space_n
@@ -124,6 +126,49 @@ class TribesGymWrapper(gym.Env):
         for pos in range(min(len(allowed_indices), self.action_space.n)):
             mask[pos] = 1
         return mask, allowed_indices
+
+    def _apply_bardur_opening(self, obs):
+        """Force deterministic T0 opening: harvest 2 animals, then choose Workshop level-up.
+
+        This executes directly against the Java bridge before the agent takes any action.
+        """
+        def find_action_idx(predicate):
+            legal = self.tribes_env.list_actions()
+            for idx, act in enumerate(legal):
+                if predicate(act):
+                    return idx
+            return None
+
+        # 1) Harvest animal #1
+        idx = find_action_idx(
+            lambda a: a.get("type") == "RESOURCE_GATHERING" and "ANIMAL" in a.get("repr", "")
+        )
+        if idx is None:
+            actions_debug = self.tribes_env.list_actions()
+            print("DEBUG_T0_ACTIONS_START")
+            for i, action in enumerate(actions_debug):
+                print(f"{i}: {action}")
+            print("DEBUG_T0_ACTIONS_END")
+            raise RuntimeError("Bardur opening failed: missing first ANIMAL harvest action.")
+        obs, _, _, _ = self.tribes_env.step(idx)
+
+        # 2) Harvest animal #2
+        idx = find_action_idx(
+            lambda a: a.get("type") == "RESOURCE_GATHERING" and "ANIMAL" in a.get("repr", "")
+        )
+        if idx is None:
+            raise RuntimeError("Bardur opening failed: missing second ANIMAL harvest action.")
+        obs, _, _, _ = self.tribes_env.step(idx)
+
+        # 3) Choose Workshop on city level-up
+        idx = find_action_idx(
+            lambda a: a.get("type") == "LEVEL_UP" and "WORKSHOP" in a.get("repr", "")
+        )
+        if idx is None:
+            raise RuntimeError("Bardur opening failed: missing WORKSHOP level-up action.")
+        obs, _, _, _ = self.tribes_env.step(idx)
+
+        return obs
     
     def _dict_to_array(self, obs_dict):
         # convert your complex dict observation to flat array
