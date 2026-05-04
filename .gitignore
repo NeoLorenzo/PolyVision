@@ -1,5 +1,6 @@
 .venv
 runs/
+wandb/
 __pycache__/
 action_embeddings_cache/
 *.py[cod]

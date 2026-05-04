@@ -2,6 +2,74 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Telemetry-001] - 2026-05-04
+
+### Added
+- Added custom PPO telemetry in `py_rl/cleanrl/cleanrl/ppo.py`:
+  - logs `charts/custom_spt_return` from `infos["spt"]` whenever an env episode ends (`truncations` or `terminations`)
+  - fallback extraction from `infos["final_info"][env_idx]["spt"]` when direct vector key is unavailable
+- Added explicit model checkpoint options to PPO CLI:
+  - `--save-model`
+  - `--model-path`
+  - saves `agent.state_dict()` at end of training
+- Added periodic checkpointing controls to PPO CLI:
+  - `--save-frequency` (default: `500000`)
+  - when `--save-model` is enabled, checkpoint files are written during training as:
+    - `runs/<run_name>/model_checkpoint_<global_step>.cleanrl_model`
+  - final model save remains:
+    - `runs/<run_name>/ppo.cleanrl_model` (or custom `--model-path`)
+
+### Validation
+- Ran smoke test:
+  - `python py_rl/cleanrl/cleanrl/ppo.py --env-id Tribes-v0 --num-envs 4 --total-timesteps 4096 --no-track --save-model`
+  - output included `model_saved=runs\Tribes-v0__ppo__1__1777901078\ppo.cleanrl_model`
+- Verified TensorBoard event tags in smoke run:
+  - `charts/custom_spt_return` present with 149 scalar points
+  - confirms custom SPT telemetry is being emitted even when default episodic stats are absent
+
+### Documentation
+- Updated `docs/TRAINING.md` with:
+  - checkpointing usage for long runs
+  - tracked 5,000,000-step launch command with online W&B sync
+
+## [Phase1-Strict-001] - 2026-05-04
+
+### Added
+- Added strict Phase 1 level file:
+  - `pol_env/Tribes/levels/phase1_bardur_drylands.csv`
+  - single-player start with Bardur capital (`c:2`)
+  - drylands-style terrain only (no shallow/deep water tiles)
+- Added quick verification script:
+  - `test_phase1_constraints.py`
+  - exercises one environment to confirm:
+    - episode truncation at turn 10
+    - executed actions are constrained by whitelist mapping
+
+### Changed
+- Updated `pol_env/Tribes/py/register_env.py` to enforce strict Phase 1 wrapper constraints:
+  - default level file now `levels/phase1_bardur_drylands.csv`
+  - added whitelist filter for legal action types:
+    - `END_TURN`, `MOVE`, `EXAMINE`, `RESOURCE_GATHERING`, `CLEAR_FOREST`,
+      `GROW_FOREST`, `LEVEL_UP`, `RESEARCH_TECH`, `BUILD`
+  - action remapping now uses whitelist-index -> raw Java action index mapping
+  - added per-step action mask (`info["action_mask"]`) and action debug metadata
+  - added wrapper turn counter based on executed `END_TURN` actions
+  - `step()` now returns `truncated=True` when turn counter reaches 10 (unless already terminated)
+  - added Phase 1 terminal override in `step()`:
+    - Java `done` is ignored (`terminated=False` always in wrapper output)
+    - horizon control is Python-only via `truncated=(turn_count >= 10)`
+    - debug metadata includes `info["java_done"]` and `info["terminated_overridden"]`
+- Updated `pol_env/Tribes/py/gym_env.py` reward logic:
+  - removed prior score/relative/terminal shaping
+  - reward is now dense absolute Stars-Per-Turn (SPT), computed from observation city production
+  - added `info["spt"]` and `info["delta_spt"]`
+- Updated strict Phase 1 level to prevent immediate Java single-player game-over:
+  - `phase1_bardur_drylands.csv` now includes a distant dummy enemy capital (`c:1`)
+  - keeps Java state alive while Python controls episode horizon
+- Updated `pol_env/Tribes/py/register_env.py` fail-fast behavior:
+  - removed synthetic `NO_OP` fallback path
+  - wrapper now raises `RuntimeError` when Java returns zero legal actions
+
 ## [Preflight-002] - 2026-05-04
 
 ### Added (Async + Benchmark)

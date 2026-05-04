@@ -28,6 +28,10 @@ python py_rl/cleanrl/cleanrl/ppo.py --total-timesteps 5000 --num-steps 32 --trac
 Notes:
 - Uses `Tribes-v0` env id by default in this forked script.
 - Writes TensorBoard logs under `runs/`.
+- For long runs, enable checkpointing with:
+  - `--save-model --save-frequency 500000`
+  - checkpoints are written as `runs/<run_name>/model_checkpoint_<step>.cleanrl_model`
+  - final model is written as `runs/<run_name>/ppo.cleanrl_model` (unless `--model-path` is provided)
 
 ## Preflight Sanity Check (Recommended Before MVP Runs)
 
@@ -41,6 +45,13 @@ Expected result:
 - completes with exit code `0`
 - prints increasing `SPS` values
 - no lingering Java worker processes after completion
+
+## Phase 1 Long Run (Tracked + Checkpointed)
+
+PowerShell command:
+```bash
+$env:WANDB_MODE='online'; python py_rl/cleanrl/cleanrl/ppo.py --env-id Tribes-v0 --num-envs 12 --total-timesteps 5000000 --track --save-model --save-frequency 500000
+```
 
 ## Custom Polyvision Variants
 

@@ -51,6 +51,12 @@ class Args:
     """the entity (team) of wandb's project"""
     capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
+    save_model: bool = False
+    """whether to save the trained model to disk at the end of training"""
+    model_path: Optional[str] = None
+    """optional output path for saved model; defaults to runs/{run_name}/{exp_name}.cleanrl_model"""
+    save_frequency: int = 500000
+    """checkpoint frequency in environment steps when --save-model is enabled"""
 
     # Algorithm specific arguments
     # env_id: str = "CartPole-v1"
@@ -159,6 +165,8 @@ if __name__ == "__main__":
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    run_dir = os.path.join("runs", run_name)
+    os.makedirs(run_dir, exist_ok=True)
     if args.track:
         import wandb
         import os
@@ -172,7 +180,7 @@ if __name__ == "__main__":
             monitor_gym=True,
             save_code=True,
         )
-    writer = SummaryWriter(f"runs/{run_name}")
+    writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
@@ -229,6 +237,7 @@ if __name__ == "__main__":
             optimizer.param_groups[0]["lr"] = lrnow
 
         for step in range(0, args.num_steps):
+            prev_global_step = global_step
             global_step += args.num_envs
             obs[step] = next_obs
             dones[step] = next_done
@@ -246,12 +255,52 @@ if __name__ == "__main__":
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
 
+            # Custom Phase-1 telemetry:
+            # Log SPT for envs that just ended (typically via truncation at turn horizon).
+            for env_idx in range(args.num_envs):
+                if truncations[env_idx] or terminations[env_idx]:
+                    spt_value = None
+
+                    # Case 1: vector info carries per-env arrays and optional validity mask.
+                    if "spt" in infos:
+                        spt_raw = infos["spt"]
+                        spt_mask = infos.get("_spt", None)
+                        if spt_mask is None:
+                            if len(spt_raw) > env_idx:
+                                spt_value = spt_raw[env_idx]
+                        else:
+                            if len(spt_mask) > env_idx and spt_mask[env_idx] and len(spt_raw) > env_idx:
+                                spt_value = spt_raw[env_idx]
+
+                    # Case 2: final_info often carries final per-env info dicts.
+                    if spt_value is None and "final_info" in infos and len(infos["final_info"]) > env_idx:
+                        finfo = infos["final_info"][env_idx]
+                        if finfo is not None and "spt" in finfo:
+                            spt_value = finfo["spt"]
+
+                    if spt_value is not None:
+                        writer.add_scalar("charts/custom_spt_return", float(spt_value), global_step)
+
             if "final_info" in infos:
                 for info in infos["final_info"]:
                     if info and "episode" in info:
                         print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
                         writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
                         writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+                    if info and "spt" in info:
+                        writer.add_scalar("charts/custom_spt_return", float(info["spt"]), global_step)
+
+            # Periodic checkpointing. Save every crossed frequency milestone in case
+            # num_envs does not divide save_frequency exactly.
+            if args.save_model and args.save_frequency > 0 and global_step > 0:
+                first_checkpoint = ((prev_global_step // args.save_frequency) + 1) * args.save_frequency
+                last_checkpoint = (global_step // args.save_frequency) * args.save_frequency
+                if first_checkpoint <= last_checkpoint:
+                    for checkpoint_step in range(first_checkpoint, last_checkpoint + 1, args.save_frequency):
+                        if checkpoint_step > 0 and checkpoint_step % args.save_frequency == 0:
+                            checkpoint_path = os.path.join(run_dir, f"model_checkpoint_{checkpoint_step}.cleanrl_model")
+                            torch.save(agent.state_dict(), checkpoint_path)
+                            print(f"checkpoint_saved={checkpoint_path}")
 
         # bootstrap value if not done
         with torch.no_grad():
@@ -346,6 +395,11 @@ if __name__ == "__main__":
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+
+    if args.save_model:
+        model_path = args.model_path or os.path.join(run_dir, f"{args.exp_name}.cleanrl_model")
+        torch.save(agent.state_dict(), model_path)
+        print(f"model_saved={model_path}")
 
     envs.close()
     writer.close()
