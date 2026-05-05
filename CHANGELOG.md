@@ -2,6 +2,54 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Learning-006] - 2026-05-04 - 2026-05-05
+
+### Scope
+- Learning-only reward-system simplification pass to reduce variance and tighten capture incentives in `pol_env/Tribes/py/register_env.py`.
+- Focused on flatter, safer shaping terms and clearer per-turn village-pressure signals.
+
+### Scope Correction
+- Realization recorded: recent training runs were not on a drylands-only map configuration.
+- Drylands-only terrain is no longer a project requirement.
+- Effective Phase 1 map scope is now:
+  - fixed `12x12` map
+  - generated/managed using the Tribes framework tooling and level pipeline
+  - current default wrapper target remains `levels/phase1_12x12_2bardur.csv`
+- Prior drylands references remain in older entries as historical planning context.
+
+### Implemented
+- Flattened reward/penalty mechanics by removing exponential (`math.exp`) scaling from active shaping logic.
+- Updated city-capture reward:
+  - replaced decayed capture bonus with flat `+2.0` per city-count increase (`CAPTURE_CITY_BONUS`).
+- Updated delayed second-village penalty:
+  - now flat `-0.2` per turn (`SECOND_VILLAGE_DELAY_PENALTY`) starting at Turn 4 while still on one city.
+- Updated visible-village neglect penalty:
+  - now flat `-0.5` per turn (`VISIBLE_VILLAGE_NEGLECT_PENALTY`) after a 2-turn grace window (`VISIBLE_VILLAGE_NEGLECT_GRACE_TURNS`) when a visible uncaptured village exists and city count is still one.
+- Added village "breadcrumb" reward:
+  - grants `+0.5` per turn (`VILLAGE_BREADCRUMB_REWARD`) when an owned unit is standing on a visible uncaptured village tile.
+  - implemented via `_has_unit_on_visible_uncaptured_village(...)`.
+- Removed exploration-based shaping reward path from active logic:
+  - deleted exploration reward constants/state and `_compute_exploration_reward(...)` usage.
+- Verified capture action mask coverage:
+  - `ALLOWED_ACTION_TYPES` explicitly includes both `CAPTURE` and `EXAMINE`.
+- Updated reward telemetry keys:
+  - replaced decayed capture/exploration telemetry with flat-mechanic fields:
+    - `reward_capture_city_bonus`
+    - `reward_second_village_delay_penalty`
+    - `reward_visible_village_neglect_penalty`
+    - `reward_village_breadcrumb`
+    - `unit_on_visible_uncaptured_village`
+- Added standalone policy-inspection script at repository root:
+  - `evaluate_brain.py`
+  - loads a `.cleanrl_model` checkpoint and runs a single episode with per-step policy introspection
+  - prints turn/SPT, critic value estimate, and legal-action probability distribution before each action
+  - supports live Java rendering (`--render-java`) and manual step-through controls (`--manual-step`) for one-action-at-a-time inspection
+- Initialized and populated benchmark registry file:
+  - `model_run_benchmark_log.md`
+  - added run-folder-to-plain-label mapping for the 7 tracked models, including:
+    - `Phase1-Learning-006 (1M)`
+    - `Phase1-Learning-006 (43M)`
+
 ## [Phase1-Learning-005] - 2026-05-04
 
 ### Scope

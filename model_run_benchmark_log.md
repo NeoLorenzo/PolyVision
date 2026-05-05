@@ -1,0 +1,13 @@
+# Model Run Benchmark Log
+
+## Registered Models (Run Folder Names)
+
+| Run Folder Name | Plain-English Model Label |
+|---|---|
+| `Tribes-v0__ppo__1__1777901752` | `Phase1-MVP-001 (2.5M)` |
+| `Tribes-v0__ppo__1__1777909271` | `Phase1-Stability-002 (1M)` |
+| `Tribes-v0__ppo__1__1777911407` | `Phase1-Learning-003 (1.5M)` |
+| `Tribes-v0__ppo__1__1777914322` | `Phase1-Learning-004 (1.25M)` |
+| `Tribes-v0__ppo__1__1777917066` | `Phase1-Learning-005 (1.25M)` |
+| `Tribes-v0__ppo__1__1777919819` | `Phase1-Learning-006 (1M)` |
+| `Tribes-v0__ppo__1__1777921614` | `Phase1-Learning-006 (43.25M)` |
