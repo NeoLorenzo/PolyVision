@@ -2,6 +2,50 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Learning-010] - 2026-05-05
+
+### Scope
+- Add a hard early-expansion guardrail so village capture pathing is mandatory when available.
+
+### Implemented
+- Updated action masking in `pol_env/Tribes/py/register_env.py` with a strict village-priority override:
+  - in `_build_action_mask_and_indices(...)`, after normal whitelist and resource-feasibility filtering, the wrapper now checks for village-entering `MOVE` actions.
+  - condition:
+    - `city_count < 2`
+    - at least one legal `MOVE` action steps onto a visible uncaptured village tile.
+  - behavior:
+    - when condition is met, allowed action indices are replaced with only those village-entering move indices.
+    - this guarantees the policy must choose a village-entering move when one is available.
+    - updated behavior: when `city_count < 2` and a legal village `CAPTURE` exists, that unit is frozen (its `MOVE`/`CAPTURE` actions are masked out), and village capture is deferred/auto-executed immediately before `END_TURN`.
+    - this allows non-unit decisions (for example `RESEARCH_TECH`) to happen first in the same turn while still guaranteeing village capture before turn handoff.
+  - queue lifecycle details:
+    - added wrapper state `_queued_village_capture_unit_ids` initialized in constructor and reset on episode reset.
+    - queued set is cleared automatically once `city_count >= 2`.
+- Added helper parsing/validation for village-entering move detection in `pol_env/Tribes/py/register_env.py`:
+  - `_parse_move_unit_and_dest_from_action_repr(...)`
+  - `_is_move_to_visible_uncaptured_village(...)`
+  - validation includes:
+    - unit ownership check (`tribeId == 0`),
+    - destination tile check against visible uncaptured village coordinates.
+- Added `_is_capture_of_village(...)` in `pol_env/Tribes/py/register_env.py` to detect and force Bardur-owned village capture actions while still below 2 cities.
+  - includes coordinate-order fallback when matching unit tile to visible village tile, so forced capture remains reliable across Java/Python axis-order quirks.
+- Added `_parse_unit_id_from_action_repr(...)` in `pol_env/Tribes/py/register_env.py` for robust unit-freeze and deferred-capture routing.
+- Added deferred-capture telemetry in `pol_env/Tribes/py/register_env.py`:
+  - `deferred_village_captures_before_end_turn`
+  - `queued_village_capture_unit_ids`
+- Hardened village detection consistency in `pol_env/Tribes/py/register_env.py`:
+  - added `_get_visible_uncaptured_village_positions(...)` and reused it in:
+    - `_is_move_to_visible_uncaptured_village(...)`
+    - `_has_visible_uncaptured_village(...)`
+    - `_has_unit_on_visible_uncaptured_village(...)`
+  - ensures the forced village mask and reward-shaping checks share the same village source of truth.
+- Fixed debug output ambiguity in `evaluate_brain.py`:
+  - action-relative `dX/dY` now normalizes coordinate-order variants before printing.
+  - move-grid orientation now uses direct `(rel_x, rel_y)` world mapping for consistent visualization.
+  - executed action label is now resolved before stepping the env, so it no longer incorrectly prints `[rel dX=+0, dY=+0]` after moves.
+- Updated benchmark registry in `model_run_benchmark_log.md`:
+  - added run mapping `Tribes-v0__ppo__1__1778000233` -> `Phase1-Learning-010 (1M)`.
+
 ## [Phase1-Learning-009] - 2026-05-05
 
 ### Scope

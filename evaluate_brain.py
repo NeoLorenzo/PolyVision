@@ -105,6 +105,21 @@ def parse_move_action_repr(action_repr: str):
         return None
 
 
+def infer_relative_delta(cur_x: int, cur_y: int, dest_x: int, dest_y: int):
+    candidates = [
+        (int(dest_x) - int(cur_x), int(dest_y) - int(cur_y)),
+        (int(dest_y) - int(cur_x), int(dest_x) - int(cur_y)),
+    ]
+
+    def is_local_step(dx, dy):
+        return abs(dx) <= 1 and abs(dy) <= 1 and not (dx == 0 and dy == 0)
+
+    for dx, dy in candidates:
+        if is_local_step(dx, dy):
+            return dx, dy
+    return candidates[0]
+
+
 def get_unit_pos_from_env_obs(env: TribesGymWrapper, unit_id: int):
     raw_obs = getattr(env.tribes_env, "_last_obs", None)
     if not isinstance(raw_obs, dict):
@@ -144,8 +159,7 @@ def format_action_for_debug(action_repr: str, action_type: str, env: TribesGymWr
     if cur is None:
         return f"MOVE by unit {unit_id} [rel dX=?, dY=?]"
     cur_x, cur_y = cur
-    dx = dest_x - cur_x
-    dy = dest_y - cur_y
+    dx, dy = infer_relative_delta(cur_x, cur_y, dest_x, dest_y)
     return f"MOVE by unit {unit_id} [rel dX={dx:+d}, dY={dy:+d}]"
 
 
@@ -168,8 +182,7 @@ def print_policy_move_grid(env: TribesGymWrapper, legal_actions, allowed_indices
         if cur is None:
             continue
         cur_x, cur_y = cur
-        dx = int(dest_x) - int(cur_x)
-        dy = int(dest_y) - int(cur_y)
+        dx, dy = infer_relative_delta(cur_x, cur_y, dest_x, dest_y)
         move_rows.append(
             {
                 "pos": pos,
@@ -220,17 +233,14 @@ def print_policy_move_grid(env: TribesGymWrapper, legal_actions, allowed_indices
                 row.append("  U  ")
                 continue
 
-            # Match same orientation mapping as opening grid.
-            engine_dx = rel_y
-            engine_dy = rel_x
-            world_x = int(anchor_cur[0]) + engine_dx
-            world_y = int(anchor_cur[1]) + engine_dy
+            world_x = int(anchor_cur[0]) + rel_x
+            world_y = int(anchor_cur[1]) + rel_y
             off_board = world_x < 0 or world_y < 0 or world_x >= map_size or world_y >= map_size
             if off_board:
                 row.append("  X  ")
                 continue
 
-            key = (engine_dx, engine_dy)
+            key = (rel_x, rel_y)
             if key in rel_prob:
                 pct = 100.0 * rel_prob[key]
                 row.append(f"{pct:5.1f}")
@@ -420,9 +430,6 @@ def main() -> None:
                     print("Stopped by user.")
                     break
 
-            next_obs, reward, terminated, truncated, next_info = env.step(action)
-            done = bool(terminated or truncated)
-
             chosen_raw_idx = None
             chosen_action_label = "UNKNOWN"
             if allowed_indices:
@@ -433,6 +440,9 @@ def main() -> None:
                     chosen_type = str(chosen_act.get("type", "UNKNOWN"))
                     chosen_raw_repr = str(chosen_act.get("repr", chosen_type))
                     chosen_action_label = format_action_for_debug(chosen_raw_repr, chosen_type, env)
+
+            next_obs, reward, terminated, truncated, next_info = env.step(action)
+            done = bool(terminated or truncated)
 
             print(f"Executed Action: idx={action} raw_idx={chosen_raw_idx} | {chosen_action_label}")
             print(f"Reward: {float(reward):.4f} | terminated={terminated} truncated={truncated}")

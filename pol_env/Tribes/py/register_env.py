@@ -43,6 +43,7 @@ class TribesGymWrapper(gym.Env):
         self._last_city_count = 1
         self._moved_on_t0 = False
         self._visible_village_streak_turns = 0
+        self._queued_village_capture_unit_ids = set()
         try:
             obs = self.tribes_env.reset(self.level_file, seed=42)
             
@@ -78,6 +79,7 @@ class TribesGymWrapper(gym.Env):
         self._last_city_count = self._starting_city_count
         self._moved_on_t0 = False
         self._visible_village_streak_turns = 0
+        self._queued_village_capture_unit_ids = set()
         
         # Log action space info for debugging
         action_count = self.tribes_env.action_space_n
@@ -123,10 +125,47 @@ class TribesGymWrapper(gym.Env):
             selected_raw_action = allowed_indices[selected_allowed_pos]
 
         selected_action_type = legal_actions[selected_raw_action].get("type", "UNKNOWN")
-        if selected_action_type == "END_TURN":
-            self._turn_count += 1
 
         prev_bardur_spt = self._compute_bardur_spt(start_obs)
+
+        deferred_capture_count = 0
+        # If END_TURN is selected and we have queued village captures (city_count < 2),
+        # execute those captures first, then end the turn.
+        if selected_action_type == "END_TURN" and self._queued_village_capture_unit_ids:
+            queued_units = set(self._queued_village_capture_unit_ids)
+            for _ in range(max(1, len(queued_units))):
+                cur_obs = getattr(self.tribes_env, "_last_obs", {})
+                if self._get_city_count(cur_obs) >= 2:
+                    break
+                legal_pre_end = self.tribes_env.list_actions()
+                capture_idx = None
+                capture_unit_id = None
+                for idx, a in enumerate(legal_pre_end):
+                    if a.get("type") != "CAPTURE":
+                        continue
+                    if not self._is_capture_of_village(a, cur_obs):
+                        continue
+                    unit_id = self._parse_unit_id_from_action_repr(str(a.get("repr", "")))
+                    if unit_id is None or unit_id not in queued_units:
+                        continue
+                    capture_idx = idx
+                    capture_unit_id = unit_id
+                    break
+                if capture_idx is None:
+                    break
+                self.tribes_env.step(capture_idx)
+                deferred_capture_count += 1
+                if capture_unit_id in queued_units:
+                    queued_units.remove(capture_unit_id)
+            # Re-resolve END_TURN after deferred captures since action indices may shift.
+            legal_actions = self.tribes_env.list_actions()
+            raw_count = len(legal_actions)
+            end_turn_idx = next((i for i, a in enumerate(legal_actions) if a.get("type") == "END_TURN"), 0)
+            selected_raw_action = end_turn_idx
+            selected_action_type = "END_TURN"
+
+        if selected_action_type == "END_TURN":
+            self._turn_count += 1
 
         obs, _, done, info = self.tribes_env.step(selected_raw_action)
         obs_after_selected = obs
@@ -220,12 +259,16 @@ class TribesGymWrapper(gym.Env):
         info["terminated_overridden"] = True
         info["forced_pre_end_turns"] = int(forced_pre_end_turns)
         info["forced_post_end_turns"] = int(forced_post_end_turns)
+        info["deferred_village_captures_before_end_turn"] = int(deferred_capture_count)
+        info["queued_village_capture_unit_ids"] = list(sorted(int(u) for u in self._queued_village_capture_unit_ids))
         info["delta_spt"] = float(base_delta_spt)
         info["spt"] = float(current_bardur_spt)
         info["activeTribeID"] = int(self._get_active_tribe_id(obs))
         self._last_city_count = current_city_count
         if selected_action_type == "MOVE" and self._turn_count == 0:
             self._moved_on_t0 = True
+        if current_city_count >= 2:
+            self._queued_village_capture_unit_ids = set()
 
         return self._dict_to_array(obs), reward, terminated, truncated, info
 
@@ -245,6 +288,58 @@ class TribesGymWrapper(gym.Env):
                 if not self._is_resource_gather_legal_for_upgrade(a, legal_actions, obs):
                     continue
             allowed_indices.append(idx)
+
+        # Hard guardrail (Phase1-Learning-010):
+        # If we still have <2 cities and can capture a visible village now,
+        # freeze that unit and queue its capture to execute on END_TURN. Otherwise,
+        # if we can step onto one, force MOVE to village tiles.
+        if self._get_city_count(obs) < 2 and allowed_indices:
+            forced_village_captures = []
+            for idx in allowed_indices:
+                a = legal_actions[idx]
+                if a.get("type") != "CAPTURE":
+                    continue
+                if self._is_capture_of_village(a, obs):
+                    forced_village_captures.append(idx)
+            if forced_village_captures:
+                frozen_units = set()
+                for idx in forced_village_captures:
+                    u = self._parse_unit_id_from_action_repr(str(legal_actions[idx].get("repr", "")))
+                    if u is not None:
+                        frozen_units.add(int(u))
+                self._queued_village_capture_unit_ids = set(frozen_units)
+
+                filtered_indices = []
+                for idx in allowed_indices:
+                    a = legal_actions[idx]
+                    a_type = a.get("type")
+                    if a_type not in ("MOVE", "CAPTURE"):
+                        filtered_indices.append(idx)
+                        continue
+                    u = self._parse_unit_id_from_action_repr(str(a.get("repr", "")))
+                    if u is None or int(u) not in frozen_units:
+                        filtered_indices.append(idx)
+                if filtered_indices:
+                    allowed_indices = filtered_indices
+                else:
+                    end_turn_idx = next((i for i, a in enumerate(legal_actions) if a.get("type") == "END_TURN"), None)
+                    allowed_indices = [end_turn_idx] if end_turn_idx is not None else []
+            else:
+                self._queued_village_capture_unit_ids = set()
+
+            forced_village_moves = []
+            if not forced_village_captures:
+                for idx in allowed_indices:
+                    a = legal_actions[idx]
+                    if a.get("type") != "MOVE":
+                        continue
+                    if self._is_move_to_visible_uncaptured_village(a, obs):
+                        forced_village_moves.append(idx)
+                if forced_village_moves:
+                    allowed_indices = forced_village_moves
+        else:
+            self._queued_village_capture_unit_ids = set()
+
         mask = np.zeros(self.action_space.n, dtype=np.int8)
         for pos in range(min(len(allowed_indices), self.action_space.n)):
             mask[pos] = 1
@@ -725,6 +820,99 @@ class TribesGymWrapper(gym.Env):
         min_cost = min(dp[missing_pop:]) if missing_pop <= max_pop_gain else inf
         return min_cost <= stars + 1e-9
 
+    def _parse_move_unit_and_dest_from_action_repr(self, action_repr):
+        if not isinstance(action_repr, str):
+            return None
+        nums = re.findall(r"-?\d+", action_repr)
+        if len(nums) < 3:
+            return None
+        try:
+            unit_id = int(nums[0])
+            dest_x = int(nums[-2])
+            dest_y = int(nums[-1])
+            return unit_id, dest_x, dest_y
+        except Exception:
+            return None
+
+    def _parse_unit_id_from_action_repr(self, action_repr):
+        if not isinstance(action_repr, str):
+            return None
+        m = re.search(r"by unit\s+(-?\d+)", action_repr, flags=re.IGNORECASE)
+        if m is None:
+            return None
+        try:
+            return int(m.group(1))
+        except Exception:
+            return None
+
+    def _get_visible_uncaptured_village_positions(self, obs):
+        board = obs.get("board", {})
+        terrain = board.get("terrain", [])
+        city_ids = board.get("cityID", [])
+        if not terrain or not city_ids:
+            return set()
+
+        village_positions = set()
+        for y in range(len(terrain)):
+            row_t = terrain[y]
+            row_c = city_ids[y] if y < len(city_ids) else []
+            for x in range(len(row_t)):
+                try:
+                    t_val = int(row_t[x])
+                    c_val = int(row_c[x]) if x < len(row_c) else -1
+                except Exception:
+                    continue
+                if t_val == 4 and c_val == -1:
+                    village_positions.add((x, y))
+        return village_positions
+
+    def _is_move_to_visible_uncaptured_village(self, action, obs):
+        parsed = self._parse_move_unit_and_dest_from_action_repr(str(action.get("repr", "")))
+        if parsed is None:
+            return False
+        unit_id, dest_a, dest_b = parsed
+
+        units = obs.get("unit", {})
+        unit = units.get(str(unit_id), None) if isinstance(units, dict) else None
+        if not isinstance(unit, dict):
+            return False
+        if int(unit.get("tribeId", -1)) != 0:
+            return False
+
+        village_positions = self._get_visible_uncaptured_village_positions(obs)
+        if not village_positions:
+            return False
+
+        # Some action repr variants encode destination as "x:y" while others
+        # effectively behave as "y:x" relative to board arrays in Python.
+        return (dest_a, dest_b) in village_positions or (dest_b, dest_a) in village_positions
+
+    def _is_capture_of_village(self, action, obs):
+        try:
+            action_repr = str(action.get("repr", ""))
+            if "VILLAGE" not in action_repr.upper():
+                return False
+
+            unit_id = self._parse_unit_id_from_action_repr(action_repr)
+            if unit_id is None:
+                return False
+
+            units = obs.get("unit", {})
+            unit = units.get(str(unit_id), None) if isinstance(units, dict) else None
+            if not isinstance(unit, dict):
+                return False
+            if int(unit.get("tribeId", -1)) != 0:
+                return False
+
+            ux = int(unit.get("x", -1))
+            uy = int(unit.get("y", -1))
+            if ux < 0 or uy < 0:
+                return False
+            village_positions = self._get_visible_uncaptured_village_positions(obs)
+            return (ux, uy) in village_positions or (uy, ux) in village_positions
+        except Exception:
+            return False
+
     def _force_non_bardur_turns_to_end(self, obs, max_loops=16):
         forced = 0
         java_done = False
@@ -756,45 +944,15 @@ class TribesGymWrapper(gym.Env):
         return out
 
     def _has_visible_uncaptured_village(self, obs):
-        board = obs.get("board", {})
-        terrain = board.get("terrain", [])
-        city_ids = board.get("cityID", [])
-        if not terrain or not city_ids:
-            return False
-
-        for i in range(len(terrain)):
-            row_t = terrain[i]
-            row_c = city_ids[i] if i < len(city_ids) else []
-            for j in range(len(row_t)):
-                t_val = int(row_t[j])
-                c_val = int(row_c[j]) if j < len(row_c) else -1
-                if t_val == 4 and c_val == -1:
-                    return True
-        return False
+        return len(self._get_visible_uncaptured_village_positions(obs)) > 0
 
     def _has_unit_on_visible_uncaptured_village(self, obs):
-        board = obs.get("board", {})
-        terrain = board.get("terrain", [])
-        city_ids = board.get("cityID", [])
-        if not terrain or not city_ids:
-            return False
-
-        village_positions = set()
-        for i in range(len(terrain)):
-            row_t = terrain[i]
-            row_c = city_ids[i] if i < len(city_ids) else []
-            for j in range(len(row_t)):
-                t_val = int(row_t[j])
-                c_val = int(row_c[j]) if j < len(row_c) else -1
-                if t_val == 4 and c_val == -1:
-                    # Board arrays are indexed [row=y][col=x], while units store (x, y).
-                    village_positions.add((j, i))
-
+        village_positions = self._get_visible_uncaptured_village_positions(obs)
         if not village_positions:
             return False
 
         for ux, uy in self._get_owned_unit_tiles(obs):
-            if (ux, uy) in village_positions:
+            if (ux, uy) in village_positions or (uy, ux) in village_positions:
                 return True
         return False
 
