@@ -18,6 +18,8 @@ class TribesGymWrapper(gym.Env):
     VISIBLE_VILLAGE_NEGLECT_PENALTY = -0.5
     VISIBLE_VILLAGE_NEGLECT_GRACE_TURNS = 2
     VILLAGE_BREADCRUMB_REWARD = 0.5
+    FOG_CLEAR_REWARD_PER_TILE = 0.08
+    FOG_CLEAR_REWARD_MAX_TILES = 5
     ALLOWED_ACTION_TYPES = {
         "END_TURN",
         "MOVE",
@@ -127,6 +129,7 @@ class TribesGymWrapper(gym.Env):
         prev_bardur_spt = self._compute_bardur_spt(start_obs)
 
         obs, _, done, info = self.tribes_env.step(selected_raw_action)
+        obs_after_selected = obs
         java_done = bool(done)
 
         forced_post_end_turns = 0
@@ -150,10 +153,21 @@ class TribesGymWrapper(gym.Env):
         second_village_delay_penalty = 0.0
         visible_village_neglect_penalty = 0.0
         village_breadcrumb_reward = 0.0
+        fog_clearance_reward = 0.0
 
         visible_uncaptured_village = self._has_visible_uncaptured_village(obs)
         has_second_village = current_city_count >= (self._starting_city_count + 1)
         unit_on_visible_uncaptured_village = self._has_unit_on_visible_uncaptured_village(obs)
+
+        if selected_action_type == "MOVE":
+            vis_before = self._count_visible_tiles(start_obs)
+            vis_after = self._count_visible_tiles(obs_after_selected)
+            fog_tiles_cleared = max(0, vis_after - vis_before)
+            if fog_tiles_cleared > 0:
+                fog_clearance_reward = min(
+                    self.FOG_CLEAR_REWARD_MAX_TILES,
+                    int(fog_tiles_cleared),
+                ) * self.FOG_CLEAR_REWARD_PER_TILE
 
         if selected_action_type == "END_TURN":
             if current_turn >= self.SECOND_VILLAGE_DELAY_START_TURN and not has_second_village:
@@ -173,6 +187,7 @@ class TribesGymWrapper(gym.Env):
         reward_adjustment += second_village_delay_penalty
         reward_adjustment += visible_village_neglect_penalty
         reward_adjustment += village_breadcrumb_reward
+        reward_adjustment += fog_clearance_reward
 
         # Phase 1 override: ignore Java terminal state and control horizon purely in Python.
         terminated = False
@@ -199,6 +214,7 @@ class TribesGymWrapper(gym.Env):
         info["reward_second_village_delay_penalty"] = float(second_village_delay_penalty)
         info["reward_visible_village_neglect_penalty"] = float(visible_village_neglect_penalty)
         info["reward_village_breadcrumb"] = float(village_breadcrumb_reward)
+        info["reward_fog_clearance"] = float(fog_clearance_reward)
         info["action_mask"] = action_mask
         info["java_done"] = bool(java_done)
         info["terminated_overridden"] = True
@@ -216,10 +232,19 @@ class TribesGymWrapper(gym.Env):
     def _build_action_mask_and_indices(self, legal_actions=None):
         if legal_actions is None:
             legal_actions = self.tribes_env.list_actions()
-        allowed_indices = [
-            idx for idx, a in enumerate(legal_actions)
-            if a.get("type") in self.ALLOWED_ACTION_TYPES
-        ]
+        obs = getattr(self.tribes_env, "_last_obs", {})
+        if not isinstance(obs, dict):
+            obs = {}
+
+        allowed_indices = []
+        for idx, a in enumerate(legal_actions):
+            a_type = a.get("type")
+            if a_type not in self.ALLOWED_ACTION_TYPES:
+                continue
+            if a_type == "RESOURCE_GATHERING":
+                if not self._is_resource_gather_legal_for_upgrade(a, legal_actions, obs):
+                    continue
+            allowed_indices.append(idx)
         mask = np.zeros(self.action_space.n, dtype=np.int8)
         for pos in range(min(len(allowed_indices), self.action_space.n)):
             mask[pos] = 1
@@ -594,6 +619,112 @@ class TribesGymWrapper(gym.Env):
                 continue
         return spt
 
+    def _get_bardur_stars(self, obs):
+        tribes = obs.get("tribes", {})
+        if not isinstance(tribes, dict):
+            return 0.0
+        tribe0 = tribes.get("0", {})
+        if not isinstance(tribe0, dict):
+            return 0.0
+        try:
+            return float(tribe0.get("star", 0.0))
+        except Exception:
+            return 0.0
+
+    def _parse_city_id_from_action_repr(self, action_repr):
+        if not isinstance(action_repr, str):
+            return None
+        m = re.search(r"by city\s+(-?\d+)", action_repr)
+        if m is None:
+            return None
+        try:
+            return int(m.group(1))
+        except Exception:
+            return None
+
+    def _parse_resource_type_from_action_repr(self, action_repr):
+        if not isinstance(action_repr, str):
+            return None
+        m = re.search(r":\s*([A-Z_]+)\s*$", action_repr.strip())
+        if m is None:
+            return None
+        return m.group(1)
+
+    def _resource_cost_and_population_bonus(self, resource_type):
+        # Costs/bonuses aligned with TribesConfig defaults.
+        table = {
+            "ANIMAL": (2.0, 1),
+            "FRUIT": (2.0, 1),
+            "FISH": (2.0, 1),
+            "WHALES": (0.0, 0),
+            "ORE": (0.0, 0),
+            "CROPS": (0.0, 0),
+        }
+        return table.get(resource_type, None)
+
+    def _is_resource_gather_legal_for_upgrade(self, action, legal_actions, obs):
+        repr_s = str(action.get("repr", ""))
+        city_id = self._parse_city_id_from_action_repr(repr_s)
+        if city_id is None:
+            return True  # Defensive fallback: don't mask unknown format.
+
+        city_info = (obs.get("city", {}) or {}).get(str(city_id), None)
+        if not isinstance(city_info, dict):
+            return True
+
+        if int(city_info.get("tribeID", -1)) != 0:
+            return False
+
+        try:
+            pop = int(city_info.get("population", 0))
+            pop_need = int(city_info.get("population_need", 0))
+        except Exception:
+            return True
+
+        missing_pop = max(0, pop_need - pop)
+        if missing_pop <= 0:
+            return True
+
+        stars = float(self._get_bardur_stars(obs))
+        candidates = []
+        for la in legal_actions:
+            if la.get("type") != "RESOURCE_GATHERING":
+                continue
+            la_repr = str(la.get("repr", ""))
+            la_city_id = self._parse_city_id_from_action_repr(la_repr)
+            if la_city_id != city_id:
+                continue
+            r_type = self._parse_resource_type_from_action_repr(la_repr)
+            meta = self._resource_cost_and_population_bonus(r_type) if r_type is not None else None
+            if meta is None:
+                return True  # Unknown resource semantics; keep legal rather than over-mask.
+            cost, bonus = meta
+            candidates.append((float(cost), int(bonus)))
+
+        if not candidates:
+            return False
+
+        max_pop_gain = sum(max(0, b) for _, b in candidates)
+        if max_pop_gain < missing_pop:
+            return False
+
+        # 0/1 knapsack DP: minimum star cost needed to reach each population gain.
+        inf = 1e9
+        dp = [inf] * (max_pop_gain + 1)
+        dp[0] = 0.0
+        for cost, bonus in candidates:
+            if bonus <= 0:
+                continue
+            for p in range(max_pop_gain - bonus, -1, -1):
+                if dp[p] >= inf:
+                    continue
+                new_cost = dp[p] + cost
+                if new_cost < dp[p + bonus]:
+                    dp[p + bonus] = new_cost
+
+        min_cost = min(dp[missing_pop:]) if missing_pop <= max_pop_gain else inf
+        return min_cost <= stars + 1e-9
+
     def _force_non_bardur_turns_to_end(self, obs, max_loops=16):
         forced = 0
         java_done = False
@@ -666,6 +797,22 @@ class TribesGymWrapper(gym.Env):
             if (ux, uy) in village_positions:
                 return True
         return False
+
+    def _count_visible_tiles(self, obs):
+        board = obs.get("board", {})
+        terrain = board.get("terrain", [])
+        if not terrain:
+            return 0
+        visible = 0
+        for row in terrain:
+            for val in row:
+                try:
+                    # TERRAIN 7 = FOG in this env; everything else is visible.
+                    if int(val) != 7:
+                        visible += 1
+                except Exception:
+                    continue
+        return visible
     
     def _dict_to_array(self, obs_dict):
         # convert your complex dict observation to flat array

@@ -60,6 +60,7 @@ def print_reward_breakdown(info, total_reward: float, truncated: bool = False):
     delay_penalty = float(info.get("reward_second_village_delay_penalty", 0.0))
     neglect_penalty = float(info.get("reward_visible_village_neglect_penalty", 0.0))
     breadcrumb = float(info.get("reward_village_breadcrumb", 0.0))
+    fog_clearance = float(info.get("reward_fog_clearance", 0.0))
     t10_penalty = 0.0
     if bool(truncated):
         turn_count = int(info.get("turn_count", -1))
@@ -68,7 +69,7 @@ def print_reward_breakdown(info, total_reward: float, truncated: bool = False):
         if turn_count >= 10 and city_count <= starting_city_count:
             t10_penalty = -3.0
 
-    shaping_sum = capture_bonus + delay_penalty + neglect_penalty + breadcrumb + t10_penalty
+    shaping_sum = capture_bonus + delay_penalty + neglect_penalty + breadcrumb + fog_clearance + t10_penalty
     reconstructed_total = delta_spt + shaping_sum
     reward_adjustment = float(info.get("reward_adjustment", shaping_sum))
     selected_action_type = str(info.get("selected_action_type", "UNKNOWN"))
@@ -80,6 +81,7 @@ def print_reward_breakdown(info, total_reward: float, truncated: bool = False):
     print(f"  second_village_delay_penalty:    {delay_penalty:+.4f}")
     print(f"  visible_village_neglect_penalty: {neglect_penalty:+.4f}")
     print(f"  village_breadcrumb:              {breadcrumb:+.4f}")
+    print(f"  fog_clearance_reward:            {fog_clearance:+.4f}")
     if t10_penalty != 0.0:
         print(f"  second_village_by_t10_penalty:   {t10_penalty:+.4f}")
     print(f"  shaping_sum:                     {shaping_sum:+.4f}")

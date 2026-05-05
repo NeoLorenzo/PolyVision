@@ -2,6 +2,48 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Learning-009] - 2026-05-05
+
+### Scope
+- Learning-only planning and analysis phase focused on improving post-opening policy decisions.
+- Objective is to improve model performance by reviewing the latest model runs slowly and deriving candidate soft and hard rules for the next training iteration.
+
+### Planned Review Method
+- Replay latest model runs step-by-step to inspect decision quality and opportunity cost at each turn.
+- Record repeated policy mistakes, weak priorities, and missed high-value actions under true fog-of-war conditions.
+- Separate candidate interventions into:
+  - soft shaping rules (reward/punishment nudges),
+  - hard constraints/guardrails (strict behavior limits or action gating).
+
+### Planned Output
+- Produce a shortlist of actionable behavior-shaping rules tied directly to observed run evidence.
+- Prioritize rules that are low-risk, testable, and likely to improve early economy tempo, village capture consistency, and overall growth reliability.
+- Carry selected rules into the next model update after this review pass.
+
+### Implemented
+- Added anti-sunken-cost action gating for early economy investments in `pol_env/Tribes/py/register_env.py`:
+  - updated `_build_action_mask_and_indices(...)` to apply legality checks for `RESOURCE_GATHERING` actions before adding them to the allowed mask.
+  - introduced `_is_resource_gather_legal_for_upgrade(...)` to block gather actions that cannot realistically complete the current city upgrade with available stars and legal follow-up gathers.
+  - this prevents partial/incomplete investment patterns (sunken-cost starts) where stars are spent but no near-term city level-up can be achieved.
+- Implemented resource-investment feasibility helpers in `pol_env/Tribes/py/register_env.py`:
+  - `_get_bardur_stars(obs)` to read current Bardur stars from observation payload.
+  - `_parse_city_id_from_action_repr(...)` and `_parse_resource_type_from_action_repr(...)` to recover city/resource metadata from legal-action `repr` strings.
+  - `_resource_cost_and_population_bonus(...)` to map resource gathers to star cost and population gain assumptions.
+  - feasibility solver uses a bounded 0/1 knapsack-style DP to compute minimum star cost needed to reach missing population for upgrade.
+- Added fog-of-war-clearance reward shaping in `pol_env/Tribes/py/register_env.py`:
+  - new reward constants:
+    - `FOG_CLEAR_REWARD_PER_TILE = 0.08`
+    - `FOG_CLEAR_REWARD_MAX_TILES = 5`
+  - for `MOVE` actions, reward now includes a fog-clearance component based on visible-tile delta between pre-step and immediate post-selected-action observations.
+  - fog-clearance contribution is capped per step using max cleared tiles constant.
+  - added `_count_visible_tiles(obs)` helper using board terrain visibility (`terrain != 7` treated as visible).
+  - added telemetry field `reward_fog_clearance` and included this component in `reward_adjustment`.
+- Updated introspection output in `evaluate_brain.py` to include new reward component:
+  - `print_reward_breakdown(...)` now reads and prints `reward_fog_clearance`.
+  - shaping reconstruction now includes fog-clearance reward in `shaping_sum` and reconstructed-total reporting.
+- Updated benchmark registry in `model_run_benchmark_log.md`:
+  - added run mapping `Tribes-v0__ppo__1__1777995722` -> `Phase1-Learning-009 (1M)`.
+
 ## [Phase1-Learning-008] - 2026-05-05
 
 ### Scope
