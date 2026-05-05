@@ -108,6 +108,11 @@ public class PythonEnv {
      * Returns an observation JSON similar to GameSaver output but in-memory.
      */
     public String observationJson() {
+        // Build observations from the active player's partial-observable copy
+        // so Python receives fog-of-war constrained state.
+        int povPlayer = gs.getActiveTribeID();
+        GameState pov = gs.copy(povPlayer);
+
         JSONObject game = new JSONObject();
 
         // Board INFO (2D arrays)
@@ -119,7 +124,7 @@ public class PythonEnv {
         JSONArray building2D = new JSONArray();
         JSONArray network2D = new JSONArray();
 
-        Board b = gs.getBoard();
+        Board b = pov.getBoard();
         for (int i = 0; i < b.getSize(); i++) {
             JSONArray terrain = new JSONArray();
             JSONArray resource = new JSONArray();
@@ -202,7 +207,7 @@ public class PythonEnv {
 
         // Tribes INFO (subset)
         JSONObject tribesINFO = new JSONObject();
-        Tribe[] tribes = gs.getTribes();
+        Tribe[] tribes = pov.getTribes();
         for (Tribe t : tribes) {
             JSONObject tribeInfo = new JSONObject();
             tribeInfo.put("citiesID", t.getCitiesID());
@@ -229,10 +234,10 @@ public class PythonEnv {
         game.put("unit", unit);
         game.put("city", city);
         game.put("tribes", tribesINFO);
-        game.put("tick", gs.getTick());
-        game.put("gameIsOver", gs.isGameOver());
-        game.put("activeTribeID", gs.getActiveTribeID());
-        game.put("gameMode", gs.getGameMode().getKey());
+        game.put("tick", pov.getTick());
+        game.put("gameIsOver", pov.isGameOver());
+        game.put("activeTribeID", pov.getActiveTribeID());
+        game.put("gameMode", pov.getGameMode().getKey());
 
         return game.toString();
     }
@@ -277,7 +282,8 @@ public class PythonEnv {
      */
     public void renderGui() {
         if (gui == null) openGui();
-        gui.update(gs.copy(-1), null);
+        // Render from the active tribe POV so fog-of-war is visible in the viewer.
+        gui.update(gs.copy(gs.getActiveTribeID()), null);
     }
 
     /**

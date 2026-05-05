@@ -255,12 +255,21 @@ class TribesGymWrapper(gym.Env):
                 return None
             return None
 
-        def score_move(action_repr, capital_x, capital_y, other_unit_pos=None):
+        def score_move(
+            action_repr,
+            capital_x,
+            capital_y,
+            other_unit_pos=None,
+            current_override=None,
+            map_size=15,
+        ):
             parsed = parse_move_repr(action_repr)
             if parsed is None:
                 return -1e9
 
             _, current_x, current_y, dest_x, dest_y = parsed
+            if (current_x is None or current_y is None) and current_override is not None:
+                current_x, current_y = current_override
             score = 0.0
 
             # Reward 1: diagonal movement.
@@ -269,9 +278,6 @@ class TribesGymWrapper(gym.Env):
                     score += 3.0
 
             # Reward 2: move toward map center (or away from capital if center unknown).
-            board = obs.get("board", {})
-            terrain = board.get("terrain", [])
-            map_size = len(terrain) if terrain else 15
             center = (map_size - 1) / 2.0
             if current_x is not None and current_y is not None:
                 current_dist_center = abs(current_x - center) + abs(current_y - center)
@@ -280,6 +286,8 @@ class TribesGymWrapper(gym.Env):
             else:
                 # Fallback center-pressure using distance away from capital/edge.
                 score += abs(dest_x - capital_x) * 0.2 + abs(dest_y - capital_y) * 0.2
+                edge_dist = min(dest_x, dest_y, map_size - 1 - dest_x, map_size - 1 - dest_y)
+                score += max(0, edge_dist) * 0.2
 
             # Reward 3: dispersion from other unit position.
             if other_unit_pos is not None:
@@ -323,29 +331,122 @@ class TribesGymWrapper(gym.Env):
             if capital_pos is None:
                 capital_pos = (0, 0)
             cap_x, cap_y = capital_pos
+            board = local_obs.get("board", {})
+            terrain = board.get("terrain", [])
+            map_size = len(terrain) if terrain else 15
 
             best = None
             best_score = -1e18
+            scored_moves = []
             for idx, act, parsed in move_candidates:
                 try:
-                    unit_id, cur_x, cur_y, _, _ = parsed
+                    unit_id, cur_x, cur_y, dest_x, dest_y = parsed
+                    effective_cur = (cur_x, cur_y)
                     if (cur_x is None or cur_y is None) and unit_id is not None:
                         fallback_pos = get_unit_pos_from_obs(local_obs, unit_id)
                         if fallback_pos is not None:
-                            act_repr = act.get("repr", "")
-                            # Augment repr-like context by replacing missing current.
-                            # score_move will still parse destination from repr.
-                            sc = score_move(act_repr, cap_x, cap_y, other_unit_pos=other_unit_pos)
-                            sc += 0.5  # slight bump when we can recover unit identity
+                            effective_cur = fallback_pos
+                            sc = score_move(
+                                act.get("repr", ""),
+                                cap_x,
+                                cap_y,
+                                other_unit_pos=other_unit_pos,
+                                current_override=fallback_pos,
+                                map_size=map_size,
+                            )
                         else:
-                            sc = score_move(act.get("repr", ""), cap_x, cap_y, other_unit_pos=other_unit_pos)
+                            sc = score_move(
+                                act.get("repr", ""),
+                                cap_x,
+                                cap_y,
+                                other_unit_pos=other_unit_pos,
+                                map_size=map_size,
+                            )
                     else:
-                        sc = score_move(act.get("repr", ""), cap_x, cap_y, other_unit_pos=other_unit_pos)
+                        sc = score_move(
+                            act.get("repr", ""),
+                            cap_x,
+                            cap_y,
+                            other_unit_pos=other_unit_pos,
+                            map_size=map_size,
+                        )
+                    dx = None
+                    dy = None
+                    cur_valid = effective_cur[0] is not None and effective_cur[1] is not None
+                    if cur_valid:
+                        dx = int(dest_x) - int(effective_cur[0])
+                        dy = int(dest_y) - int(effective_cur[1])
+                    scored_moves.append(
+                        {
+                            "score": float(sc),
+                            "idx": idx,
+                            "unit_id": unit_id,
+                            "cur": (effective_cur[0], effective_cur[1]),
+                            "dest": (int(dest_x), int(dest_y)),
+                            "dx": dx,
+                            "dy": dy,
+                            "cur_valid": cur_valid,
+                        }
+                    )
                     if sc > best_score:
                         best_score = sc
                         best = idx
                 except Exception:
                     continue
+
+            if scored_moves:
+                anchor = None
+                if best is not None:
+                    anchor = next((m for m in scored_moves if m["idx"] == best), None)
+                if anchor is None:
+                    anchor = max(scored_moves, key=lambda m: m["score"])
+
+                if anchor and anchor["cur_valid"]:
+                    anchor_unit = anchor["unit_id"]
+                    anchor_cur = anchor["cur"]
+
+                    # Map relative offsets -> score for moves of the selected unit from selected origin.
+                    rel_scores = {}
+                    max_delta = 1
+                    for m in scored_moves:
+                        if m["unit_id"] != anchor_unit or m["cur"] != anchor_cur or not m["cur_valid"]:
+                            continue
+                        key = (int(m["dx"]), int(m["dy"]))
+                        rel_scores[key] = float(m["score"])
+                        max_delta = max(max_delta, abs(int(m["dx"])), abs(int(m["dy"])))
+
+                    radius = max(2, max_delta)
+                    print(f"OPENING_MOVE_GRID: unit={anchor_unit} centered at current tile")
+                    print("  (numbers = move score, X = invalid/unavailable, U = unit)")
+                    for rel_y in range(-radius, radius + 1):
+                        row = []
+                        for rel_x in range(-radius, radius + 1):
+                            if rel_x == 0 and rel_y == 0:
+                                row.append("  U  ")
+                                continue
+
+                            # Display-grid orientation is mapped to match the Java
+                            # viewer orientation:
+                            # shown horizontal axis -> engine Y delta
+                            # shown vertical axis   -> engine X delta
+                            engine_dx = rel_y
+                            engine_dy = rel_x
+
+                            world_x = int(anchor_cur[0]) + engine_dx
+                            world_y = int(anchor_cur[1]) + engine_dy
+                            off_board = world_x < 0 or world_y < 0 or world_x >= map_size or world_y >= map_size
+                            if off_board:
+                                row.append("  X  ")
+                                continue
+
+                            key = (engine_dx, engine_dy)
+                            if key in rel_scores:
+                                row.append(f"{rel_scores[key]:5.1f}")
+                            else:
+                                row.append("  X  ")
+                        print(" ".join(row))
+                else:
+                    print("OPENING_MOVE_GRID: unavailable (could not resolve unit origin).")
 
             if best is None:
                 return local_obs

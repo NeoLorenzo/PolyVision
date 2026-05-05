@@ -2,6 +2,59 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Learning-007] - 2026-05-05
+
+### Scope
+- Learning-only correction phase dedicated to restoring true fog-of-war training conditions.
+- Focus on aligning the environment, observations, and debugging workflow with partial observability so this model trains on the intended information limits.
+
+### Root Cause Correction
+- Prior models were effectively trained with fog of war disabled because agent-side full observation was enabled.
+- This created an unintended reward/punishment landscape and made prior learning behavior less representative of real partial-observable play.
+- This phase corrects that configuration gap before further reward/heuristic iteration.
+
+### Scope Guardrail
+- Rule/heuristic retuning items are intentionally deferred to the next model iteration and are not treated as the objective of this phase entry.
+
+### Implemented
+- Enabled fog-of-war-constrained agent observation in `pol_env/Tribes/src/core/Constants.java`:
+  - set `PLAY_WITH_FULL_OBS = false` for agent-facing gameplay state.
+  - retained `GUI_FORCE_FULL_OBS = true` so display behavior remains independently configurable from agent observation mode.
+- Updated Python bridge observation generation in `pol_env/Tribes/src/core/game/PythonEnv.java`:
+  - `observationJson()` now builds from the active tribe POV copy (`gs.copy(activeTribeID)`) instead of omniscient state.
+  - board tile payloads (`terrain`, `resource`, `unit`, `city`, `building`, `network`) now come from the POV-constrained game state.
+  - tribe payloads now come from `pov.getTribes()` so hidden enemy data is no longer serialized into Python observations.
+  - top-level metadata (`tick`, `gameIsOver`, `activeTribeID`, `gameMode`) is emitted from the same POV copy for consistency.
+- Updated rendering path in `pol_env/Tribes/src/core/game/PythonEnv.java`:
+  - `renderGui()` now calls `gui.update(gs.copy(gs.getActiveTribeID()), null)` so visual debugging reflects the same fog-constrained state the policy receives.
+- Extended debugging and inspection tooling for validating fog-constrained behavior:
+  - `evaluate_brain.py`:
+    - added robust `MOVE` action `repr` parsing (`parse_move_action_repr`) using regex extraction of unit/destination coordinates.
+    - added live unit position lookup from `_last_obs` (`get_unit_pos_from_env_obs`) with id-key and key-scan fallback paths.
+    - added `format_action_for_debug(...)` so printed chosen/legal `MOVE` actions show relative deltas (`dX`, `dY`) from current unit tile.
+    - added `print_policy_move_grid(...)` to render a relative move-probability grid (`POLICY_MOVE_GRID`) centered on the acting unit.
+    - added `--show-opening` CLI flag to replay the hardcoded opening action-by-action before policy control starts.
+    - when `--show-opening` is enabled, wraps `tribes_env.step` with tracing to print each opening action and optional manual stepping.
+    - preserves render/manual-step integration during opening replay and restores the original `step` function afterward.
+    - rebuilds action mask/info after opening replay so downstream introspection uses valid post-opening state.
+  - `pol_env/Tribes/py/register_env.py`:
+    - expanded `score_move(...)` signature to accept `current_override` and explicit `map_size`.
+    - applies recovered current coordinates when missing in action `repr`.
+    - adds edge-distance fallback pressure when current coordinates are unknown.
+    - resolves `map_size` from local observation once and passes through scoring calls.
+    - logs per-candidate move metadata (`unit_id`, origin, destination, deltas, score validity) in `scored_moves`.
+    - adds `OPENING_MOVE_GRID` score visualization around the selected unit with board-boundary checks and orientation mapping to match Java view.
+    - emits explicit fallback message when unit-origin resolution is unavailable.
+- Updated benchmark and run-tracking metadata:
+  - `model_run_benchmark_log.md`:
+    - added run mapping `Tribes-v0__ppo__1__1777986222` -> `Phase1-Learning-007 (1M)`.
+- Added Java source manifest file:
+  - `pol_env/Tribes/sources.txt`:
+    - introduced a repository-local source-file manifest listing Java source paths under `pol_env/Tribes/src`.
+    - intended to support repeatable compile/build invocation workflows that rely on explicit source lists.
+- Updated changelog run label precision in historical entry:
+  - corrected `Phase1-Learning-006 (43M)` to `Phase1-Learning-006 (43.25M)`.
+
 ## [Phase1-Learning-006] - 2026-05-04 - 2026-05-05
 
 ### Scope
@@ -48,7 +101,7 @@ All notable changes to this project are documented in this file.
   - `model_run_benchmark_log.md`
   - added run-folder-to-plain-label mapping for the 7 tracked models, including:
     - `Phase1-Learning-006 (1M)`
-    - `Phase1-Learning-006 (43M)`
+    - `Phase1-Learning-006 (43.25M)`
 
 ## [Phase1-Learning-005] - 2026-05-04
 

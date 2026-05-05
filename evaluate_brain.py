@@ -1,6 +1,7 @@
 import argparse
 import glob
 import os
+import re
 import time
 from types import SimpleNamespace
 
@@ -49,6 +50,155 @@ def format_pct(p: float) -> str:
     return f"{(100.0 * p):6.2f}%"
 
 
+def parse_move_action_repr(action_repr: str):
+    if not isinstance(action_repr, str):
+        return None
+    nums = re.findall(r"-?\d+", action_repr)
+    if len(nums) < 3:
+        return None
+    try:
+        unit_id = int(nums[0])
+        dest_x = int(nums[-2])
+        dest_y = int(nums[-1])
+        return unit_id, dest_x, dest_y
+    except Exception:
+        return None
+
+
+def get_unit_pos_from_env_obs(env: TribesGymWrapper, unit_id: int):
+    raw_obs = getattr(env.tribes_env, "_last_obs", None)
+    if not isinstance(raw_obs, dict):
+        return None
+    units = raw_obs.get("unit", {})
+    if not isinstance(units, dict):
+        return None
+
+    # Prefer direct id key lookup first.
+    candidate = units.get(str(unit_id), None)
+    if isinstance(candidate, dict):
+        try:
+            return int(candidate.get("x", -1)), int(candidate.get("y", -1))
+        except Exception:
+            pass
+
+    # Fallback scan in case keys are not unit ids.
+    for key, unit in units.items():
+        if not isinstance(unit, dict):
+            continue
+        try:
+            if int(key) == unit_id:
+                return int(unit.get("x", -1)), int(unit.get("y", -1))
+        except Exception:
+            continue
+    return None
+
+
+def format_action_for_debug(action_repr: str, action_type: str, env: TribesGymWrapper) -> str:
+    if action_type != "MOVE":
+        return action_repr
+    parsed = parse_move_action_repr(action_repr)
+    if parsed is None:
+        return action_repr
+    unit_id, dest_x, dest_y = parsed
+    cur = get_unit_pos_from_env_obs(env, unit_id)
+    if cur is None:
+        return f"MOVE by unit {unit_id} [rel dX=?, dY=?]"
+    cur_x, cur_y = cur
+    dx = dest_x - cur_x
+    dy = dest_y - cur_y
+    return f"MOVE by unit {unit_id} [rel dX={dx:+d}, dY={dy:+d}]"
+
+
+def print_policy_move_grid(env: TribesGymWrapper, legal_actions, allowed_indices, action_mask, probs_np, chosen_pos: int):
+    # Build move candidates from currently legal, allowed actions.
+    move_rows = []
+    for pos, raw_idx in enumerate(allowed_indices):
+        if pos >= len(probs_np) or action_mask[pos] <= 0:
+            continue
+        if not (0 <= raw_idx < len(legal_actions)):
+            continue
+        act = legal_actions[raw_idx]
+        if str(act.get("type", "")) != "MOVE":
+            continue
+        parsed = parse_move_action_repr(str(act.get("repr", "")))
+        if parsed is None:
+            continue
+        unit_id, dest_x, dest_y = parsed
+        cur = get_unit_pos_from_env_obs(env, unit_id)
+        if cur is None:
+            continue
+        cur_x, cur_y = cur
+        dx = int(dest_x) - int(cur_x)
+        dy = int(dest_y) - int(cur_y)
+        move_rows.append(
+            {
+                "pos": pos,
+                "unit_id": unit_id,
+                "cur": (int(cur_x), int(cur_y)),
+                "dest": (int(dest_x), int(dest_y)),
+                "dx": int(dx),
+                "dy": int(dy),
+                "p": float(probs_np[pos]),
+            }
+        )
+
+    if not move_rows:
+        return
+
+    # Anchor on chosen move unit if chosen action is MOVE; otherwise highest-prob move.
+    anchor = None
+    for m in move_rows:
+        if m["pos"] == chosen_pos:
+            anchor = m
+            break
+    if anchor is None:
+        anchor = max(move_rows, key=lambda m: m["p"])
+
+    anchor_unit = anchor["unit_id"]
+    anchor_cur = anchor["cur"]
+    unit_rows = [m for m in move_rows if m["unit_id"] == anchor_unit and m["cur"] == anchor_cur]
+    if not unit_rows:
+        return
+
+    raw_obs = getattr(env.tribes_env, "_last_obs", None)
+    terrain = raw_obs.get("board", {}).get("terrain", []) if isinstance(raw_obs, dict) else []
+    map_size = len(terrain) if terrain else 15
+
+    rel_prob = {}
+    max_delta = 1
+    for m in unit_rows:
+        rel_prob[(m["dx"], m["dy"])] = m["p"]
+        max_delta = max(max_delta, abs(m["dx"]), abs(m["dy"]))
+
+    radius = max(2, max_delta)
+    print(f"POLICY_MOVE_GRID: unit={anchor_unit} centered at current tile")
+    print("  (numbers = move probability %, X = invalid/unavailable, U = unit)")
+    for rel_y in range(-radius, radius + 1):
+        row = []
+        for rel_x in range(-radius, radius + 1):
+            if rel_x == 0 and rel_y == 0:
+                row.append("  U  ")
+                continue
+
+            # Match same orientation mapping as opening grid.
+            engine_dx = rel_y
+            engine_dy = rel_x
+            world_x = int(anchor_cur[0]) + engine_dx
+            world_y = int(anchor_cur[1]) + engine_dy
+            off_board = world_x < 0 or world_y < 0 or world_x >= map_size or world_y >= map_size
+            if off_board:
+                row.append("  X  ")
+                continue
+
+            key = (engine_dx, engine_dy)
+            if key in rel_prob:
+                pct = 100.0 * rel_prob[key]
+                row.append(f"{pct:5.1f}")
+            else:
+                row.append("  X  ")
+        print(" ".join(row))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Single-episode policy introspection for Tribes PPO.")
     parser.add_argument("--model-path", type=str, default=None, help="Optional explicit .cleanrl_model path.")
@@ -69,6 +219,11 @@ def main() -> None:
         "--manual-step",
         action="store_true",
         help="Pause before each action. Press Enter to continue, or 'q' then Enter to quit.",
+    )
+    parser.add_argument(
+        "--show-opening",
+        action="store_true",
+        help="Replay and render the hardcoded opening sequence step-by-step before policy control starts.",
     )
     args = parser.parse_args()
 
@@ -91,13 +246,70 @@ def main() -> None:
         print(f"Loaded model: {model_path}")
         print("=" * 100)
 
-        obs, info = env.reset(seed=args.seed)
-        if args.render_java:
+        if args.show_opening:
+            # Reproduce reset initialization manually so we can visualize each
+            # hardcoded opening action instead of skipping straight to Turn 2.
+            obs = env.tribes_env.reset(env.level_file, args.seed)
+            env._turn_count = 0
+
+            if args.render_java:
+                try:
+                    env.tribes_env.render(mode="java")
+                    time.sleep(max(0.0, args.step_delay_s))
+                except Exception as e:
+                    print(f"Warning: could not open Java render window: {e}")
+
+            original_step = env.tribes_env.step
+
+            def traced_step(action_index):
+                legal = env.tribes_env.list_actions()
+                action_desc = "UNKNOWN"
+                if 0 <= int(action_index) < len(legal):
+                    act = legal[int(action_index)]
+                    action_desc = str(act.get("repr", act.get("type", "UNKNOWN")))
+                print(f"[Opening] Executing: {action_desc}")
+
+                if args.manual_step:
+                    user_in = input("Press Enter for next opening action ('q' + Enter to quit): ").strip().lower()
+                    if user_in in ("q", "quit", "exit"):
+                        raise KeyboardInterrupt("Opening replay interrupted by user.")
+
+                out = original_step(action_index)
+
+                if args.render_java:
+                    try:
+                        env.tribes_env.render(mode="java")
+                        time.sleep(max(0.0, args.step_delay_s))
+                    except Exception as e:
+                        print(f"Warning: Java render update failed during opening: {e}")
+                return out
+
             try:
-                env.tribes_env.render(mode="java")
-                time.sleep(max(0.0, args.step_delay_s))
-            except Exception as e:
-                print(f"Warning: could not open Java render window: {e}")
+                env.tribes_env.step = traced_step
+                obs = env._apply_bardur_opening(obs)
+            finally:
+                env.tribes_env.step = original_step
+
+            env._starting_city_count = env._get_city_count(obs)
+            env._last_city_count = env._starting_city_count
+            env._moved_on_t0 = False
+            env._visible_village_streak_turns = 0
+            action_mask, allowed_indices = env._build_action_mask_and_indices()
+            obs = env._dict_to_array(obs)
+            info = {
+                "valid_actions": len(allowed_indices),
+                "raw_valid_actions": env.tribes_env.action_space_n,
+                "turn_count": env._turn_count,
+                "action_mask": action_mask,
+            }
+        else:
+            obs, info = env.reset(seed=args.seed)
+            if args.render_java:
+                try:
+                    env.tribes_env.render(mode="java")
+                    time.sleep(max(0.0, args.step_delay_s))
+                except Exception as e:
+                    print(f"Warning: could not open Java render window: {e}")
 
         done = False
         step_idx = 0
@@ -140,9 +352,11 @@ def main() -> None:
                         continue
                     act = legal_actions[raw_idx] if raw_idx < len(legal_actions) else {}
                     act_type = str(act.get("type", "UNKNOWN"))
-                    act_repr = str(act.get("repr", act_type))
+                    raw_repr = str(act.get("repr", act_type))
+                    act_repr = format_action_for_debug(raw_repr, act_type, env)
                     chosen = "  <-- chosen" if pos == action else ""
                     print(f"  [{pos:03d}] {format_pct(float(probs_np[pos]))} | {act_type:16s} | {act_repr}{chosen}")
+                print_policy_move_grid(env, legal_actions, allowed_indices, action_mask, probs_np, action)
 
             if args.manual_step:
                 user_in = input("Press Enter for next action ('q' + Enter to quit): ").strip().lower()
@@ -159,9 +373,10 @@ def main() -> None:
                 selected_allowed_pos = action % len(allowed_indices)
                 chosen_raw_idx = allowed_indices[selected_allowed_pos]
                 if 0 <= chosen_raw_idx < len(legal_actions):
-                    chosen_action_label = str(
-                        legal_actions[chosen_raw_idx].get("repr", legal_actions[chosen_raw_idx].get("type", "UNKNOWN"))
-                    )
+                    chosen_act = legal_actions[chosen_raw_idx]
+                    chosen_type = str(chosen_act.get("type", "UNKNOWN"))
+                    chosen_raw_repr = str(chosen_act.get("repr", chosen_type))
+                    chosen_action_label = format_action_for_debug(chosen_raw_repr, chosen_type, env)
 
             print(f"Executed Action: idx={action} raw_idx={chosen_raw_idx} | {chosen_action_label}")
             print(f"Reward: {float(reward):.4f} | terminated={terminated} truncated={truncated}")
