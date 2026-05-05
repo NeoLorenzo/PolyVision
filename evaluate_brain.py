@@ -50,6 +50,44 @@ def format_pct(p: float) -> str:
     return f"{(100.0 * p):6.2f}%"
 
 
+def print_reward_breakdown(info, total_reward: float, truncated: bool = False):
+    if not isinstance(info, dict):
+        print(f"Reward Breakdown: total={float(total_reward):+.4f} (info unavailable)")
+        return
+
+    delta_spt = float(info.get("delta_spt", 0.0))
+    capture_bonus = float(info.get("reward_capture_city_bonus", 0.0))
+    delay_penalty = float(info.get("reward_second_village_delay_penalty", 0.0))
+    neglect_penalty = float(info.get("reward_visible_village_neglect_penalty", 0.0))
+    breadcrumb = float(info.get("reward_village_breadcrumb", 0.0))
+    t10_penalty = 0.0
+    if bool(truncated):
+        turn_count = int(info.get("turn_count", -1))
+        city_count = int(info.get("city_count", 0))
+        starting_city_count = int(info.get("starting_city_count", 0))
+        if turn_count >= 10 and city_count <= starting_city_count:
+            t10_penalty = -3.0
+
+    shaping_sum = capture_bonus + delay_penalty + neglect_penalty + breadcrumb + t10_penalty
+    reconstructed_total = delta_spt + shaping_sum
+    reward_adjustment = float(info.get("reward_adjustment", shaping_sum))
+    selected_action_type = str(info.get("selected_action_type", "UNKNOWN"))
+
+    print("Reward Breakdown:")
+    print(f"  selected_action_type:            {selected_action_type}")
+    print(f"  base_delta_spt:                  {delta_spt:+.4f}")
+    print(f"  capture_city_bonus:              {capture_bonus:+.4f}")
+    print(f"  second_village_delay_penalty:    {delay_penalty:+.4f}")
+    print(f"  visible_village_neglect_penalty: {neglect_penalty:+.4f}")
+    print(f"  village_breadcrumb:              {breadcrumb:+.4f}")
+    if t10_penalty != 0.0:
+        print(f"  second_village_by_t10_penalty:   {t10_penalty:+.4f}")
+    print(f"  shaping_sum:                     {shaping_sum:+.4f}")
+    print(f"  reward_adjustment(info):         {reward_adjustment:+.4f}")
+    print(f"  reconstructed_total:             {reconstructed_total:+.4f}")
+    print(f"  env_returned_total:              {float(total_reward):+.4f}")
+
+
 def parse_move_action_repr(action_repr: str):
     if not isinstance(action_repr, str):
         return None
@@ -264,22 +302,38 @@ def main() -> None:
             def traced_step(action_index):
                 legal = env.tribes_env.list_actions()
                 action_desc = "UNKNOWN"
+                action_type = "UNKNOWN"
                 if 0 <= int(action_index) < len(legal):
                     act = legal[int(action_index)]
+                    action_type = str(act.get("type", "UNKNOWN"))
                     action_desc = str(act.get("repr", act.get("type", "UNKNOWN")))
-                print(f"[Opening] Executing: {action_desc}")
+                action_desc_l = action_desc.lower()
+                is_tribe1_action = ("by tribe 1" in action_desc_l) or ("tribe 1" in action_desc_l)
+                should_log = not is_tribe1_action
 
-                if args.manual_step:
+                if should_log:
+                    print(f"[Opening] Executing: {action_desc}")
+
+                if args.manual_step and should_log:
                     user_in = input("Press Enter for next opening action ('q' + Enter to quit): ").strip().lower()
                     if user_in in ("q", "quit", "exit"):
                         raise KeyboardInterrupt("Opening replay interrupted by user.")
 
                 out = original_step(action_index)
 
-                if args.render_java:
+                if args.render_java and should_log:
                     try:
-                        env.tribes_env.render(mode="java")
-                        time.sleep(max(0.0, args.step_delay_s))
+                        step_obs = out[0] if isinstance(out, tuple) and len(out) > 0 else None
+                        active_tribe = -1
+                        if isinstance(step_obs, dict):
+                            try:
+                                active_tribe = int(step_obs.get("activeTribeID", -1))
+                            except Exception:
+                                active_tribe = -1
+                        # Avoid visual tribe-1 flicker during opening replay.
+                        if active_tribe == 0:
+                            env.tribes_env.render(mode="java")
+                            time.sleep(max(0.0, args.step_delay_s))
                     except Exception as e:
                         print(f"Warning: Java render update failed during opening: {e}")
                 return out
@@ -380,6 +434,7 @@ def main() -> None:
 
             print(f"Executed Action: idx={action} raw_idx={chosen_raw_idx} | {chosen_action_label}")
             print(f"Reward: {float(reward):.4f} | terminated={terminated} truncated={truncated}")
+            print_reward_breakdown(next_info, float(reward), truncated=bool(truncated))
 
             if args.render_java:
                 try:

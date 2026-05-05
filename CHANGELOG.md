@@ -2,6 +2,57 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Learning-008] - 2026-05-05
+
+### Scope
+- Learning-only planning and analysis phase focused on post-fog-of-war behavior shaping.
+- Objective is to improve model performance by reviewing the latest model runs in detail and identifying candidate soft and hard rules for the next training iteration.
+
+### Planned Review Method
+- Replay the latest model runs slowly to inspect decision quality turn-by-turn.
+- Incorporate the confirmed finding from the previous model review that the hardcoded opening sequence is already performing perfectly and does not require change in this phase.
+- Record repeated policy mistakes, weak priorities, and missed high-value opportunities under true fog-of-war conditions.
+- Separate candidate interventions into:
+  - soft shaping rules (reward/punishment nudges),
+  - hard constraints/guardrails (strict behavior limits or action gating).
+
+### Planned Output
+- Produce a shortlist of actionable behavior-shaping rules with clear rationale tied to observed run behavior.
+- Prioritize rules that are low-risk, easy to validate, and likely to improve early economy tempo, village capture consistency, and overall growth reliability.
+- Carry selected rules into the next model update after this review pass.
+
+### Implemented
+- Added richer reward-attribution diagnostics in `evaluate_brain.py`:
+  - added `print_reward_breakdown(info, total_reward, truncated=False)` to print per-step reward components:
+    - `delta_spt` base reward,
+    - `reward_capture_city_bonus`,
+    - `reward_second_village_delay_penalty`,
+    - `reward_visible_village_neglect_penalty`,
+    - `reward_village_breadcrumb`,
+    - conditional Turn-10 failure penalty reconstruction (`-3.0`) on truncation.
+  - prints shaping sum, `reward_adjustment` from `info`, reconstructed total, and environment-returned total for consistency checks.
+  - now calls reward-breakdown logging after each executed step in policy introspection output.
+- Refined opening replay logging behavior in `evaluate_brain.py`:
+  - in `--show-opening` traced stepping, filters out Tribe 1 opening actions from print/manual-step/render pacing.
+  - keeps focus on Bardur-controlled opening actions during slow replay inspection.
+  - during replay rendering, now checks step-result `activeTribeID` and only renders when Bardur is active to avoid Tribe 1 visual flicker.
+- Updated turn-accounting and reward baseline behavior in `pol_env/Tribes/py/register_env.py`:
+  - `step(...)` now captures `start_obs` from `_last_obs` and computes reward baseline from Bardur SPT delta (`base_delta_spt`) instead of relying on Java-returned scalar reward.
+  - added forced non-Bardur turn advancement before and after selected action execution via `_force_non_bardur_turns_to_end(...)`.
+  - reward is now computed as:
+    - `base_delta_spt + reward_adjustment`.
+- Added Bardur-perspective helpers in `pol_env/Tribes/py/register_env.py`:
+  - `_get_active_tribe_id(obs)` to robustly read `activeTribeID`.
+  - `_compute_bardur_spt(obs)` to sum production only from Bardur-owned cities (`tribeID == 0`).
+  - `_force_non_bardur_turns_to_end(obs, max_loops=16)` to auto-advance non-Bardur turns using legal `END_TURN` actions.
+- Expanded wrapper telemetry in `pol_env/Tribes/py/register_env.py`:
+  - added `forced_pre_end_turns`, `forced_post_end_turns`,
+  - added Bardur-centric `delta_spt` and `spt`,
+  - added current `activeTribeID`,
+  - updated `java_done` to reflect combined done state after forced post-action turn advancement.
+- Updated benchmark registry in `model_run_benchmark_log.md`:
+  - added run mapping `Tribes-v0__ppo__1__1777990600` -> `Phase1-Learning-008 (1M)`.
+
 ## [Phase1-Learning-007] - 2026-05-05
 
 ### Scope

@@ -96,6 +96,14 @@ class TribesGymWrapper(gym.Env):
         return data
 
     def step(self, action):
+        start_obs = getattr(self.tribes_env, "_last_obs", None)
+        if not isinstance(start_obs, dict):
+            start_obs = {}
+
+        forced_pre_end_turns = 0
+        if self._get_active_tribe_id(start_obs) != 0:
+            start_obs, forced_pre_end_turns, _ = self._force_non_bardur_turns_to_end(start_obs)
+
         legal_actions = self.tribes_env.list_actions()
         raw_count = len(legal_actions)
         action_mask, allowed_indices = self._build_action_mask_and_indices(legal_actions)
@@ -116,7 +124,18 @@ class TribesGymWrapper(gym.Env):
         if selected_action_type == "END_TURN":
             self._turn_count += 1
 
-        obs, reward, done, info = self.tribes_env.step(selected_raw_action)
+        prev_bardur_spt = self._compute_bardur_spt(start_obs)
+
+        obs, _, done, info = self.tribes_env.step(selected_raw_action)
+        java_done = bool(done)
+
+        forced_post_end_turns = 0
+        if self._get_active_tribe_id(obs) != 0:
+            obs, forced_post_end_turns, forced_done = self._force_non_bardur_turns_to_end(obs)
+            java_done = java_done or bool(forced_done)
+
+        current_bardur_spt = self._compute_bardur_spt(obs)
+        base_delta_spt = float(current_bardur_spt - prev_bardur_spt)
         current_city_count = self._get_city_count(obs)
         current_turn = int(self._turn_count)
         reward_adjustment = 0.0
@@ -161,7 +180,7 @@ class TribesGymWrapper(gym.Env):
         if truncated and current_city_count <= self._starting_city_count:
             reward_adjustment += self.SECOND_VILLAGE_BY_T10_PENALTY
 
-        reward = float(reward) + reward_adjustment
+        reward = float(base_delta_spt) + reward_adjustment
 
         info["valid_actions"] = len(allowed_indices)
         info["raw_valid_actions"] = raw_count
@@ -181,8 +200,13 @@ class TribesGymWrapper(gym.Env):
         info["reward_visible_village_neglect_penalty"] = float(visible_village_neglect_penalty)
         info["reward_village_breadcrumb"] = float(village_breadcrumb_reward)
         info["action_mask"] = action_mask
-        info["java_done"] = bool(done)
+        info["java_done"] = bool(java_done)
         info["terminated_overridden"] = True
+        info["forced_pre_end_turns"] = int(forced_pre_end_turns)
+        info["forced_post_end_turns"] = int(forced_post_end_turns)
+        info["delta_spt"] = float(base_delta_spt)
+        info["spt"] = float(current_bardur_spt)
+        info["activeTribeID"] = int(self._get_active_tribe_id(obs))
         self._last_city_count = current_city_count
         if selected_action_type == "MOVE" and self._turn_count == 0:
             self._moved_on_t0 = True
@@ -547,6 +571,42 @@ class TribesGymWrapper(gym.Env):
             if isinstance(tribe0, dict):
                 return len(tribe0.get("citiesID", []))
         return 0
+
+    def _get_active_tribe_id(self, obs):
+        try:
+            return int(obs.get("activeTribeID", -1))
+        except Exception:
+            return -1
+
+    def _compute_bardur_spt(self, obs):
+        city_map = obs.get("city", {})
+        spt = 0.0
+        if not isinstance(city_map, dict):
+            return spt
+        for city in city_map.values():
+            if not isinstance(city, dict):
+                continue
+            try:
+                if int(city.get("tribeID", -1)) != 0:
+                    continue
+                spt += float(city.get("production", 0))
+            except Exception:
+                continue
+        return spt
+
+    def _force_non_bardur_turns_to_end(self, obs, max_loops=16):
+        forced = 0
+        java_done = False
+        local_obs = obs
+        while self._get_active_tribe_id(local_obs) not in (0, -1) and forced < max_loops:
+            legal = self.tribes_env.list_actions()
+            end_idx = next((i for i, a in enumerate(legal) if a.get("type") == "END_TURN"), None)
+            if end_idx is None:
+                break
+            local_obs, _, done, _ = self.tribes_env.step(end_idx)
+            java_done = java_done or bool(done)
+            forced += 1
+        return local_obs, forced, java_done
 
     def _get_owned_unit_tiles(self, obs):
         out = set()
