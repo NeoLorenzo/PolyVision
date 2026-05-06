@@ -12,12 +12,13 @@ class TribesGymWrapper(gym.Env):
     PHASE1_LEVEL_FILE = "levels/phase1_12x12_2bardur.csv"
     DEFAULT_LEVEL_POOL_GLOB = "levels/phase1_pool/*.csv"
     MAX_TURNS = 10
-    SECOND_VILLAGE_BY_T10_PENALTY = -3.0
 
-    # Phase1-Learning-006 shaping (flattened, lower-variance rewards/penalties).
-    CAPTURE_CITY_BONUS = 2.0
-    SECOND_VILLAGE_DELAY_PENALTY = -0.2
-    SECOND_VILLAGE_DELAY_START_TURN = 4
+    # Phase1 village/city shaping.
+    REVEAL_UNCAPTURED_VILLAGE_REWARD = 1.0
+    MOVE_CLOSER_TO_VISIBLE_VILLAGE_REWARD = 0.5
+    MOVE_ONTO_VILLAGE_REWARD = 1.0
+    CAPTURE_CITY_BONUS_MIN = 4.0
+    CAPTURE_CITY_BONUS_MAX = 8.0
     VISIBLE_VILLAGE_NEGLECT_PENALTY = -0.5
     VISIBLE_VILLAGE_NEGLECT_GRACE_TURNS = 2
     VILLAGE_BREADCRUMB_REWARD = 0.5
@@ -239,21 +240,31 @@ class TribesGymWrapper(gym.Env):
         current_bardur_spt = self._compute_bardur_spt(obs)
         base_delta_spt = float(current_bardur_spt - prev_bardur_spt)
         current_city_count = self._get_city_count(obs)
-        current_turn = int(self._turn_count)
         reward_adjustment = 0.0
 
         capture_city_bonus = 0.0
         if current_city_count > self._last_city_count:
             n_new_cities = current_city_count - self._last_city_count
-            for _ in range(max(0, n_new_cities)):
-                capture_city_bonus += self.CAPTURE_CITY_BONUS
+            # +4.0 per newly captured city in this step, capped at +8.0.
+            capture_city_bonus = min(
+                self.CAPTURE_CITY_BONUS_MAX,
+                max(0, n_new_cities) * self.CAPTURE_CITY_BONUS_MIN,
+            )
         reward_adjustment += capture_city_bonus
 
-        second_village_delay_penalty = 0.0
+        reveal_uncaptured_village_reward = 0.0
+        move_closer_to_visible_village_reward = 0.0
+        move_onto_village_reward = 0.0
         visible_village_neglect_penalty = 0.0
         village_breadcrumb_reward = 0.0
         fog_clearance_reward = 0.0
         fog_tiles_cleared = 0
+
+        visible_villages_before = self._get_visible_uncaptured_village_positions(start_obs)
+        visible_villages_after_selected = self._get_visible_uncaptured_village_positions(obs_after_selected)
+        newly_revealed_villages = visible_villages_after_selected - visible_villages_before
+        if len(newly_revealed_villages) > 0:
+            reveal_uncaptured_village_reward = self.REVEAL_UNCAPTURED_VILLAGE_REWARD * float(len(newly_revealed_villages))
 
         visible_uncaptured_village = self._has_visible_uncaptured_village(obs)
         has_second_village = current_city_count >= (self._starting_city_count + 1)
@@ -270,10 +281,20 @@ class TribesGymWrapper(gym.Env):
                 ) * self.FOG_CLEAR_REWARD_PER_TILE
                 self._episode_fog_tiles_cleared += int(fog_tiles_cleared)
 
-        if selected_action_type == "END_TURN":
-            if current_turn >= self.SECOND_VILLAGE_DELAY_START_TURN and not has_second_village:
-                second_village_delay_penalty = self.SECOND_VILLAGE_DELAY_PENALTY
+            moved_unit_before = self._get_unit_position(start_obs, chosen_move_unit_id) if chosen_move_unit_id is not None else None
+            moved_unit_after = self._get_unit_position(obs_after_selected, chosen_move_unit_id) if chosen_move_unit_id is not None else None
+            dist_before = self._min_manhattan_distance(moved_unit_before, visible_villages_before)
+            dist_after = self._min_manhattan_distance(moved_unit_after, visible_villages_after_selected)
+            if dist_before is not None and dist_after is not None and dist_after < dist_before:
+                move_closer_to_visible_village_reward = self.MOVE_CLOSER_TO_VISIBLE_VILLAGE_REWARD
 
+            if moved_unit_after is not None and (
+                moved_unit_after in visible_villages_after_selected
+                or (moved_unit_after[1], moved_unit_after[0]) in visible_villages_after_selected
+            ):
+                move_onto_village_reward = self.MOVE_ONTO_VILLAGE_REWARD
+
+        if selected_action_type == "END_TURN":
             if visible_uncaptured_village and not has_second_village:
                 self._visible_village_streak_turns += 1
             else:
@@ -285,7 +306,9 @@ class TribesGymWrapper(gym.Env):
             if unit_on_visible_uncaptured_village:
                 village_breadcrumb_reward = self.VILLAGE_BREADCRUMB_REWARD
 
-        reward_adjustment += second_village_delay_penalty
+        reward_adjustment += reveal_uncaptured_village_reward
+        reward_adjustment += move_closer_to_visible_village_reward
+        reward_adjustment += move_onto_village_reward
         reward_adjustment += visible_village_neglect_penalty
         reward_adjustment += village_breadcrumb_reward
         reward_adjustment += fog_clearance_reward
@@ -293,8 +316,6 @@ class TribesGymWrapper(gym.Env):
         # Phase 1 override: ignore Java terminal state and control horizon purely in Python.
         terminated = False
         truncated = self._turn_count >= self.MAX_TURNS
-        if truncated and current_city_count <= self._starting_city_count:
-            reward_adjustment += self.SECOND_VILLAGE_BY_T10_PENALTY
 
         reward = float(base_delta_spt) + reward_adjustment
 
@@ -336,10 +357,14 @@ class TribesGymWrapper(gym.Env):
         info["visible_village_streak_turns"] = int(self._visible_village_streak_turns)
         info["moved_on_t0"] = bool(self._moved_on_t0)
         info["reward_capture_city_bonus"] = float(capture_city_bonus)
-        info["reward_second_village_delay_penalty"] = float(second_village_delay_penalty)
+        info["reward_second_village_delay_penalty"] = 0.0
         info["reward_visible_village_neglect_penalty"] = float(visible_village_neglect_penalty)
         info["reward_village_breadcrumb"] = float(village_breadcrumb_reward)
         info["reward_fog_clearance"] = float(fog_clearance_reward)
+        info["reward_reveal_uncaptured_village"] = float(reveal_uncaptured_village_reward)
+        info["reward_move_closer_to_visible_village"] = float(move_closer_to_visible_village_reward)
+        info["reward_move_onto_village"] = float(move_onto_village_reward)
+        info["newly_revealed_uncaptured_villages"] = int(len(newly_revealed_villages))
         info["fog_tiles_cleared_step"] = int(fog_tiles_cleared)
         info["fog_tiles_cleared_total"] = int(self._episode_fog_tiles_cleared)
         info["visible_tiles"] = int(self._count_visible_tiles(obs))
@@ -1220,6 +1245,19 @@ class TribesGymWrapper(gym.Env):
             if (ux, uy) in village_positions or (uy, ux) in village_positions:
                 return True
         return False
+
+    def _min_manhattan_distance(self, origin, targets):
+        if origin is None or not targets:
+            return None
+        ox, oy = origin
+        best = None
+        for tx, ty in targets:
+            d_xy = abs(int(ox) - int(tx)) + abs(int(oy) - int(ty))
+            d_yx = abs(int(ox) - int(ty)) + abs(int(oy) - int(tx))
+            d = min(d_xy, d_yx)
+            if best is None or d < best:
+                best = d
+        return best
 
     def _count_visible_tiles(self, obs):
         board = obs.get("board", {})

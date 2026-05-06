@@ -2,6 +2,46 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Learning-013] - 2026-05-06
+
+### Scope
+- Learning-phase reward-shaping iteration focused on stronger village discovery/capture incentives and removal of delayed/terminal penalty pressure.
+- Keep run-tracking metadata aligned with the latest training checkpoint.
+
+### Implemented
+- Updated village/city reward shaping in `pol_env/Tribes/py/register_env.py`:
+  - removed constants:
+    - `SECOND_VILLAGE_BY_T10_PENALTY`,
+    - `SECOND_VILLAGE_DELAY_PENALTY`,
+    - `SECOND_VILLAGE_DELAY_START_TURN`,
+    - fixed `CAPTURE_CITY_BONUS = 2.0`.
+  - added new positive-shaping constants:
+    - `REVEAL_UNCAPTURED_VILLAGE_REWARD = 1.0`,
+    - `MOVE_CLOSER_TO_VISIBLE_VILLAGE_REWARD = 0.5`,
+    - `MOVE_ONTO_VILLAGE_REWARD = 1.0`,
+    - `CAPTURE_CITY_BONUS_MIN = 4.0`,
+    - `CAPTURE_CITY_BONUS_MAX = 8.0`.
+  - changed city-capture bonus computation:
+    - now scales with new cities captured in-step (`+4` per city) with hard cap at `+8` total per step.
+  - added newly-revealed-village reward logic:
+    - computes visible uncaptured villages before and after selected action,
+    - adds reward proportional to newly revealed village count.
+  - added move-progress reward toward visible villages:
+    - computes moved unit position pre/post selected move,
+    - uses new Manhattan-distance helper to award when distance to nearest visible uncaptured village decreases.
+  - added explicit reward for stepping onto a visible uncaptured village tile.
+  - removed second-village delay penalty application on `END_TURN`.
+  - removed terminal Turn-10 no-expansion penalty branch (`SECOND_VILLAGE_BY_T10_PENALTY` on truncation).
+  - extended emitted info telemetry:
+    - `reward_reveal_uncaptured_village`,
+    - `reward_move_closer_to_visible_village`,
+    - `reward_move_onto_village`,
+    - `newly_revealed_uncaptured_villages`.
+  - kept compatibility info key `reward_second_village_delay_penalty`, now always set to `0.0`.
+  - added helper `_min_manhattan_distance(origin, targets)` with XY/YX fallback minimization for coordinate-order robustness.
+- Updated benchmark registry in `model_run_benchmark_log.md`:
+  - added run mapping `Tribes-v0__ppo__1__1778088607` -> `Phase1-Learning-013 (4.5M)`.
+
 ## [Phase1-Generation-012] - 2026-05-06
 
 ### Scope
