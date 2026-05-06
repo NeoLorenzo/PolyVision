@@ -1,4 +1,5 @@
 import argparse
+import argparse
 import os
 import subprocess
 import sys
@@ -15,15 +16,24 @@ def main():
     parser.add_argument("--size", type=int, default=16, help="Square map size (e.g., 11, 14, 16)")
     parser.add_argument("--output", type=str, default="levels/phase1_fixed.csv", help="Output CSV path relative to Tribes dir")
     parser.add_argument("--tribes", nargs="+", default=["BARDUR", "XIN_XI"], help="Tribes (at least 2) for level generation")
+    parser.add_argument(
+        "--initial-land",
+        type=float,
+        default=1.0,
+        help="Initial land ratio for generator (1.0 enforces drylands-like all-land starts).",
+    )
     args = parser.parse_args()
 
     tribes_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     src_file = os.path.join(tribes_dir, "src", "core", "levelgen", "GenerateLevelCli.java")
+    levelgen_src = os.path.join(tribes_dir, "src", "core", "levelgen", "LevelGenerator.java")
     out_dir = os.path.join(tribes_dir, "out")
     json_jar = os.path.join(tribes_dir, "lib", "json.jar")
 
     if not os.path.exists(src_file):
         raise FileNotFoundError(f"Missing source file: {src_file}")
+    if not os.path.exists(levelgen_src):
+        raise FileNotFoundError(f"Missing source file: {levelgen_src}")
 
     os.makedirs(out_dir, exist_ok=True)
 
@@ -34,6 +44,7 @@ def main():
         f"{out_dir}{os.pathsep}{json_jar}",
         "-d",
         out_dir,
+        levelgen_src,
         src_file,
     ]
     run(compile_cmd, cwd=tribes_dir)
@@ -47,6 +58,7 @@ def main():
         str(args.seed),
         str(args.size),
         args.output,
+        str(args.initial_land),
     ] + args.tribes
     run(run_cmd, cwd=tribes_dir)
 
@@ -60,4 +72,3 @@ if __name__ == "__main__":
     except subprocess.CalledProcessError as e:
         print(f"Command failed with exit code {e.returncode}")
         sys.exit(e.returncode)
-

@@ -2,6 +2,81 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Generalizing-011] - 2026-05-05 - 2026-05-06
+
+### Scope
+- Shift Phase 1 from fixed deterministic-map training toward controlled map variation to reduce overfitting and break local optima.
+- Keep training reproducible at the run level while ensuring each episode is not the exact same map state.
+
+### Implemented
+- Updated `pol_env/Tribes/py/register_env.py` reset seeding to use a deterministic per-run seed stream instead of `seed or 42`:
+  - explicit reset seed re-initializes deterministic streams,
+  - subsequent resets (without explicit seed) draw deterministic per-episode seeds from the run stream.
+- Added deterministic map-pool selection support in `pol_env/Tribes/py/register_env.py`:
+  - new env knob `POLYVISION_LEVEL_POOL_GLOB` (glob for candidate CSV maps),
+  - default fallback glob `levels/phase1_pool/*.csv`,
+  - level selection mode via `POLYVISION_LEVEL_SELECTION_MODE`:
+    - `round_robin` (default),
+    - `seeded_random` (deterministic RNG stream).
+- Added base-seed override knob `POLYVISION_BASE_SEED` for deterministic runs when Gym does not provide reset seeds.
+- Added per-episode map/seed telemetry in reset and step info:
+  - `map_path`, `map_id`, `map_pool_index`, `map_pool_size`, `episode_seed`, `level_selection_mode`.
+- Added map-pool generator script `pol_env/Tribes/py/generate_phase1_map_pool.py`:
+  - generates a deterministic pool of 12x12 CSV maps from a base seed and stride,
+  - intended output directory: `levels/phase1_pool`.
+  - generated and added pool files:
+    - `levels/phase1_pool/phase1_12x12_pool_000.csv` through `levels/phase1_pool/phase1_12x12_pool_031.csv`.
+- Fixed Tribes Java level-generation parity bug in `pol_env/Tribes/src/core/levelgen/LevelGenerator.java`:
+  - corrected capital-owner comparisons in starting-resource post-generation:
+    - `owner == IMPERIUS.getKey()`
+    - `owner == BARDUR.getKey()`
+  - this restores intended guaranteed starting resources around capitals (including Bardur animals for Hunting parity).
+- Fixed player-order consistency for generated maps in `pol_env/Tribes/src/core/levelgen/LevelGenerator.java`:
+  - capital cells are now sorted before writing city tokens, so row-major level loading reconstructs players in the provided tribe order.
+  - this prevents random generated maps from assigning non-Bardur tribe to player index 0, which previously broke Bardur-specific opening assumptions.
+- Updated map-generator Python scripts to ensure parity fixes are compiled into map generation:
+  - `pol_env/Tribes/py/generate_phase1_map_pool.py`
+  - `pol_env/Tribes/py/generate_fixed_map.py`
+  - both now compile `LevelGenerator.java` alongside `GenerateLevelCli.java`.
+- Switched Phase1 generation to drylands-style all-land starts for lower-noise training:
+  - updated `pol_env/Tribes/src/core/levelgen/GenerateLevelCli.java` to use `initialLand=1.0` by default.
+  - `GenerateLevelCli` now accepts optional explicit `[initialLand]` argument.
+  - updated generator scripts to pass `--initial-land` explicitly (default `1.0`) when producing map pools/fixed maps.
+  - rationale: simplify training distribution and avoid island/water start variance that introduces unnecessary early-game noise relative to the intended opening curriculum.
+- Updated evaluator map selection parity with trainer in `evaluate_brain.py`:
+  - `--show-opening` no longer hard-resets `env.level_file`; it now uses wrapper seed/map pool selection logic.
+  - added optional evaluator flags:
+    - `--level-pool-glob`
+    - `--level-selection-mode`
+    - `--base-seed`
+  - this makes debug rollouts follow the same map distribution as training by default when pool settings are shared.
+  - `--show-opening` replay now also prints selected map basename, pool index, and episode seed for run-trace clarity.
+- Added multiprocessing-serialization hardening in `pol_env/Tribes/py/register_env.py`:
+  - reset/step info payloads are now sanitized to pickle-safe primitives/containers.
+  - added defensive fallback that strips or stringifies any residual non-picklable objects.
+  - purpose: prevent AsyncVectorEnv worker crashes from `TypeError: cannot pickle '_thread.RLock' object` when unexpected runtime objects leak into info channels.
+- Training performance optimizations with no policy-logic changes:
+  - `pol_env/Tribes/py/register_env.py`:
+    - opening move-score grid printouts are now gated behind `POLYVISION_OPENING_GRID_DEBUG` (default off).
+  - `py_rl/cleanrl/cleanrl/ppo.py`:
+    - added `enable_step_diagnostics` (default `False`) to disable expensive per-step diagnostic extraction/logging in the hot loop unless explicitly requested.
+    - core PPO rollout/update behavior is unchanged; this only trims instrumentation overhead.
+- Updated parallel environment count target for training to `num_envs=20` (recommended/default run configuration):
+  - reason: a direct throughput sweep (`50,000` timesteps each) over `num_envs=8..20` showed best sustained SPS at `20` in this setup.
+  - stability follow-up at `num_envs=24` (short repeated runs) was faster in some outlier runs but materially noisier overall, so `20` was selected as the safer high-throughput baseline for long runs.
+- Short benchmark results (local single-process surrogate, same map pool/settings before vs after):
+  - opening-grid print gating:
+    - before: `1500 steps in 6.450s` (`232.6 SPS`)
+    - after: `1500 steps in 6.156s` (`243.6 SPS`)
+    - delta: `+4.7%` SPS
+  - step-diagnostics overhead (diagnostics on vs off):
+    - diagnostics on: `260.3 SPS`
+    - diagnostics off: `274.1 SPS`
+    - delta: `+5.3%` SPS
+- Updated benchmark registry in `model_run_benchmark_log.md`:
+  - added `Tribes-v0__ppo__1__1778008176` -> `Phase1-Learning-010 (2.75M)`.
+  - added `Tribes-v0__ppo__1__1778027687` -> `Phase1-Generalizing-011 (33M)`.
+
 ## [Phase1-Learning-010] - 2026-05-05
 
 ### Scope

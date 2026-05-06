@@ -98,6 +98,8 @@ class Args:
     """minimum randomized startup delay (seconds) before each env launches its JVM"""
     startup_jitter_max_s: float = 2.0
     """maximum randomized startup delay (seconds) before each env launches its JVM"""
+    enable_step_diagnostics: bool = False
+    """if toggled, compute and log extra per-step wrapper diagnostics (slower)"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -337,54 +339,55 @@ if __name__ == "__main__":
                 device,
             )
 
-            # ---- Custom diagnostics from wrapper infos ----
-            valid_actions_values = _extract_vector_field(infos, "valid_actions", args.num_envs, default_value=None)
-            for v in valid_actions_values:
-                if v is not None:
-                    iter_valid_actions_sum += float(v)
-                    iter_valid_actions_count += 1
+            if args.enable_step_diagnostics:
+                # ---- Custom diagnostics from wrapper infos ----
+                valid_actions_values = _extract_vector_field(infos, "valid_actions", args.num_envs, default_value=None)
+                for v in valid_actions_values:
+                    if v is not None:
+                        iter_valid_actions_sum += float(v)
+                        iter_valid_actions_count += 1
 
-            selected_action_type_values = _extract_vector_field(
-                infos, "selected_action_type", args.num_envs, default_value=None
-            )
-            for a_type in selected_action_type_values:
-                if a_type is not None:
-                    iter_action_count += 1
-                    if str(a_type) != "END_TURN":
-                        iter_non_endturn_count += 1
+                selected_action_type_values = _extract_vector_field(
+                    infos, "selected_action_type", args.num_envs, default_value=None
+                )
+                for a_type in selected_action_type_values:
+                    if a_type is not None:
+                        iter_action_count += 1
+                        if str(a_type) != "END_TURN":
+                            iter_non_endturn_count += 1
 
-            delta_spt_values = _extract_vector_field(infos, "delta_spt", args.num_envs, default_value=None)
-            for dspt in delta_spt_values:
-                if dspt is not None:
-                    iter_delta_spt_sum += float(dspt)
-                    iter_delta_spt_count += 1
+                delta_spt_values = _extract_vector_field(infos, "delta_spt", args.num_envs, default_value=None)
+                for dspt in delta_spt_values:
+                    if dspt is not None:
+                        iter_delta_spt_sum += float(dspt)
+                        iter_delta_spt_count += 1
 
-            # Custom Phase-1 telemetry:
-            # Log SPT for envs that just ended (typically via truncation at turn horizon).
-            for env_idx in range(args.num_envs):
-                if truncations[env_idx] or terminations[env_idx]:
-                    spt_value = None
+                # Custom Phase-1 telemetry:
+                # Log SPT for envs that just ended (typically via truncation at turn horizon).
+                for env_idx in range(args.num_envs):
+                    if truncations[env_idx] or terminations[env_idx]:
+                        spt_value = None
 
-                    # Case 1: vector info carries per-env arrays and optional validity mask.
-                    if "spt" in infos:
-                        spt_raw = infos["spt"]
-                        spt_mask = infos.get("_spt", None)
-                        if spt_mask is None:
-                            if len(spt_raw) > env_idx:
-                                spt_value = spt_raw[env_idx]
-                        else:
-                            if len(spt_mask) > env_idx and spt_mask[env_idx] and len(spt_raw) > env_idx:
-                                spt_value = spt_raw[env_idx]
+                        # Case 1: vector info carries per-env arrays and optional validity mask.
+                        if "spt" in infos:
+                            spt_raw = infos["spt"]
+                            spt_mask = infos.get("_spt", None)
+                            if spt_mask is None:
+                                if len(spt_raw) > env_idx:
+                                    spt_value = spt_raw[env_idx]
+                            else:
+                                if len(spt_mask) > env_idx and spt_mask[env_idx] and len(spt_raw) > env_idx:
+                                    spt_value = spt_raw[env_idx]
 
-                    # Case 2: final_info often carries final per-env info dicts.
-                    if spt_value is None and "final_info" in infos and len(infos["final_info"]) > env_idx:
-                        finfo = infos["final_info"][env_idx]
-                        if finfo is not None and "spt" in finfo:
-                            spt_value = finfo["spt"]
+                        # Case 2: final_info often carries final per-env info dicts.
+                        if spt_value is None and "final_info" in infos and len(infos["final_info"]) > env_idx:
+                            finfo = infos["final_info"][env_idx]
+                            if finfo is not None and "spt" in finfo:
+                                spt_value = finfo["spt"]
 
-                    if spt_value is not None:
-                        writer.add_scalar("charts/custom_spt_return", float(spt_value), global_step)
-                        writer.add_scalar("charts/episode_end_spt", float(spt_value), global_step)
+                        if spt_value is not None:
+                            writer.add_scalar("charts/custom_spt_return", float(spt_value), global_step)
+                            writer.add_scalar("charts/episode_end_spt", float(spt_value), global_step)
 
             if "final_info" in infos:
                 for info in infos["final_info"]:
@@ -392,7 +395,7 @@ if __name__ == "__main__":
                         print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
                         writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
                         writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
-                    if info and "spt" in info:
+                    if args.enable_step_diagnostics and info and "spt" in info:
                         writer.add_scalar("charts/custom_spt_return", float(info["spt"]), global_step)
 
             # Periodic checkpointing. Save every crossed frequency milestone in case
@@ -501,19 +504,19 @@ if __name__ == "__main__":
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
-        if iter_valid_actions_count > 0:
+        if args.enable_step_diagnostics and iter_valid_actions_count > 0:
             writer.add_scalar(
                 "charts/mean_valid_actions",
                 iter_valid_actions_sum / iter_valid_actions_count,
                 global_step,
             )
-        if iter_action_count > 0:
+        if args.enable_step_diagnostics and iter_action_count > 0:
             writer.add_scalar(
                 "charts/non_endturn_rate",
                 iter_non_endturn_count / iter_action_count,
                 global_step,
             )
-        if iter_delta_spt_count > 0:
+        if args.enable_step_diagnostics and iter_delta_spt_count > 0:
             writer.add_scalar(
                 "charts/mean_delta_spt",
                 iter_delta_spt_sum / iter_delta_spt_count,

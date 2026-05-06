@@ -15,3 +15,5 @@
 | `Tribes-v0__ppo__1__1777990600` | `Phase1-Learning-008 (1M)` |
 | `Tribes-v0__ppo__1__1777995722` | `Phase1-Learning-009 (1M)` |
 | `Tribes-v0__ppo__1__1778000233` | `Phase1-Learning-010 (1M)` |
+| `Tribes-v0__ppo__1__1778008176` | `Phase1-Learning-010 (2.75M)` |
+| `Tribes-v0__ppo__1__1778027687` | `Phase1-Generalizing-011 (33M)` |

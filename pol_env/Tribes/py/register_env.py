@@ -1,6 +1,8 @@
 import gymnasium as gym
+import glob
 import numpy as np
 import os
+import pickle
 import re
 from gymnasium.envs.registration import register
 from .gym_env import TribesGymEnv, make_default_env
@@ -8,6 +10,7 @@ from .gym_env import TribesGymEnv, make_default_env
 # wrapper to make it gym-compatible
 class TribesGymWrapper(gym.Env):
     PHASE1_LEVEL_FILE = "levels/phase1_12x12_2bardur.csv"
+    DEFAULT_LEVEL_POOL_GLOB = "levels/phase1_pool/*.csv"
     MAX_TURNS = 10
     SECOND_VILLAGE_BY_T10_PENALTY = -3.0
 
@@ -36,7 +39,23 @@ class TribesGymWrapper(gym.Env):
     def __init__(self, level_file=None):
         self.tribes_env = make_default_env()
         self.level_file = level_file or self.PHASE1_LEVEL_FILE
+        self._level_selection_mode = str(
+            os.environ.get("POLYVISION_LEVEL_SELECTION_MODE", "round_robin")
+        ).strip().lower()
+        if self._level_selection_mode not in ("round_robin", "seeded_random"):
+            self._level_selection_mode = "round_robin"
+        self._level_pool = self._resolve_level_pool(self.level_file)
+        self._level_pool_size = len(self._level_pool)
+        self._level_pool_offset = 0
+        self._level_pool_rng = None
+        self._episode_index = 0
+        self._current_level_file = self.level_file
+        self._current_level_index = 0
+        self._last_reset_seed = None
+        self._seed_stream = None
+        self._seed_stream_base = self._parse_int_env("POLYVISION_BASE_SEED", default=42)
         self.verbose_resets = os.environ.get("POLYVISION_VERBOSE_RESETS", "0").lower() in ("1", "true", "yes", "on")
+        self.debug_opening_grid = os.environ.get("POLYVISION_OPENING_GRID_DEBUG", "0").lower() in ("1", "true", "yes", "on")
         self.render_mode = "rgb_array"        # Initialize the environment to get the actual action space size
         self._turn_count = 0
         self._starting_city_count = 1
@@ -45,7 +64,11 @@ class TribesGymWrapper(gym.Env):
         self._visible_village_streak_turns = 0
         self._queued_village_capture_unit_ids = set()
         try:
-            obs = self.tribes_env.reset(self.level_file, seed=42)
+            bootstrap_seed = self._resolve_episode_seed(seed=42)
+            bootstrap_level, bootstrap_idx = self._select_level_for_reset(bootstrap_seed)
+            self._current_level_file = bootstrap_level
+            self._current_level_index = bootstrap_idx
+            obs = self.tribes_env.reset(self._current_level_file, bootstrap_seed)
             
             # Use a fixed large action space to handle dynamic action counts
             # Most games will have fewer actions, but this provides a safe upper bound
@@ -72,7 +95,13 @@ class TribesGymWrapper(gym.Env):
             )
     
     def reset(self, seed=None, options=None):
-        obs = self.tribes_env.reset(self.level_file, seed or 42)
+        episode_seed = self._resolve_episode_seed(seed=seed)
+        level_file, level_index = self._select_level_for_reset(episode_seed)
+        self._current_level_file = level_file
+        self._current_level_index = int(level_index)
+        self._last_reset_seed = int(episode_seed)
+        obs = self.tribes_env.reset(self._current_level_file, self._last_reset_seed)
+        self._episode_index += 1
         self._turn_count = 0
         obs = self._apply_bardur_opening(obs)
         self._starting_city_count = self._get_city_count(obs)
@@ -85,15 +114,25 @@ class TribesGymWrapper(gym.Env):
         action_count = self.tribes_env.action_space_n
         action_mask, allowed_indices = self._build_action_mask_and_indices()
         if self.verbose_resets:
-            print(f"Reset: Available actions = {action_count}, allowed = {len(allowed_indices)}")
+            print(
+                f"Reset: Available actions = {action_count}, allowed = {len(allowed_indices)}, "
+                f"map={os.path.basename(self._current_level_file)}, seed={self._last_reset_seed}"
+            )
         
         # convert your dict obs to numpy array here
-        return self._dict_to_array(obs), {
+        info = {
             "valid_actions": len(allowed_indices),
             "raw_valid_actions": action_count,
             "turn_count": self._turn_count,
             "action_mask": action_mask,
+            "map_path": self._current_level_file,
+            "map_id": os.path.basename(self._current_level_file),
+            "map_pool_index": int(self._current_level_index),
+            "map_pool_size": int(self._level_pool_size),
+            "episode_seed": int(self._last_reset_seed),
+            "level_selection_mode": self._level_selection_mode,
         }
+        return self._dict_to_array(obs), self._sanitize_info_for_multiprocessing(info)
     
     def render(self, **kwargs):
         data = np.array(self.tribes_env.render("rgb_image"))
@@ -261,6 +300,12 @@ class TribesGymWrapper(gym.Env):
         info["forced_post_end_turns"] = int(forced_post_end_turns)
         info["deferred_village_captures_before_end_turn"] = int(deferred_capture_count)
         info["queued_village_capture_unit_ids"] = list(sorted(int(u) for u in self._queued_village_capture_unit_ids))
+        info["map_path"] = self._current_level_file
+        info["map_id"] = os.path.basename(self._current_level_file)
+        info["map_pool_index"] = int(self._current_level_index)
+        info["map_pool_size"] = int(self._level_pool_size)
+        info["episode_seed"] = int(self._last_reset_seed) if self._last_reset_seed is not None else None
+        info["level_selection_mode"] = self._level_selection_mode
         info["delta_spt"] = float(base_delta_spt)
         info["spt"] = float(current_bardur_spt)
         info["activeTribeID"] = int(self._get_active_tribe_id(obs))
@@ -270,7 +315,120 @@ class TribesGymWrapper(gym.Env):
         if current_city_count >= 2:
             self._queued_village_capture_unit_ids = set()
 
+        info = self._sanitize_info_for_multiprocessing(info)
         return self._dict_to_array(obs), reward, terminated, truncated, info
+
+    def _sanitize_info_value(self, value):
+        # Keep common scalar types as-is.
+        if value is None or isinstance(value, (bool, int, float, str)):
+            return value
+        if isinstance(value, np.generic):
+            try:
+                return value.item()
+            except Exception:
+                return str(value)
+        if isinstance(value, np.ndarray):
+            # Object arrays are the most likely to contain non-picklables.
+            if value.dtype == object:
+                return [self._sanitize_info_value(v) for v in value.tolist()]
+            return value
+        if isinstance(value, (list, tuple, set)):
+            return [self._sanitize_info_value(v) for v in value]
+        if isinstance(value, dict):
+            out = {}
+            for k, v in value.items():
+                out[str(k)] = self._sanitize_info_value(v)
+            return out
+        # Fallback for custom/foreign objects (e.g., Py4J wrappers, locks, etc.).
+        return str(value)
+
+    def _sanitize_info_for_multiprocessing(self, info):
+        if not isinstance(info, dict):
+            return {"info_error": "non_dict_info", "info_repr": str(info)}
+        safe = {str(k): self._sanitize_info_value(v) for k, v in info.items()}
+        # Final defensive check: if still unpicklable, degrade to string-only payload.
+        try:
+            pickle.dumps(safe, protocol=pickle.HIGHEST_PROTOCOL)
+            return safe
+        except Exception as exc:
+            fallback = {}
+            for k, v in safe.items():
+                try:
+                    pickle.dumps(v, protocol=pickle.HIGHEST_PROTOCOL)
+                    fallback[k] = v
+                except Exception:
+                    fallback[k] = str(v)
+            fallback["info_pickle_warning"] = str(exc)
+            return fallback
+
+    def _parse_int_env(self, key, default):
+        raw = os.environ.get(key, None)
+        if raw is None:
+            return int(default)
+        try:
+            return int(str(raw).strip())
+        except Exception:
+            return int(default)
+
+    def _tribes_root_dir(self):
+        return os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+    def _resolve_level_pool(self, fallback_level):
+        root = self._tribes_root_dir()
+        pool_glob = os.environ.get("POLYVISION_LEVEL_POOL_GLOB", "").strip()
+        if not pool_glob:
+            default_glob_abs = os.path.join(root, self.DEFAULT_LEVEL_POOL_GLOB)
+            found = sorted(glob.glob(default_glob_abs))
+        else:
+            pattern = pool_glob
+            if not os.path.isabs(pattern):
+                pattern = os.path.join(root, pattern)
+            found = sorted(glob.glob(pattern))
+
+        if found:
+            return found
+
+        if os.path.isabs(fallback_level):
+            return [fallback_level]
+        return [os.path.join(root, fallback_level)]
+
+    def _ensure_seed_stream_initialized(self, seed):
+        seed_i = int(seed)
+        self._seed_stream = np.random.default_rng(seed_i)
+        # Separate stream for map choice so map-selection mode is deterministic per run
+        # but independent from episode-seed draws.
+        self._level_pool_rng = np.random.default_rng(seed_i ^ 0x9E3779B9)
+        if self._level_pool_size > 0:
+            self._level_pool_offset = abs(seed_i) % self._level_pool_size
+        else:
+            self._level_pool_offset = 0
+
+    def _resolve_episode_seed(self, seed=None):
+        if seed is not None:
+            resolved = int(seed)
+            self._ensure_seed_stream_initialized(resolved)
+            self._last_reset_seed = resolved
+            return resolved
+
+        if self._seed_stream is None:
+            self._ensure_seed_stream_initialized(self._seed_stream_base)
+
+        resolved = int(self._seed_stream.integers(0, 2**31 - 1))
+        self._last_reset_seed = resolved
+        return resolved
+
+    def _select_level_for_reset(self, episode_seed):
+        if self._level_pool_size <= 1:
+            return self._level_pool[0], 0
+
+        if self._level_selection_mode == "seeded_random":
+            if self._level_pool_rng is None:
+                self._ensure_seed_stream_initialized(episode_seed)
+            idx = int(self._level_pool_rng.integers(0, self._level_pool_size))
+            return self._level_pool[idx], idx
+
+        idx = int((self._level_pool_offset + self._episode_index) % self._level_pool_size)
+        return self._level_pool[idx], idx
 
     def _build_action_mask_and_indices(self, legal_actions=None):
         if legal_actions is None:
@@ -538,7 +696,7 @@ class TribesGymWrapper(gym.Env):
                 except Exception:
                     continue
 
-            if scored_moves:
+            if self.debug_opening_grid and scored_moves:
                 anchor = None
                 if best is not None:
                     anchor = next((m for m in scored_moves if m["idx"] == best), None)
@@ -606,11 +764,6 @@ class TribesGymWrapper(gym.Env):
         # Harvest 1
         idx = find_action_idx(lambda a: a.get("type") == "RESOURCE_GATHERING" and "ANIMAL" in a.get("repr", ""))
         if idx is None:
-            actions_debug = self.tribes_env.list_actions()
-            print("DEBUG_T0_ACTIONS_START")
-            for i, action in enumerate(actions_debug):
-                print(f"{i}: {action}")
-            print("DEBUG_T0_ACTIONS_END")
             raise RuntimeError("Bardur opening failed: missing first ANIMAL harvest action.")
         obs, _, _, _ = self.tribes_env.step(idx)
 

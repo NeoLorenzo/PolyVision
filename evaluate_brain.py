@@ -275,7 +275,34 @@ def main() -> None:
         action="store_true",
         help="Replay and render the hardcoded opening sequence step-by-step before policy control starts.",
     )
+    parser.add_argument(
+        "--level-pool-glob",
+        type=str,
+        default=None,
+        help="Optional map pool glob, e.g. levels/phase1_pool/*.csv (matches training env setting).",
+    )
+    parser.add_argument(
+        "--level-selection-mode",
+        type=str,
+        default=None,
+        choices=["round_robin", "seeded_random"],
+        help="Optional map selection mode override for wrapper.",
+    )
+    parser.add_argument(
+        "--base-seed",
+        type=int,
+        default=None,
+        help="Optional POLYVISION_BASE_SEED override for deterministic seed stream.",
+    )
     args = parser.parse_args()
+
+    # Optional env overrides so evaluate_brain can mirror trainer map settings.
+    if args.level_pool_glob:
+        os.environ["POLYVISION_LEVEL_POOL_GLOB"] = str(args.level_pool_glob)
+    if args.level_selection_mode:
+        os.environ["POLYVISION_LEVEL_SELECTION_MODE"] = str(args.level_selection_mode)
+    if args.base_seed is not None:
+        os.environ["POLYVISION_BASE_SEED"] = str(int(args.base_seed))
 
     model_path = find_latest_model(args.model_path)
     device = torch.device(args.device if torch.cuda.is_available() or args.device == "cpu" else "cpu")
@@ -299,8 +326,17 @@ def main() -> None:
         if args.show_opening:
             # Reproduce reset initialization manually so we can visualize each
             # hardcoded opening action instead of skipping straight to Turn 2.
-            obs = env.tribes_env.reset(env.level_file, args.seed)
+            # Important: use the same wrapper seed/map selection path as training,
+            # rather than forcing env.level_file directly.
+            episode_seed = env._resolve_episode_seed(seed=args.seed)
+            level_file, level_index = env._select_level_for_reset(episode_seed)
+            env._current_level_file = level_file
+            env._current_level_index = int(level_index)
+            env._last_reset_seed = int(episode_seed)
+            env._episode_index += 1
+            obs = env.tribes_env.reset(level_file, episode_seed)
             env._turn_count = 0
+            print(f"Map: {os.path.basename(level_file)} | pool_index={level_index} | episode_seed={episode_seed}")
 
             if args.render_java:
                 try:

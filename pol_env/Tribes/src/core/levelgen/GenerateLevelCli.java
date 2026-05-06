@@ -9,36 +9,56 @@ import java.util.List;
  * Small CLI wrapper around LevelGenerator so maps can be generated and frozen as CSV files.
  *
  * Usage:
- *   java -cp out;lib/json.jar core.levelgen.GenerateLevelCli <seed> <mapSize> <outputCsv> <tribe1> [tribe2...]
+ *   java -cp out;lib/json.jar core.levelgen.GenerateLevelCli <seed> <mapSize> <outputCsv> [initialLand] <tribe1> [tribe2...]
  *
  * Example:
- *   java -cp out;lib/json.jar core.levelgen.GenerateLevelCli 12345 16 levels/phase1_fixed.csv BARDUR XIN_XI
+ *   java -cp out;lib/json.jar core.levelgen.GenerateLevelCli 12345 16 levels/phase1_fixed.csv 1.0 BARDUR XIN_XI
  */
 public class GenerateLevelCli {
 
     public static void main(String[] args) {
-        if (args.length < 5) {
-            System.out.println("Usage: <seed> <mapSize> <outputCsv> <tribe1> [tribe2...]");
+        if (args.length < 4) {
+            System.out.println("Usage: <seed> <mapSize> <outputCsv> [initialLand] <tribe1> [tribe2...]");
             System.exit(1);
         }
 
         long seed = Long.parseLong(args[0]);
         int mapSize = Integer.parseInt(args[1]);
         String outputCsv = args[2];
+        double initialLand = 1.0; // Drylands default for Phase1 generalization.
+        int tribesStartArg = 3;
+
+        if (args.length >= 5 && isDouble(args[3])) {
+            initialLand = Double.parseDouble(args[3]);
+            tribesStartArg = 4;
+        }
+        if (args.length <= tribesStartArg) {
+            System.out.println("Usage: <seed> <mapSize> <outputCsv> [initialLand] <tribe1> [tribe2...]");
+            System.exit(1);
+        }
 
         List<Types.TRIBE> tribeList = new ArrayList<>();
-        for (int i = 3; i < args.length; i++) {
+        for (int i = tribesStartArg; i < args.length; i++) {
             tribeList.add(parseTribe(args[i]));
         }
         Types.TRIBE[] tribes = tribeList.toArray(new Types.TRIBE[0]);
 
         LevelGenerator gen = new LevelGenerator(seed);
-        gen.init(mapSize, 3, 4, 0.5, tribes);
+        gen.init(mapSize, 3, 4, initialLand, tribes);
         gen.generate();
         gen.toCSV(outputCsv);
         System.out.println("Generated map:");
         gen.print();
         System.out.println("Saved CSV to: " + outputCsv);
+    }
+
+    private static boolean isDouble(String raw) {
+        try {
+            Double.parseDouble(raw);
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     private static Types.TRIBE parseTribe(String raw) {
@@ -61,4 +81,3 @@ public class GenerateLevelCli {
         }
     }
 }
-

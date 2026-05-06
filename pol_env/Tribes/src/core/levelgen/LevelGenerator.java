@@ -170,6 +170,9 @@ public class LevelGenerator {
                 }
             }
         }
+        // Keep capital write order aligned with tribe order so row-major level loading
+        // recreates players in the same order as the provided tribes array.
+        Collections.sort(capitalCells);
         for (i = 0; i < capitalCells.size(); i++) {
             writeTile((capitalCells.get(i) / mapSize) * mapSize + (capitalCells.get(i) % mapSize), ""+CITY.getMapChar(), String.valueOf(tribes[i].getKey()));
         }
@@ -377,9 +380,9 @@ public class LevelGenerator {
         for(int capital : capitalCells) {
             int owner = Integer.parseInt(getResource(capital));
 
-            if(owner == (char)IMPERIUS.getKey()) {
+            if(owner == IMPERIUS.getKey()) {
                 postGenerate(FRUIT.getMapChar(), PLAIN.getMapChar(), 2, capital);
-            } else if(owner == (char)BARDUR.getKey()) {
+            } else if(owner == BARDUR.getKey()) {
                 postGenerate(ANIMAL.getMapChar(), FOREST.getMapChar(), 2, capital);
             }
         }
