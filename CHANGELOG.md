@@ -2,6 +2,112 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Generation-012] - 2026-05-06
+
+### Scope
+- Extend Phase 1 procedural generation from a single drylands-style path into explicit map-type-driven generation profiles.
+- Harden movement legality and diagnostics around board bounds across Java gameplay, Python wrapper filtering, and evaluator tooling.
+- Regenerate and expand the fixed Phase 1 map pool for broader deterministic curriculum coverage.
+
+### Implemented
+- Added map-type profile configuration in `pol_env/Tribes/src/core/TribesConfig.java`:
+  - introduced `MAP_TYPE` enum with per-profile `initialLand`, `smoothing`, and `relief` presets:
+    - `DRYLANDS`, `LAKES`, `CONTINENTS`, `PANGEA`, `ARCHIPELAGO`, `WATERWORLD`.
+  - added `DEFAULT_MAP_TYPE = MAP_TYPE.CONTINENTS`.
+- Extended game initialization APIs to carry map-type selection:
+  - `pol_env/Tribes/src/core/game/Game.java`:
+    - added overloaded `init(...)` accepting `TribesConfig.MAP_TYPE`.
+    - existing `init(...)` now delegates to overload with `DEFAULT_MAP_TYPE`.
+  - `pol_env/Tribes/src/core/game/GameState.java`:
+    - added overloaded `init(...)` accepting `TribesConfig.MAP_TYPE`.
+    - level generator initialization now uses map-type-specific smoothing/relief/initial-land values.
+- Extended level-generation CLI argument model in `pol_env/Tribes/src/core/levelgen/GenerateLevelCli.java`:
+  - usage now supports optional `[mapType]` after optional `[initialLand]`.
+  - added map-type parsing/validation helpers (`isMapType`, `parseMapType`).
+  - generator init now consumes selected map type profile values.
+- Refactored procedural generation pipeline in `pol_env/Tribes/src/core/levelgen/LevelGenerator.java`:
+  - added map-type state and support in `init(...)` overload (`TribesConfig.MAP_TYPE`).
+  - replaced single land-pass logic with profile-aware base-land generation:
+    - generic smoothed generation,
+    - dedicated Pangea clustered-center growth,
+    - dedicated Continents multi-cluster growth.
+  - reworked capital-placement strategy selection:
+    - quadrant-style placement for Drylands/Lakes/Archipelago/Waterworld,
+    - village-conversion placement for Continents/Pangea with Pangea coastal bias,
+    - distance-based and quadrant fallbacks.
+  - added/expanded phased village generation:
+    - suburb phase (Lakes/Archipelago),
+    - pre-terrain village density phase (Lakes/Archipelago/Waterworld),
+    - post-terrain village saturation pass,
+    - tiny-island village pass for Continents/Pangea by map-size target.
+  - replaced per-cell random terrain/resource assignment with quota allocation:
+    - tribe-normalized terrain quotas for mountain/forest/plain residual.
+    - per-tribe, per-band resource quotas for fruit/crops/animals/ore/fish/whales.
+    - deterministic weighted count allocator with fractional remainder handling.
+  - preserved capital write ordering by sorted index so level loading remains stable with tribe order.
+- Added board-bounds helper in `pol_env/Tribes/src/core/game/Board.java`:
+  - new `isInBounds(int x, int y)` utility.
+- Hardened move generation and execution to prevent off-board destinations:
+  - `pol_env/Tribes/src/core/actions/unitactions/factory/MoveFactory.java`:
+    - skips out-of-bounds path nodes.
+  - `pol_env/Tribes/src/core/actions/unitactions/Move.java`:
+    - feasibility now fails when destination is null or out of bounds.
+  - `pol_env/Tribes/src/core/actions/unitactions/command/MoveCommand.java`:
+    - early-return false for null/out-of-bounds destination before execution.
+- Added debug rendering overlays and dynamic board-size sync in `pol_env/Tribes/src/gui/GameView.java`:
+  - new debug overlays for map border, per-tile coordinate labels, and corner legend.
+  - `update(...)` now refreshes `gridSize` from live board size to keep renderer bounds aligned.
+- Updated Python map-generation scripts to expose map-type selection:
+  - `pol_env/Tribes/py/generate_phase1_map_pool.py`:
+    - removed duplicate `argparse` import.
+    - added `--map-type` (default `DRYLANDS`) and forwards it to Java CLI.
+  - `pol_env/Tribes/py/generate_fixed_map.py`:
+    - removed duplicate `argparse` import.
+    - added `--map-type` (default `DRYLANDS`) and forwards it to Java CLI.
+- Added bounds and fog-coverage diagnostics in `pol_env/Tribes/py/register_env.py`:
+  - tracks `initial_visible_tiles` and cumulative `fog_tiles_cleared_total`.
+  - filters `MOVE` actions whose parsed destination is outside board bounds.
+  - when sampled move destination is out-of-bounds, falls back to `END_TURN`.
+  - adds step-time move verification info:
+    - requested vs actual move position,
+    - destination match flag,
+    - actual in-bounds flag.
+  - asserts unit positions are in bounds after selected action and after forced non-Bardur turn advancement.
+  - extends info payload with:
+    - `fog_tiles_cleared_step`, `fog_tiles_cleared_total`,
+    - `visible_tiles`, `initial_visible_tiles`,
+    - move verification fields (`move_verify_*`).
+  - upgraded move `repr` parsing to prefer explicit `by unit ... to x:y` pattern before numeric fallback.
+- Expanded evaluator-side move/bounds diagnostics in `evaluate_brain.py`:
+  - upgraded move parsing with explicit `by unit ... to x:y` regex-first path.
+  - simplified relative-delta inference to direct coordinate subtraction.
+  - added board-dimension helper and map-bounds banner output.
+  - enriched action labels with `from -> to`, relative deltas, and `in_bounds`.
+  - added pre-selection legal-action sanity check logging for off-board move options.
+  - added post-step `MOVE_VERIFY` log comparing requested destination with actual unit position and board bounds.
+  - updated policy move-grid off-board handling to use width/height instead of single map-size assumption.
+- Extended PPO terminal metrics logging in `py_rl/cleanrl/cleanrl/ppo.py`:
+  - added generic per-metric extraction helper for vectorized `infos`.
+  - now logs end-of-episode:
+    - `charts/episode_end_village_count_t10` from `city_count`,
+    - `charts/episode_end_fog_tiles_cleared_t10` from `fog_tiles_cleared_total`,
+    - alongside existing end-episode `spt` metrics.
+- Updated benchmark registry in `model_run_benchmark_log.md`:
+  - added run mapping `Tribes-v0__ppo__1__1778077298` -> `Phase1-Generation-012 (4M)`.
+- Added constraint check coverage in `test_phase1_constraints.py`:
+  - added move-destination parser helper.
+  - added assertion pass ensuring every allowed `MOVE` action destination is within current board bounds before selecting `END_TURN`.
+- Regenerated and expanded phase1 pool maps in `pol_env/Tribes/levels/phase1_pool`:
+  - regenerated existing pool files:
+    - `phase1_12x12_pool_000.csv` through `phase1_12x12_pool_031.csv`.
+  - added new pool files:
+    - `phase1_12x12_pool_032.csv` through `phase1_12x12_pool_127.csv`.
+  - effective pool size is now 128 maps (`000`-`127`).
+- Added new map-generation parity reference document `MapGen.md`:
+  - captures cleaned Polytopia-generation reference notes,
+  - documents current Tribes parity status by subsystem,
+  - includes map-type, village, resource, and modifier reference tables.
+
 ## [Phase1-Generalizing-011] - 2026-05-05 - 2026-05-06
 
 ### Scope

@@ -95,9 +95,23 @@ public class GameState {
      * Initializes the GameState using a level generator.
      */
     void init(long levelgen_seed, Types.TRIBE[] tribes) {
+        init(levelgen_seed, tribes, TribesConfig.DEFAULT_MAP_TYPE);
+    }
 
+    /**
+     * Initializes the GameState using a level generator and an explicit map profile.
+     */
+    void init(long levelgen_seed, Types.TRIBE[] tribes, TribesConfig.MAP_TYPE mapType) {
+        TribesConfig.MAP_TYPE resolvedMapType = mapType == null ? TribesConfig.DEFAULT_MAP_TYPE : mapType;
         LevelGenerator levelGen = new LevelGenerator(levelgen_seed);
-        levelGen.init(TribesConfig.DEFAULT_MAP_SIZE[tribes.length-1], 3, 4, 0.5, tribes);
+        levelGen.init(
+                TribesConfig.DEFAULT_MAP_SIZE[tribes.length-1],
+                resolvedMapType.getSmoothing(),
+                resolvedMapType.getRelief(),
+                resolvedMapType.getInitialLand(),
+                tribes,
+                resolvedMapType
+        );
         levelGen.generate();
         String[] lines = levelGen.gelLevelLines();
         initGameState(lines);

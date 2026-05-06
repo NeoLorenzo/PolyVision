@@ -93,6 +93,19 @@ def print_reward_breakdown(info, total_reward: float, truncated: bool = False):
 def parse_move_action_repr(action_repr: str):
     if not isinstance(action_repr, str):
         return None
+    m = re.search(
+        r"by unit\s+(-?\d+).*?\bto\s+(-?\d+)\s*:\s*(-?\d+)",
+        action_repr,
+        flags=re.IGNORECASE,
+    )
+    if m is not None:
+        try:
+            unit_id = int(m.group(1))
+            dest_x = int(m.group(2))
+            dest_y = int(m.group(3))
+            return unit_id, dest_x, dest_y
+        except Exception:
+            return None
     nums = re.findall(r"-?\d+", action_repr)
     if len(nums) < 3:
         return None
@@ -106,18 +119,7 @@ def parse_move_action_repr(action_repr: str):
 
 
 def infer_relative_delta(cur_x: int, cur_y: int, dest_x: int, dest_y: int):
-    candidates = [
-        (int(dest_x) - int(cur_x), int(dest_y) - int(cur_y)),
-        (int(dest_y) - int(cur_x), int(dest_x) - int(cur_y)),
-    ]
-
-    def is_local_step(dx, dy):
-        return abs(dx) <= 1 and abs(dy) <= 1 and not (dx == 0 and dy == 0)
-
-    for dx, dy in candidates:
-        if is_local_step(dx, dy):
-            return dx, dy
-    return candidates[0]
+    return int(dest_x) - int(cur_x), int(dest_y) - int(cur_y)
 
 
 def get_unit_pos_from_env_obs(env: TribesGymWrapper, unit_id: int):
@@ -148,6 +150,14 @@ def get_unit_pos_from_env_obs(env: TribesGymWrapper, unit_id: int):
     return None
 
 
+def get_board_dims_from_env_obs(env: TribesGymWrapper):
+    raw_obs = getattr(env.tribes_env, "_last_obs", None)
+    terrain = raw_obs.get("board", {}).get("terrain", []) if isinstance(raw_obs, dict) else []
+    height = len(terrain)
+    width = max((len(r) for r in terrain), default=0) if terrain else 0
+    return width, height
+
+
 def format_action_for_debug(action_repr: str, action_type: str, env: TribesGymWrapper) -> str:
     if action_type != "MOVE":
         return action_repr
@@ -157,10 +167,18 @@ def format_action_for_debug(action_repr: str, action_type: str, env: TribesGymWr
     unit_id, dest_x, dest_y = parsed
     cur = get_unit_pos_from_env_obs(env, unit_id)
     if cur is None:
-        return f"MOVE by unit {unit_id} [rel dX=?, dY=?]"
+        return f"MOVE by unit {unit_id} [to {dest_x}:{dest_y} | rel dX=?, dY=?]"
     cur_x, cur_y = cur
     dx, dy = infer_relative_delta(cur_x, cur_y, dest_x, dest_y)
-    return f"MOVE by unit {unit_id} [rel dX={dx:+d}, dY={dy:+d}]"
+    raw_obs = getattr(env.tribes_env, "_last_obs", None)
+    terrain = raw_obs.get("board", {}).get("terrain", []) if isinstance(raw_obs, dict) else []
+    width = max((len(r) for r in terrain), default=0)
+    height = len(terrain)
+    in_bounds = width > 0 and height > 0 and (0 <= int(dest_x) < width and 0 <= int(dest_y) < height)
+    return (
+        f"MOVE by unit {unit_id} "
+        f"[from {cur_x}:{cur_y} -> {dest_x}:{dest_y} | rel dX={dx:+d}, dY={dy:+d} | in_bounds={in_bounds}]"
+    )
 
 
 def print_policy_move_grid(env: TribesGymWrapper, legal_actions, allowed_indices, action_mask, probs_np, chosen_pos: int):
@@ -215,7 +233,11 @@ def print_policy_move_grid(env: TribesGymWrapper, legal_actions, allowed_indices
 
     raw_obs = getattr(env.tribes_env, "_last_obs", None)
     terrain = raw_obs.get("board", {}).get("terrain", []) if isinstance(raw_obs, dict) else []
-    map_size = len(terrain) if terrain else 15
+    map_h = len(terrain)
+    map_w = max((len(r) for r in terrain), default=0) if terrain else 0
+    if map_w <= 0 or map_h <= 0:
+        map_w = 15
+        map_h = 15
 
     rel_prob = {}
     max_delta = 1
@@ -235,7 +257,7 @@ def print_policy_move_grid(env: TribesGymWrapper, legal_actions, allowed_indices
 
             world_x = int(anchor_cur[0]) + rel_x
             world_y = int(anchor_cur[1]) + rel_y
-            off_board = world_x < 0 or world_y < 0 or world_x >= map_size or world_y >= map_size
+            off_board = world_x < 0 or world_y < 0 or world_x >= map_w or world_y >= map_h
             if off_board:
                 row.append("  X  ")
                 continue
@@ -247,6 +269,31 @@ def print_policy_move_grid(env: TribesGymWrapper, legal_actions, allowed_indices
             else:
                 row.append("  X  ")
         print(" ".join(row))
+
+
+def print_move_bounds_sanity(env: TribesGymWrapper, legal_actions, allowed_indices):
+    raw_obs = getattr(env.tribes_env, "_last_obs", None)
+    terrain = raw_obs.get("board", {}).get("terrain", []) if isinstance(raw_obs, dict) else []
+    height = len(terrain)
+    width = max((len(r) for r in terrain), default=0) if terrain else 0
+    if width <= 0 or height <= 0:
+        return
+
+    for pos, raw_idx in enumerate(allowed_indices):
+        if not (0 <= raw_idx < len(legal_actions)):
+            continue
+        act = legal_actions[raw_idx]
+        if str(act.get("type", "")) != "MOVE":
+            continue
+        parsed = parse_move_action_repr(str(act.get("repr", "")))
+        if parsed is None:
+            continue
+        unit_id, dest_x, dest_y = parsed
+        if not (0 <= int(dest_x) < width and 0 <= int(dest_y) < height):
+            print(
+                f"WARNING_OFFBOARD_MOVE: allowed_pos={pos} raw_idx={raw_idx} unit={unit_id} "
+                f"dest={dest_x}:{dest_y} board={width}x{height} repr={act.get('repr')}"
+            )
 
 
 def main() -> None:
@@ -413,6 +460,13 @@ def main() -> None:
                 except Exception as e:
                     print(f"Warning: could not open Java render window: {e}")
 
+        board_w, board_h = get_board_dims_from_env_obs(env)
+        if board_w > 0 and board_h > 0:
+            print(
+                f"Map Bounds: {board_w}x{board_h} "
+                f"(valid x: 0..{board_w - 1}, valid y: 0..{board_h - 1})"
+            )
+
         done = False
         step_idx = 0
 
@@ -447,6 +501,7 @@ def main() -> None:
             if not allowed_indices:
                 print("  (No allowed actions after whitelist filtering.)")
             else:
+                print_move_bounds_sanity(env, legal_actions, allowed_indices)
                 for pos, raw_idx in enumerate(allowed_indices):
                     if pos >= len(probs_np):
                         continue
@@ -468,6 +523,8 @@ def main() -> None:
 
             chosen_raw_idx = None
             chosen_action_label = "UNKNOWN"
+            chosen_move_unit = None
+            chosen_move_dest = None
             if allowed_indices:
                 selected_allowed_pos = action % len(allowed_indices)
                 chosen_raw_idx = allowed_indices[selected_allowed_pos]
@@ -476,11 +533,38 @@ def main() -> None:
                     chosen_type = str(chosen_act.get("type", "UNKNOWN"))
                     chosen_raw_repr = str(chosen_act.get("repr", chosen_type))
                     chosen_action_label = format_action_for_debug(chosen_raw_repr, chosen_type, env)
+                    if chosen_type == "MOVE":
+                        parsed = parse_move_action_repr(chosen_raw_repr)
+                        if parsed is not None:
+                            chosen_move_unit, dest_x, dest_y = parsed
+                            chosen_move_dest = (int(dest_x), int(dest_y))
 
             next_obs, reward, terminated, truncated, next_info = env.step(action)
             done = bool(terminated or truncated)
 
             print(f"Executed Action: idx={action} raw_idx={chosen_raw_idx} | {chosen_action_label}")
+            if chosen_move_unit is not None and chosen_move_dest is not None:
+                post_pos = get_unit_pos_from_env_obs(env, int(chosen_move_unit))
+                board_w, board_h = get_board_dims_from_env_obs(env)
+                in_bounds_post = False
+                if post_pos is not None and board_w > 0 and board_h > 0:
+                    in_bounds_post = 0 <= int(post_pos[0]) < board_w and 0 <= int(post_pos[1]) < board_h
+                dest_match = post_pos == chosen_move_dest if post_pos is not None else False
+                print(
+                    "MOVE_VERIFY: "
+                    f"unit={chosen_move_unit} "
+                    f"requested={chosen_move_dest[0]}:{chosen_move_dest[1]} "
+                    f"actual={post_pos[0]}:{post_pos[1] if post_pos is not None else '?'} "
+                    f"dest_match={dest_match} "
+                    f"actual_in_bounds={in_bounds_post} "
+                    f"board={board_w}x{board_h}"
+                    if post_pos is not None
+                    else (
+                        "MOVE_VERIFY: "
+                        f"unit={chosen_move_unit} requested={chosen_move_dest[0]}:{chosen_move_dest[1]} "
+                        f"actual=missing dest_match=False actual_in_bounds=False board={board_w}x{board_h}"
+                    )
+                )
             print(f"Reward: {float(reward):.4f} | terminated={terminated} truncated={truncated}")
             print_reward_breakdown(next_info, float(reward), truncated=bool(truncated))
 

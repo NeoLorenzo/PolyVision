@@ -63,6 +63,8 @@ class TribesGymWrapper(gym.Env):
         self._moved_on_t0 = False
         self._visible_village_streak_turns = 0
         self._queued_village_capture_unit_ids = set()
+        self._initial_visible_tiles = 0
+        self._episode_fog_tiles_cleared = 0
         try:
             bootstrap_seed = self._resolve_episode_seed(seed=42)
             bootstrap_level, bootstrap_idx = self._select_level_for_reset(bootstrap_seed)
@@ -109,6 +111,8 @@ class TribesGymWrapper(gym.Env):
         self._moved_on_t0 = False
         self._visible_village_streak_turns = 0
         self._queued_village_capture_unit_ids = set()
+        self._initial_visible_tiles = int(self._count_visible_tiles(obs))
+        self._episode_fog_tiles_cleared = 0
         
         # Log action space info for debugging
         action_count = self.tribes_env.action_space_n
@@ -131,6 +135,7 @@ class TribesGymWrapper(gym.Env):
             "map_pool_size": int(self._level_pool_size),
             "episode_seed": int(self._last_reset_seed),
             "level_selection_mode": self._level_selection_mode,
+            "initial_visible_tiles": int(self._initial_visible_tiles),
         }
         return self._dict_to_array(obs), self._sanitize_info_for_multiprocessing(info)
     
@@ -142,6 +147,8 @@ class TribesGymWrapper(gym.Env):
         start_obs = getattr(self.tribes_env, "_last_obs", None)
         if not isinstance(start_obs, dict):
             start_obs = {}
+        chosen_move_unit_id = None
+        chosen_move_dest = None
 
         forced_pre_end_turns = 0
         if self._get_active_tribe_id(start_obs) != 0:
@@ -205,15 +212,29 @@ class TribesGymWrapper(gym.Env):
 
         if selected_action_type == "END_TURN":
             self._turn_count += 1
+        elif selected_action_type == "MOVE":
+            selected_action = legal_actions[selected_raw_action]
+            parsed_move = self._parse_move_unit_and_dest_from_action_repr(str(selected_action.get("repr", "")))
+            if parsed_move is not None:
+                chosen_move_unit_id = int(parsed_move[0])
+                chosen_move_dest = (int(parsed_move[1]), int(parsed_move[2]))
+            if not self._is_move_destination_within_board(selected_action, start_obs):
+                end_turn_idx = next((i for i, a in enumerate(legal_actions) if a.get("type") == "END_TURN"), 0)
+                selected_raw_action = end_turn_idx
+                selected_action_type = legal_actions[selected_raw_action].get("type", "UNKNOWN")
+                if selected_action_type == "END_TURN":
+                    self._turn_count += 1
 
         obs, _, done, info = self.tribes_env.step(selected_raw_action)
         obs_after_selected = obs
         java_done = bool(done)
+        self._assert_all_units_in_bounds(obs, context="post_selected_action")
 
         forced_post_end_turns = 0
         if self._get_active_tribe_id(obs) != 0:
             obs, forced_post_end_turns, forced_done = self._force_non_bardur_turns_to_end(obs)
             java_done = java_done or bool(forced_done)
+            self._assert_all_units_in_bounds(obs, context="post_forced_end_turns")
 
         current_bardur_spt = self._compute_bardur_spt(obs)
         base_delta_spt = float(current_bardur_spt - prev_bardur_spt)
@@ -232,6 +253,7 @@ class TribesGymWrapper(gym.Env):
         visible_village_neglect_penalty = 0.0
         village_breadcrumb_reward = 0.0
         fog_clearance_reward = 0.0
+        fog_tiles_cleared = 0
 
         visible_uncaptured_village = self._has_visible_uncaptured_village(obs)
         has_second_village = current_city_count >= (self._starting_city_count + 1)
@@ -246,6 +268,7 @@ class TribesGymWrapper(gym.Env):
                     self.FOG_CLEAR_REWARD_MAX_TILES,
                     int(fog_tiles_cleared),
                 ) * self.FOG_CLEAR_REWARD_PER_TILE
+                self._episode_fog_tiles_cleared += int(fog_tiles_cleared)
 
         if selected_action_type == "END_TURN":
             if current_turn >= self.SECOND_VILLAGE_DELAY_START_TURN and not has_second_village:
@@ -280,6 +303,30 @@ class TribesGymWrapper(gym.Env):
         info["sampled_action"] = sampled_action
         info["selected_raw_action"] = selected_raw_action
         info["selected_action_type"] = selected_action_type
+
+        if selected_action_type == "MOVE" and chosen_move_unit_id is not None and chosen_move_dest is not None:
+            actual_pos = self._get_unit_position(obs, chosen_move_unit_id)
+            dims = self._board_dimensions_from_obs(obs)
+            in_bounds = False
+            if actual_pos is not None and dims is not None:
+                width, height = dims
+                in_bounds = (
+                    0 <= int(actual_pos[0]) < int(width)
+                    and 0 <= int(actual_pos[1]) < int(height)
+                )
+            info["move_verify_unit_id"] = int(chosen_move_unit_id)
+            info["move_verify_requested_x"] = int(chosen_move_dest[0])
+            info["move_verify_requested_y"] = int(chosen_move_dest[1])
+            info["move_verify_actual_x"] = int(actual_pos[0]) if actual_pos is not None else -1
+            info["move_verify_actual_y"] = int(actual_pos[1]) if actual_pos is not None else -1
+            info["move_verify_dest_match"] = bool(actual_pos == chosen_move_dest if actual_pos is not None else False)
+            info["move_verify_actual_in_bounds"] = bool(in_bounds)
+
+            if actual_pos is not None and not in_bounds:
+                raise RuntimeError(
+                    f"Unit moved out of board bounds: unit={chosen_move_unit_id} "
+                    f"requested={chosen_move_dest} actual={actual_pos} dims={dims}"
+                )
         info["turn_count"] = self._turn_count
         info["city_count"] = current_city_count
         info["reward_adjustment"] = float(reward_adjustment)
@@ -293,6 +340,10 @@ class TribesGymWrapper(gym.Env):
         info["reward_visible_village_neglect_penalty"] = float(visible_village_neglect_penalty)
         info["reward_village_breadcrumb"] = float(village_breadcrumb_reward)
         info["reward_fog_clearance"] = float(fog_clearance_reward)
+        info["fog_tiles_cleared_step"] = int(fog_tiles_cleared)
+        info["fog_tiles_cleared_total"] = int(self._episode_fog_tiles_cleared)
+        info["visible_tiles"] = int(self._count_visible_tiles(obs))
+        info["initial_visible_tiles"] = int(self._initial_visible_tiles)
         info["action_mask"] = action_mask
         info["java_done"] = bool(java_done)
         info["terminated_overridden"] = True
@@ -442,6 +493,9 @@ class TribesGymWrapper(gym.Env):
             a_type = a.get("type")
             if a_type not in self.ALLOWED_ACTION_TYPES:
                 continue
+            if a_type == "MOVE":
+                if not self._is_move_destination_within_board(a, obs):
+                    continue
             if a_type == "RESOURCE_GATHERING":
                 if not self._is_resource_gather_legal_for_upgrade(a, legal_actions, obs):
                     continue
@@ -976,6 +1030,20 @@ class TribesGymWrapper(gym.Env):
     def _parse_move_unit_and_dest_from_action_repr(self, action_repr):
         if not isinstance(action_repr, str):
             return None
+        m = re.search(
+            r"by unit\s+(-?\d+).*?\bto\s+(-?\d+)\s*:\s*(-?\d+)",
+            action_repr,
+            flags=re.IGNORECASE,
+        )
+        if m is not None:
+            try:
+                unit_id = int(m.group(1))
+                dest_x = int(m.group(2))
+                dest_y = int(m.group(3))
+                return unit_id, dest_x, dest_y
+            except Exception:
+                return None
+
         nums = re.findall(r"-?\d+", action_repr)
         if len(nums) < 3:
             return None
@@ -997,6 +1065,50 @@ class TribesGymWrapper(gym.Env):
             return int(m.group(1))
         except Exception:
             return None
+
+    def _board_dimensions_from_obs(self, obs):
+        if not isinstance(obs, dict):
+            return None
+        board = obs.get("board", {})
+        terrain = board.get("terrain", []) if isinstance(board, dict) else []
+        if not isinstance(terrain, list) or not terrain:
+            return None
+
+        height = len(terrain)
+        width = 0
+        for row in terrain:
+            if isinstance(row, (list, tuple)):
+                width = max(width, len(row))
+        if width <= 0 or height <= 0:
+            return None
+        return width, height
+
+    def _get_unit_position(self, obs, unit_id):
+        if not isinstance(obs, dict):
+            return None
+        units = obs.get("unit", {})
+        if not isinstance(units, dict):
+            return None
+        unit = units.get(str(unit_id), None)
+        if not isinstance(unit, dict):
+            return None
+        try:
+            return int(unit.get("x", -1)), int(unit.get("y", -1))
+        except Exception:
+            return None
+
+    def _is_move_destination_within_board(self, action, obs):
+        parsed = self._parse_move_unit_and_dest_from_action_repr(str(action.get("repr", "")))
+        if parsed is None:
+            return False
+
+        _, dest_x, dest_y = parsed
+        dims = self._board_dimensions_from_obs(obs)
+        if dims is None:
+            # If dimensions are unavailable, avoid over-masking legal actions.
+            return True
+        width, height = dims
+        return 0 <= int(dest_x) < width and 0 <= int(dest_y) < height
 
     def _get_visible_uncaptured_village_positions(self, obs):
         board = obs.get("board", {})
@@ -1124,6 +1236,33 @@ class TribesGymWrapper(gym.Env):
                 except Exception:
                     continue
         return visible
+
+    def _assert_all_units_in_bounds(self, obs, context="unknown"):
+        dims = self._board_dimensions_from_obs(obs)
+        if dims is None:
+            return
+        width, height = dims
+        units = obs.get("unit", {})
+        if not isinstance(units, dict):
+            return
+
+        offenders = []
+        for unit_id, unit in units.items():
+            if not isinstance(unit, dict):
+                continue
+            try:
+                x = int(unit.get("x", -1))
+                y = int(unit.get("y", -1))
+            except Exception:
+                continue
+            if x < 0 or y < 0 or x >= width or y >= height:
+                offenders.append((unit_id, x, y))
+
+        if offenders:
+            detail = ", ".join(f"id={uid} pos={x}:{y}" for uid, x, y in offenders)
+            raise RuntimeError(
+                f"Detected out-of-bounds unit(s) ({context}) on board {width}x{height}: {detail}"
+            )
     
     def _dict_to_array(self, obs_dict):
         # convert your complex dict observation to flat array

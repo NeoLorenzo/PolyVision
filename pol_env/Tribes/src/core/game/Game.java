@@ -1,6 +1,7 @@
 package core.game;
 
 import core.Constants;
+import core.TribesConfig;
 import core.Types;
 import core.actions.Action;
 import core.actions.tribeactions.EndTurn;
@@ -96,13 +97,28 @@ public class Game {
      * @param gameMode      Game Mode for this game.
      */
     public void init(ArrayList<Agent> players, long levelgen_seed, Types.TRIBE[] tribes, long seed, Types.GAME_MODE gameMode) {
+        init(players, levelgen_seed, tribes, seed, gameMode, TribesConfig.DEFAULT_MAP_TYPE);
+    }
+
+    /**
+     * Initializes the game with a specific procedural map-generation profile.
+     *
+     * @param players       Players of the game.
+     * @param levelgen_seed Seed for the level generator.
+     * @param tribes        Array of tribe types to play with.
+     * @param seed          Seed for the game (used only for board generation)
+     * @param gameMode      Game Mode for this game.
+     * @param mapType       Procedural map profile controlling macro terrain generation.
+     */
+    public void init(ArrayList<Agent> players, long levelgen_seed, Types.TRIBE[] tribes, long seed,
+                     Types.GAME_MODE gameMode, TribesConfig.MAP_TYPE mapType) {
 
         //Initiate the bare bones of the main game classes
         this.seed = seed;
         this.rnd = new Random(seed);
         this.gs = new GameState(rnd, gameMode);
 
-        this.gs.init(levelgen_seed, tribes);
+        this.gs.init(levelgen_seed, tribes, mapType);
         initGameStructures(players, tribes);
         updateAssignedGameStates();
     }

@@ -15,9 +15,12 @@ public class MoveCommand implements ActionCommand {
     @Override
     public boolean execute(Action a, GameState gs) {
         Move action = (Move)a;
+        Vector2d destination = action.getDestination();
+        if (destination == null || !gs.getBoard().isInBounds(destination.x, destination.y)) {
+            return false;
+        }
         if(action.isFeasible(gs)) {
             int unitId = action.getUnitId();
-            Vector2d destination = action.getDestination();
             Unit unit = (Unit) gs.getActor(unitId);
             Board board = gs.getBoard();
             Tribe tribe = gs.getTribe(unit.getTribeId());

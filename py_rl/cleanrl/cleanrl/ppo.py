@@ -367,27 +367,45 @@ if __name__ == "__main__":
                 for env_idx in range(args.num_envs):
                     if truncations[env_idx] or terminations[env_idx]:
                         spt_value = None
+                        city_count_value = None
+                        fog_cleared_total_value = None
+
+                        def _extract_done_metric(metric_key):
+                            if metric_key not in infos:
+                                return None
+                            raw = infos[metric_key]
+                            mask = infos.get(f"_{metric_key}", None)
+                            if mask is None:
+                                if len(raw) > env_idx:
+                                    return raw[env_idx]
+                            else:
+                                if len(mask) > env_idx and mask[env_idx] and len(raw) > env_idx:
+                                    return raw[env_idx]
+                            return None
 
                         # Case 1: vector info carries per-env arrays and optional validity mask.
-                        if "spt" in infos:
-                            spt_raw = infos["spt"]
-                            spt_mask = infos.get("_spt", None)
-                            if spt_mask is None:
-                                if len(spt_raw) > env_idx:
-                                    spt_value = spt_raw[env_idx]
-                            else:
-                                if len(spt_mask) > env_idx and spt_mask[env_idx] and len(spt_raw) > env_idx:
-                                    spt_value = spt_raw[env_idx]
+                        spt_value = _extract_done_metric("spt")
+                        city_count_value = _extract_done_metric("city_count")
+                        fog_cleared_total_value = _extract_done_metric("fog_tiles_cleared_total")
 
                         # Case 2: final_info often carries final per-env info dicts.
-                        if spt_value is None and "final_info" in infos and len(infos["final_info"]) > env_idx:
+                        if "final_info" in infos and len(infos["final_info"]) > env_idx:
                             finfo = infos["final_info"][env_idx]
-                            if finfo is not None and "spt" in finfo:
-                                spt_value = finfo["spt"]
+                            if finfo is not None:
+                                if spt_value is None and "spt" in finfo:
+                                    spt_value = finfo["spt"]
+                                if city_count_value is None and "city_count" in finfo:
+                                    city_count_value = finfo["city_count"]
+                                if fog_cleared_total_value is None and "fog_tiles_cleared_total" in finfo:
+                                    fog_cleared_total_value = finfo["fog_tiles_cleared_total"]
 
                         if spt_value is not None:
                             writer.add_scalar("charts/custom_spt_return", float(spt_value), global_step)
                             writer.add_scalar("charts/episode_end_spt", float(spt_value), global_step)
+                        if city_count_value is not None:
+                            writer.add_scalar("charts/episode_end_village_count_t10", float(city_count_value), global_step)
+                        if fog_cleared_total_value is not None:
+                            writer.add_scalar("charts/episode_end_fog_tiles_cleared_t10", float(fog_cleared_total_value), global_step)
 
             if "final_info" in infos:
                 for info in infos["final_info"]:

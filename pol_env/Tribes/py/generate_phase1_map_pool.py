@@ -1,5 +1,4 @@
 import argparse
-import argparse
 import os
 import subprocess
 import sys
@@ -41,6 +40,12 @@ def main():
         default=1.0,
         help="Initial land ratio for generator (1.0 enforces drylands-like all-land starts).",
     )
+    parser.add_argument(
+        "--map-type",
+        type=str,
+        default="DRYLANDS",
+        help="Map profile (e.g., DRYLANDS, LAKES, CONTINENTS, PANGEA, ARCHIPELAGO, WATERWORLD).",
+    )
     args = parser.parse_args()
 
     tribes_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -79,6 +84,7 @@ def main():
             str(args.size),
             rel_out,
             str(args.initial_land),
+            str(args.map_type),
         ] + list(args.tribes)
         run(run_cmd, cwd=tribes_dir)
 

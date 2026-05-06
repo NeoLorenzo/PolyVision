@@ -2,6 +2,43 @@ package core;
 
 public class TribesConfig
 {
+    /**
+     * High-level terrain-generation profiles used by the procedural map generator.
+     * These values control the macro land/water shape before detailed terrain/resource passes.
+     */
+    public enum MAP_TYPE {
+        DRYLANDS(1.00, 3, 4),
+        LAKES(0.72, 3, 4),
+        CONTINENTS(0.55, 3, 4),
+        PANGEA(0.50, 4, 5),
+        ARCHIPELAGO(0.35, 3, 3),
+        WATERWORLD(0.10, 2, 2);
+
+        private final double initialLand;
+        private final int smoothing;
+        private final int relief;
+
+        MAP_TYPE(double initialLand, int smoothing, int relief) {
+            this.initialLand = initialLand;
+            this.smoothing = smoothing;
+            this.relief = relief;
+        }
+
+        public double getInitialLand() {
+            return initialLand;
+        }
+
+        public int getSmoothing() {
+            return smoothing;
+        }
+
+        public int getRelief() {
+            return relief;
+        }
+    }
+
+    public static final MAP_TYPE DEFAULT_MAP_TYPE = MAP_TYPE.CONTINENTS;
+
     /* UNITS */
 
     // Warrior

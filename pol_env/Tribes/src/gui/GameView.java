@@ -76,6 +76,8 @@ public class GameView extends JComponent {
      */
     public static Dimension dimension;
     private static double isometricAngle = -45;
+    private static final boolean DEBUG_DRAW_TILE_COORDS = true;
+    private static final boolean DEBUG_DRAW_MAP_BORDER = true;
 
     GameView(Game game, InfoView inforView, Vector2d panTranslate)
     {
@@ -160,6 +162,7 @@ public class GameView extends JComponent {
         // Update list of actionable tiles to be highlighted (collectible resources)
         updateActionableTiles();
         paintTerrains(g);
+        drawDebugMapOverlay(g);
         paintRoads(g);
         paintCities(g);
         paintResourcesBuildings(g);
@@ -180,6 +183,98 @@ public class GameView extends JComponent {
 
         g.setColor(Color.BLACK);
         //player.draw(g); //if we want to give control to the agent to paint something (for debug), start here.
+    }
+
+    private void drawDebugMapOverlay(Graphics2D g) {
+        if (DEBUG_DRAW_MAP_BORDER) {
+            drawDebugMapBorder(g);
+        }
+        if (DEBUG_DRAW_TILE_COORDS) {
+            drawDebugTileCoordinates(g);
+            drawDebugOverlayLegend(g);
+        }
+    }
+
+    private void drawDebugMapBorder(Graphics2D g) {
+        Graphics2D g2 = (Graphics2D) g.create();
+        g2.setColor(new Color(255, 60, 60, 220));
+        g2.setStroke(new BasicStroke(3.0f));
+
+        Vector2d p00 = rotatePoint(0.0, 0.0);
+        Vector2d p10 = rotatePoint(gridSize, 0.0);
+        Vector2d p11 = rotatePoint(gridSize, gridSize);
+        Vector2d p01 = rotatePoint(0.0, gridSize);
+
+        int[] xs = new int[]{
+                p00.x + panTranslate.x,
+                p10.x + panTranslate.x,
+                p11.x + panTranslate.x,
+                p01.x + panTranslate.x
+        };
+        int[] ys = new int[]{
+                p00.y + panTranslate.y,
+                p10.y + panTranslate.y,
+                p11.y + panTranslate.y,
+                p01.y + panTranslate.y
+        };
+        g2.drawPolygon(xs, ys, 4);
+        g2.dispose();
+    }
+
+    private void drawDebugTileCoordinates(Graphics2D g) {
+        Graphics2D g2 = (Graphics2D) g.create();
+        int fontSize = Math.max(10, CELL_SIZE / 5);
+        g2.setFont(new Font(getFont().getName(), Font.BOLD, fontSize));
+
+        for (int i = 0; i < gridSize; i++) {
+            for (int j = 0; j < gridSize; j++) {
+                Vector2d center = rotatePoint(j + 0.5, i + 0.5);
+                int sx = center.x + panTranslate.x;
+                int sy = center.y + panTranslate.y;
+                String label = i + ":" + j;
+
+                // shadow
+                g2.setColor(new Color(0, 0, 0, 200));
+                g2.drawString(label, sx - fontSize, sy + fontSize / 2);
+                // foreground
+                g2.setColor(new Color(255, 255, 255, 220));
+                g2.drawString(label, sx - fontSize - 1, sy + fontSize / 2 - 1);
+            }
+        }
+        g2.dispose();
+    }
+
+    private void drawDebugOverlayLegend(Graphics2D g) {
+        Graphics2D g2 = (Graphics2D) g.create();
+        int fontSize = Math.max(12, CELL_SIZE / 4);
+        g2.setFont(new Font(getFont().getName(), Font.BOLD, fontSize));
+
+        String header = "DEBUG MAP: gridSize=" + gridSize + " valid index=0.." + (gridSize - 1);
+        g2.setColor(new Color(0, 0, 0, 200));
+        g2.fillRoundRect(8, 8, Math.max(340, header.length() * fontSize / 2), fontSize + 12, 8, 8);
+        g2.setColor(new Color(255, 255, 255, 230));
+        g2.drawString(header, 14, 8 + fontSize);
+
+        // Corner tile centers with their renderer index labels.
+        int max = gridSize - 1;
+        drawCornerLabel(g2, 0, 0, "NW 0:0");
+        drawCornerLabel(g2, max, 0, "NE 0:" + max);
+        drawCornerLabel(g2, 0, max, "SW " + max + ":0");
+        drawCornerLabel(g2, max, max, "SE " + max + ":" + max);
+        g2.dispose();
+    }
+
+    private void drawCornerLabel(Graphics2D g2, int j, int i, String label) {
+        Vector2d center = rotatePoint(j + 0.5, i + 0.5);
+        int sx = center.x + panTranslate.x;
+        int sy = center.y + panTranslate.y;
+
+        g2.setColor(new Color(255, 80, 80, 230));
+        g2.fillOval(sx - 4, sy - 4, 8, 8);
+        g2.setColor(new Color(0, 0, 0, 220));
+        g2.drawString(label, sx + 8, sy - 6);
+        g2.setColor(new Color(255, 255, 255, 230));
+        g2.drawString(label, sx + 7, sy - 7);
     }
 
     private void updateActionableTiles() {
@@ -648,6 +743,9 @@ public class GameView extends JComponent {
         //int gameTurn = 0;// gs.getTick() % gs.getTribes().length;
         gameState = gs; //.copy(gameTurn);
         board = gameState.getBoard();
+        // Keep renderer loops aligned with the live board size coming from the
+        // current GameState (important when viewer bootstrap board differs).
+        gridSize = board.getSize();
     }
 
     void updatePan(Vector2d panTranslate) {

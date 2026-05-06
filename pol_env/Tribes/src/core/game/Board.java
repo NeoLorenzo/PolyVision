@@ -1024,6 +1024,9 @@ public class Board {
     // Simple getters and setters
     public Tribe[] getTribes() { return tribes; }
     public int getSize() { return size; }
+    public boolean isInBounds(int x, int y) {
+        return x >= 0 && y >= 0 && x < size && y < size;
+    }
     public Tribe getTribe(int tribeId) { return tribes[tribeId]; }
     public int getActiveTribeID() { return activeTribeID; }
     public void setActiveTribeID(int activeTribeID) { this.activeTribeID = activeTribeID; }
