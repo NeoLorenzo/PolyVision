@@ -635,6 +635,7 @@ public class LevelGenerator {
         Collections.shuffle(domainIds, rnd);
 
         ArrayList<Integer> capitals = new ArrayList<>();
+        int initialMinCapitalDistance = Math.max(3, mapSize / 4);
         for (int tribeIdx = 0; tribeIdx < tribes.length; tribeIdx++) {
             int domainId = domainIds.get(tribeIdx % domainIds.size());
             int domainRow = domainId / domainsPerAxis;
@@ -645,32 +646,54 @@ public class LevelGenerator {
             int colStart = (domainCol * mapSize) / domainsPerAxis;
             int colEnd = ((domainCol + 1) * mapSize) / domainsPerAxis - 1;
 
-            ArrayList<Integer> localCandidates = new ArrayList<>();
-            for (int row = Math.max(1, rowStart); row <= Math.min(mapSize - 2, rowEnd); row++) {
-                for (int col = Math.max(1, colStart); col <= Math.min(mapSize - 2, colEnd); col++) {
-                    int idx = row * mapSize + col;
-                    if (getTerrain(idx) != PLAIN.getMapChar()) continue;
-                    if (capitals.contains(idx)) continue;
-                    localCandidates.add(idx);
-                }
-            }
-
             int picked = -1;
-            if (!localCandidates.isEmpty()) {
-                picked = localCandidates.get(randomInt(0, localCandidates.size()));
-            } else {
+            int minCapitalDistance = initialMinCapitalDistance;
+            while (minCapitalDistance >= 0 && picked < 0) {
+                ArrayList<Integer> localCandidates = new ArrayList<>();
+                for (int row = Math.max(1, rowStart); row <= Math.min(mapSize - 2, rowEnd); row++) {
+                    for (int col = Math.max(1, colStart); col <= Math.min(mapSize - 2, colEnd); col++) {
+                        int idx = row * mapSize + col;
+                        if (getTerrain(idx) != PLAIN.getMapChar()) continue;
+                        if (capitals.contains(idx)) continue;
+                        if (!isFarEnoughFromCapitals(idx, capitals, minCapitalDistance)) continue;
+                        localCandidates.add(idx);
+                    }
+                }
+
+                if (!localCandidates.isEmpty()) {
+                    picked = localCandidates.get(randomInt(0, localCandidates.size()));
+                    break;
+                }
+
                 ArrayList<Integer> fallback = new ArrayList<>();
                 for (int idx : candidates) {
-                    if (!capitals.contains(idx)) fallback.add(idx);
+                    if (capitals.contains(idx)) continue;
+                    if (!isFarEnoughFromCapitals(idx, capitals, minCapitalDistance)) continue;
+                    fallback.add(idx);
                 }
                 if (!fallback.isEmpty()) {
                     picked = fallback.get(randomInt(0, fallback.size()));
+                    break;
                 }
+
+                minCapitalDistance--;
             }
 
             if (picked >= 0) capitals.add(picked);
         }
         return capitals;
+    }
+
+    private boolean isFarEnoughFromCapitals(int cell, ArrayList<Integer> capitals, int minDistance) {
+        if (minDistance <= 0 || capitals.isEmpty()) {
+            return true;
+        }
+        for (int placed : capitals) {
+            if (distance(cell, placed, mapSize) < minDistance) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private void markVillageArea(ArrayList<Integer> villageMap, int center) {

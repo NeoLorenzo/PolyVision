@@ -942,11 +942,21 @@ if __name__ == "__main__":
 
                 # Custom Phase-1 telemetry:
                 # Log SPT for envs that just ended (typically via truncation at turn horizon).
+                forestry_t10_values = []
+                organization_t10_values = []
+                first_visible_turn_values = []
+                second_city_turn_values = []
                 for env_idx in range(args.num_envs):
                     if truncations[env_idx] or terminations[env_idx]:
                         spt_value = None
                         city_count_value = None
                         fog_cleared_total_value = None
+                        avg_city_level_value = None
+                        techs_researched_value = None
+                        forestry_researched_value = None
+                        organization_researched_value = None
+                        first_visible_turn_value = None
+                        second_city_turn_value = None
 
                         def _extract_done_metric(metric_key):
                             if metric_key not in infos:
@@ -965,6 +975,12 @@ if __name__ == "__main__":
                         spt_value = _extract_done_metric("spt")
                         city_count_value = _extract_done_metric("city_count")
                         fog_cleared_total_value = _extract_done_metric("fog_tiles_cleared_total")
+                        avg_city_level_value = _extract_done_metric("avg_city_level")
+                        techs_researched_value = _extract_done_metric("techs_researched")
+                        forestry_researched_value = _extract_done_metric("forestry_researched")
+                        organization_researched_value = _extract_done_metric("organization_researched")
+                        first_visible_turn_value = _extract_done_metric("turn_first_uncaptured_village_visible")
+                        second_city_turn_value = _extract_done_metric("turn_second_city_captured")
 
                         # Case 2: final_info often carries final per-env info dicts.
                         if "final_info" in infos and len(infos["final_info"]) > env_idx:
@@ -976,6 +992,18 @@ if __name__ == "__main__":
                                     city_count_value = finfo["city_count"]
                                 if fog_cleared_total_value is None and "fog_tiles_cleared_total" in finfo:
                                     fog_cleared_total_value = finfo["fog_tiles_cleared_total"]
+                                if avg_city_level_value is None and "avg_city_level" in finfo:
+                                    avg_city_level_value = finfo["avg_city_level"]
+                                if techs_researched_value is None and "techs_researched" in finfo:
+                                    techs_researched_value = finfo["techs_researched"]
+                                if forestry_researched_value is None and "forestry_researched" in finfo:
+                                    forestry_researched_value = finfo["forestry_researched"]
+                                if organization_researched_value is None and "organization_researched" in finfo:
+                                    organization_researched_value = finfo["organization_researched"]
+                                if first_visible_turn_value is None and "turn_first_uncaptured_village_visible" in finfo:
+                                    first_visible_turn_value = finfo["turn_first_uncaptured_village_visible"]
+                                if second_city_turn_value is None and "turn_second_city_captured" in finfo:
+                                    second_city_turn_value = finfo["turn_second_city_captured"]
 
                         if spt_value is not None:
                             log_scalar("charts/custom_spt_return", float(spt_value), global_step)
@@ -984,6 +1012,42 @@ if __name__ == "__main__":
                             log_scalar("charts/episode_end_village_count_t10", float(city_count_value), global_step)
                         if fog_cleared_total_value is not None:
                             log_scalar("charts/episode_end_fog_tiles_cleared_t10", float(fog_cleared_total_value), global_step)
+                        if avg_city_level_value is not None:
+                            log_scalar("charts/episode_end_avg_city_level_t10", float(avg_city_level_value), global_step)
+                        if techs_researched_value is not None:
+                            log_scalar("research/episode_end_techs_researched_t10", float(techs_researched_value), global_step)
+                        if forestry_researched_value is not None:
+                            forestry_t10_values.append(float(forestry_researched_value))
+                        if organization_researched_value is not None:
+                            organization_t10_values.append(float(organization_researched_value))
+                        if first_visible_turn_value is not None and float(first_visible_turn_value) >= 0:
+                            first_visible_turn_values.append(float(first_visible_turn_value))
+                        if second_city_turn_value is not None and float(second_city_turn_value) >= 0:
+                            second_city_turn_values.append(float(second_city_turn_value))
+                if forestry_t10_values:
+                    log_scalar(
+                        "research/episode_end_forestry_researched_t10_rate",
+                        float(np.mean(forestry_t10_values)),
+                        global_step,
+                    )
+                if organization_t10_values:
+                    log_scalar(
+                        "research/episode_end_organization_researched_t10_rate",
+                        float(np.mean(organization_t10_values)),
+                        global_step,
+                    )
+                if first_visible_turn_values:
+                    log_scalar(
+                        "charts/avg_turn_first_uncaptured_village_visible",
+                        float(np.mean(first_visible_turn_values)),
+                        global_step,
+                    )
+                if second_city_turn_values:
+                    log_scalar(
+                        "charts/avg_turn_second_city_captured",
+                        float(np.mean(second_city_turn_values)),
+                        global_step,
+                    )
 
             if "final_info" in infos:
                 for info in infos["final_info"]:

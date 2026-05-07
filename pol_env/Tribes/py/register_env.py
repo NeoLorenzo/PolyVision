@@ -176,11 +176,10 @@ class TribesGymWrapper(gym.Env):
     CAPTURE_CITY_BONUS_MAX = 6.0
     SPT_INCREASE_REWARD_MULTIPLIER = 5.0
     SPT_NONPOSITIVE_REWARD_MULTIPLIER = 1.0
-    VISIBLE_VILLAGE_NEGLECT_PENALTY = -0.5
-    VISIBLE_VILLAGE_NEGLECT_GRACE_TURNS = 2
     VILLAGE_BREADCRUMB_REWARD = 0.5
     FOG_CLEAR_REWARD_PER_TILE = 0.08
     FOG_CLEAR_REWARD_MAX_TILES = 5
+    USELESS_MOVE_FOG_MISS_PENALTY = 0.35
     ALLOWED_ACTION_TYPES = {
         "END_TURN",
         "MOVE",
@@ -228,8 +227,11 @@ class TribesGymWrapper(gym.Env):
         self._unit_previous_tiles = {}
         self._initial_visible_tiles = 0
         self._episode_fog_tiles_cleared = 0
+        self._turn_first_uncaptured_village_visible = None
+        self._turn_second_city_captured = None
         self._catalog = None
         self._catalog_fingerprint = ""
+        self._tech_name_to_obs_idx = {}
         self._last_step_canonical_diag = {}
         self._illegal_sample_count = 0
         self._fallback_end_turn_count = 0
@@ -267,6 +269,10 @@ class TribesGymWrapper(gym.Env):
                 building_types=vocab["BUILDING"],
                 levelup_choices=vocab["CITY_LEVEL_UP"],
             )
+            self._tech_name_to_obs_idx = {
+                str(name).upper(): int(i)
+                for i, name in enumerate(vocab.get("TECHNOLOGY", []))
+            }
             self._catalog_fingerprint = self._catalog.fingerprint()
             self.action_space = gym.spaces.Discrete(self._catalog.total_size)
             if int(self.action_space.n) != int(self._catalog.total_size):
@@ -312,6 +318,8 @@ class TribesGymWrapper(gym.Env):
         self._queued_village_capture_unit_ids = set()
         self._initial_visible_tiles = int(self._count_visible_tiles(obs))
         self._episode_fog_tiles_cleared = 0
+        self._turn_first_uncaptured_village_visible = None
+        self._turn_second_city_captured = None
         
         # Log action space info for debugging
         legal_actions = self.tribes_env.list_actions()
@@ -496,36 +504,53 @@ class TribesGymWrapper(gym.Env):
                 self.CAPTURE_CITY_BONUS_MAX,
                 max(0, n_new_cities) * self.CAPTURE_CITY_BONUS_MIN,
             )
+        if self._turn_second_city_captured is None and int(current_city_count) >= 2:
+            self._turn_second_city_captured = int(self._turn_count)
         reward_adjustment += capture_city_bonus
 
         reveal_uncaptured_village_reward = 0.0
         move_closer_to_visible_village_reward = 0.0
         move_onto_village_reward = 0.0
-        visible_village_neglect_penalty = 0.0
         village_breadcrumb_reward = 0.0
         fog_clearance_reward = 0.0
+        useless_move_fog_miss_penalty = 0.0
         fog_tiles_cleared = 0
+        newly_revealed_tiles = 0
+        unit_had_any_legal_fog_revealing_move = False
 
         visible_villages_before = self._get_visible_uncaptured_village_positions(start_obs)
         visible_villages_after_selected = self._get_visible_uncaptured_village_positions(obs_after_selected)
         newly_revealed_villages = visible_villages_after_selected - visible_villages_before
+        visible_uncaptured_villages_before = int(len(visible_villages_before))
+        if (
+            self._turn_first_uncaptured_village_visible is None
+            and len(visible_villages_after_selected) > 0
+        ):
+            self._turn_first_uncaptured_village_visible = int(self._turn_count)
         if len(newly_revealed_villages) > 0:
             reveal_uncaptured_village_reward = self.REVEAL_UNCAPTURED_VILLAGE_REWARD * float(len(newly_revealed_villages))
 
         visible_uncaptured_village = self._has_visible_uncaptured_village(obs)
-        has_second_village = current_city_count >= (self._starting_city_count + 1)
         unit_on_visible_uncaptured_village = self._has_unit_on_visible_uncaptured_village(obs)
+        combat_disabled = "ATTACK" not in self.ALLOWED_ACTION_TYPES
 
         if selected_action_type == "MOVE":
             vis_before = self._count_visible_tiles(start_obs)
             vis_after = self._count_visible_tiles(obs_after_selected)
             fog_tiles_cleared = max(0, vis_after - vis_before)
+            newly_revealed_tiles = int(fog_tiles_cleared)
             if fog_tiles_cleared > 0:
                 fog_clearance_reward = min(
                     self.FOG_CLEAR_REWARD_MAX_TILES,
                     int(fog_tiles_cleared),
                 ) * self.FOG_CLEAR_REWARD_PER_TILE
                 self._episode_fog_tiles_cleared += int(fog_tiles_cleared)
+            if chosen_move_unit_id is not None:
+                unit_had_any_legal_fog_revealing_move = self._unit_had_any_legal_fog_revealing_move(
+                    legal_actions,
+                    start_obs,
+                    chosen_move_unit_id,
+                )
 
             moved_unit_before = self._get_unit_position(start_obs, chosen_move_unit_id) if chosen_move_unit_id is not None else None
             moved_unit_after = self._get_unit_position(obs_after_selected, chosen_move_unit_id) if chosen_move_unit_id is not None else None
@@ -540,24 +565,27 @@ class TribesGymWrapper(gym.Env):
             ):
                 move_onto_village_reward = self.MOVE_ONTO_VILLAGE_REWARD
 
+            if (
+                combat_disabled
+                and int(self._turn_count) <= int(self.MAX_TURNS)
+                and int(current_city_count) < 2
+                and int(visible_uncaptured_villages_before) == 0
+                and int(newly_revealed_tiles) == 0
+                and bool(unit_had_any_legal_fog_revealing_move)
+            ):
+                useless_move_fog_miss_penalty = -float(self.USELESS_MOVE_FOG_MISS_PENALTY)
+
         if selected_action_type == "END_TURN":
-            if visible_uncaptured_village and not has_second_village:
-                self._visible_village_streak_turns += 1
-            else:
-                self._visible_village_streak_turns = 0
-
-            if self._visible_village_streak_turns > self.VISIBLE_VILLAGE_NEGLECT_GRACE_TURNS:
-                visible_village_neglect_penalty = self.VISIBLE_VILLAGE_NEGLECT_PENALTY
-
+            self._visible_village_streak_turns = 0
             if unit_on_visible_uncaptured_village:
                 village_breadcrumb_reward = self.VILLAGE_BREADCRUMB_REWARD
 
         reward_adjustment += reveal_uncaptured_village_reward
         reward_adjustment += move_closer_to_visible_village_reward
         reward_adjustment += move_onto_village_reward
-        reward_adjustment += visible_village_neglect_penalty
         reward_adjustment += village_breadcrumb_reward
         reward_adjustment += fog_clearance_reward
+        reward_adjustment += useless_move_fog_miss_penalty
 
         # Phase 1 override: ignore Java terminal state and control horizon purely in Python.
         terminated = False
@@ -603,6 +631,20 @@ class TribesGymWrapper(gym.Env):
         info["max_legal_actions"] = int(self._max_legal_actions)
         info["turn_count"] = self._turn_count
         info["city_count"] = current_city_count
+        info["avg_city_level"] = float(self._get_avg_city_level(obs, tribe_id=0))
+        info["techs_researched"] = int(self._get_researched_tech_count(obs, tribe_id=0))
+        info["forestry_researched"] = int(self._has_researched_tech(obs, "FORESTRY", tribe_id=0))
+        info["organization_researched"] = int(self._has_researched_tech(obs, "ORGANIZATION", tribe_id=0))
+        info["turn_first_uncaptured_village_visible"] = (
+            int(self._turn_first_uncaptured_village_visible)
+            if self._turn_first_uncaptured_village_visible is not None
+            else -1
+        )
+        info["turn_second_city_captured"] = (
+            int(self._turn_second_city_captured)
+            if self._turn_second_city_captured is not None
+            else -1
+        )
         info["fog_tiles_cleared_total"] = int(self._episode_fog_tiles_cleared)
         info["delta_spt"] = float(base_delta_spt)
         info["delta_spt_reward"] = float(delta_spt_reward)
@@ -651,13 +693,16 @@ class TribesGymWrapper(gym.Env):
             info["moved_on_t0"] = bool(self._moved_on_t0)
             info["reward_capture_city_bonus"] = float(capture_city_bonus)
             info["reward_second_village_delay_penalty"] = 0.0
-            info["reward_visible_village_neglect_penalty"] = float(visible_village_neglect_penalty)
             info["reward_village_breadcrumb"] = float(village_breadcrumb_reward)
             info["reward_fog_clearance"] = float(fog_clearance_reward)
             info["reward_reveal_uncaptured_village"] = float(reveal_uncaptured_village_reward)
             info["reward_move_closer_to_visible_village"] = float(move_closer_to_visible_village_reward)
             info["reward_move_onto_village"] = float(move_onto_village_reward)
+            info["reward_useless_move_fog_miss_penalty"] = float(useless_move_fog_miss_penalty)
             info["newly_revealed_uncaptured_villages"] = int(len(newly_revealed_villages))
+            info["visible_uncaptured_villages_before_move"] = int(visible_uncaptured_villages_before)
+            info["newly_revealed_tiles"] = int(newly_revealed_tiles)
+            info["unit_had_any_legal_fog_revealing_move"] = bool(unit_had_any_legal_fog_revealing_move)
             info["fog_tiles_cleared_step"] = int(fog_tiles_cleared)
             info["visible_tiles"] = int(self._count_visible_tiles(obs))
             info["initial_visible_tiles"] = int(self._initial_visible_tiles)
@@ -933,6 +978,7 @@ class TribesGymWrapper(gym.Env):
             else:
                 self._queued_village_capture_unit_ids = set()
 
+            visible_village_positions = self._get_visible_uncaptured_village_positions(obs)
             forced_village_moves = []
             if not forced_village_captures:
                 for idx in allowed_indices:
@@ -943,6 +989,26 @@ class TribesGymWrapper(gym.Env):
                         forced_village_moves.append(idx)
                 if forced_village_moves:
                     allowed_indices = forced_village_moves
+                elif visible_village_positions:
+                    closest_unit_id, _closest_pos, _closest_dist = self._closest_owned_unit_to_targets(
+                        obs,
+                        visible_village_positions,
+                    )
+                    forced_progress_moves = []
+                    if closest_unit_id is not None:
+                        for idx in allowed_indices:
+                            a = legal_actions[idx]
+                            if str(a.get("type", "")).upper() != "MOVE":
+                                continue
+                            if self._is_move_reducing_distance_to_targets(
+                                a,
+                                obs,
+                                closest_unit_id,
+                                visible_village_positions,
+                            ):
+                                forced_progress_moves.append(idx)
+                    if forced_progress_moves:
+                        allowed_indices = forced_progress_moves
         else:
             self._queued_village_capture_unit_ids = set()
 
@@ -1007,6 +1073,27 @@ class TribesGymWrapper(gym.Env):
             if pos is not None:
                 src_x, src_y = int(pos[0]), int(pos[1])
         return unit_id, src_x, src_y, dst_x, dst_y
+
+    def _is_move_reducing_distance_to_targets(self, action, obs, target_unit_id, targets):
+        if target_unit_id is None or not targets:
+            return False
+        unit_id, src_x, src_y, dst_x, dst_y = self._extract_move_components(action, obs)
+        if unit_id is None or int(unit_id) != int(target_unit_id):
+            return False
+        if dst_x is None or dst_y is None:
+            return False
+
+        if src_x is None or src_y is None:
+            pos = self._unit_position_by_id(obs, unit_id)
+            if pos is None:
+                return False
+            src_x, src_y = int(pos[0]), int(pos[1])
+
+        dist_before = self._min_manhattan_distance((int(src_x), int(src_y)), targets)
+        dist_after = self._min_manhattan_distance((int(dst_x), int(dst_y)), targets)
+        if dist_before is None or dist_after is None:
+            return False
+        return int(dist_after) < int(dist_before)
 
     def _build_action_mask_and_mapping(self, legal_actions=None, obs=None):
         if legal_actions is None:
@@ -1621,6 +1708,71 @@ class TribesGymWrapper(gym.Env):
                 return len(tribe0.get("citiesID", []))
         return 0
 
+    def _get_avg_city_level(self, obs, tribe_id=0):
+        city_map = obs.get("city", {})
+        if not isinstance(city_map, dict):
+            return 0.0
+        levels = []
+        for city in city_map.values():
+            if not isinstance(city, dict):
+                continue
+            try:
+                if int(city.get("tribeID", -1)) != int(tribe_id):
+                    continue
+                levels.append(int(city.get("level", 0)))
+            except Exception:
+                continue
+        if not levels:
+            return 0.0
+        return float(sum(levels) / len(levels))
+
+    def _get_researched_tech_count(self, obs, tribe_id=0):
+        tribes = obs.get("tribes", {})
+        if not isinstance(tribes, dict):
+            return 0
+        tribe = tribes.get(str(int(tribe_id)), {})
+        if not isinstance(tribe, dict):
+            return 0
+        technology = tribe.get("technology", {})
+        if not isinstance(technology, dict):
+            return 0
+        researched = technology.get("researched", [])
+        if not isinstance(researched, list):
+            return 0
+        count = 0
+        for flag in researched:
+            try:
+                if bool(flag):
+                    count += 1
+            except Exception:
+                continue
+        return int(count)
+
+    def _has_researched_tech(self, obs, tech_name, tribe_id=0):
+        if not isinstance(tech_name, str):
+            return False
+        tech_idx = self._tech_name_to_obs_idx.get(str(tech_name).upper(), None)
+        if tech_idx is None:
+            return False
+        tribes = obs.get("tribes", {})
+        if not isinstance(tribes, dict):
+            return False
+        tribe = tribes.get(str(int(tribe_id)), {})
+        if not isinstance(tribe, dict):
+            return False
+        technology = tribe.get("technology", {})
+        if not isinstance(technology, dict):
+            return False
+        researched = technology.get("researched", [])
+        if not isinstance(researched, list):
+            return False
+        if tech_idx < 0 or tech_idx >= len(researched):
+            return False
+        try:
+            return bool(researched[tech_idx])
+        except Exception:
+            return False
+
     def _get_active_tribe_id(self, obs):
         try:
             return int(obs.get("activeTribeID", -1))
@@ -1971,6 +2123,38 @@ class TribesGymWrapper(gym.Env):
                 best = d
         return best
 
+    def _closest_owned_unit_to_targets(self, obs, targets):
+        if not isinstance(obs, dict) or not targets:
+            return None, None, None
+        units = obs.get("unit", {})
+        if not isinstance(units, dict):
+            return None, None, None
+
+        best_unit_id = None
+        best_pos = None
+        best_dist = None
+        for unit_id_s, unit in units.items():
+            if not isinstance(unit, dict):
+                continue
+            try:
+                if int(unit.get("tribeId", -1)) != 0:
+                    continue
+                unit_id = int(unit_id_s)
+                ux = int(unit.get("x", -1))
+                uy = int(unit.get("y", -1))
+            except Exception:
+                continue
+            if ux < 0 or uy < 0:
+                continue
+            d = self._min_manhattan_distance((ux, uy), targets)
+            if d is None:
+                continue
+            if best_dist is None or d < best_dist:
+                best_dist = int(d)
+                best_unit_id = int(unit_id)
+                best_pos = (int(ux), int(uy))
+        return best_unit_id, best_pos, best_dist
+
     def _count_visible_tiles(self, obs):
         board = obs.get("board", {})
         terrain = board.get("terrain", [])
@@ -1986,6 +2170,49 @@ class TribesGymWrapper(gym.Env):
                 except Exception:
                     continue
         return visible
+
+    def _tile_has_adjacent_fog(self, obs, center_x, center_y):
+        dims = self._board_dimensions_from_obs(obs)
+        if dims is None:
+            return False
+        width, height = dims
+        board = obs.get("board", {})
+        terrain = board.get("terrain", []) if isinstance(board, dict) else []
+        if not isinstance(terrain, list) or not terrain:
+            return False
+
+        cx = int(center_x)
+        cy = int(center_y)
+        for dx, dy in ((0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)):
+            x = cx + int(dx)
+            y = cy + int(dy)
+            if x < 0 or y < 0 or x >= int(width) or y >= int(height):
+                continue
+            try:
+                if int(terrain[y][x]) == 7:
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _unit_had_any_legal_fog_revealing_move(self, legal_actions, obs, unit_id):
+        if unit_id is None:
+            return False
+        if not isinstance(legal_actions, list):
+            return False
+
+        target_unit_id = int(unit_id)
+        for action in legal_actions:
+            if str(action.get("type", "")).upper() != "MOVE":
+                continue
+            move_unit_id, _sx, _sy, dst_x, dst_y = self._extract_move_components(action, obs)
+            if move_unit_id is None or int(move_unit_id) != target_unit_id:
+                continue
+            if dst_x is None or dst_y is None:
+                continue
+            if self._tile_has_adjacent_fog(obs, int(dst_x), int(dst_y)):
+                return True
+        return False
 
     def _assert_all_units_in_bounds(self, obs, context="unknown"):
         dims = self._board_dimensions_from_obs(obs)

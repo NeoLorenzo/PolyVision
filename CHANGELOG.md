@@ -2,6 +2,93 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Learning-017] - 2026-05-07
+
+### Scope
+- Strengthen early-game village acquisition behavior with stricter move-progress constraints and targeted anti-stall penalties.
+- Expand end-of-episode learning telemetry for economy/research timing milestones.
+- Improve procedural capital spacing and regenerate a targeted subset of Phase1 map-pool CSVs to reflect updated generator behavior.
+
+### Implemented
+- Updated reward shaping, move filtering, and telemetry in `pol_env/Tribes/py/register_env.py`:
+  - removed visible-village neglect penalty constants and their runtime application:
+    - removed `VISIBLE_VILLAGE_NEGLECT_PENALTY`,
+    - removed `VISIBLE_VILLAGE_NEGLECT_GRACE_TURNS`,
+    - removed `reward_visible_village_neglect_penalty` info field.
+  - added `USELESS_MOVE_FOG_MISS_PENALTY = 0.35` and new step-time penalty branch for low-value moves:
+    - only considered when combat actions are disabled (`ATTACK` absent from allowed action types),
+    - active while still below 2 cities and within the episode horizon,
+    - applies when a chosen move reveals no new tiles despite at least one legal move for that unit being able to reveal adjacent fog.
+  - added new turn trackers:
+    - `_turn_first_uncaptured_village_visible`,
+    - `_turn_second_city_captured`,
+    - reset both on episode reset and populate as milestones occur.
+  - added `_tech_name_to_obs_idx` vocabulary map initialization from `Types.java` technology ordering to support robust per-tech observation lookups.
+  - expanded reward/decision telemetry:
+    - `avg_city_level`,
+    - `techs_researched`,
+    - `forestry_researched`,
+    - `organization_researched`,
+    - `turn_first_uncaptured_village_visible` (or `-1` when unseen),
+    - `turn_second_city_captured` (or `-1` when uncaptured),
+    - debug reward fields:
+      - `reward_useless_move_fog_miss_penalty`,
+      - `visible_uncaptured_villages_before_move`,
+      - `newly_revealed_tiles`,
+      - `unit_had_any_legal_fog_revealing_move`.
+  - strengthened sub-2-city move forcing logic when visible uncaptured villages exist:
+    - after village-capture and direct village-entering move checks, wrapper now identifies the closest owned unit to visible villages and forces only moves that strictly reduce that unit’s Manhattan distance to visible village targets.
+  - added move-targeting helpers:
+    - `_is_move_reducing_distance_to_targets(...)`,
+    - `_closest_owned_unit_to_targets(...)`.
+  - added fog-opportunity helpers used by anti-stall shaping:
+    - `_tile_has_adjacent_fog(...)`,
+    - `_unit_had_any_legal_fog_revealing_move(...)`.
+  - added city/research telemetry helpers:
+    - `_get_avg_city_level(...)`,
+    - `_get_researched_tech_count(...)`,
+    - `_has_researched_tech(...)`.
+- Expanded terminal rollout telemetry logging in `py_rl/cleanrl/cleanrl/ppo.py`:
+  - added per-episode-end extraction and logging for new wrapper metrics:
+    - `charts/episode_end_avg_city_level_t10`,
+    - `research/episode_end_techs_researched_t10`,
+    - research completion rates:
+      - `research/episode_end_forestry_researched_t10_rate`,
+      - `research/episode_end_organization_researched_t10_rate`,
+    - timing means:
+      - `charts/avg_turn_first_uncaptured_village_visible`,
+      - `charts/avg_turn_second_city_captured`.
+  - supports both vector info arrays and `final_info` fallback extraction paths for these metrics.
+- Improved capital-spacing constraints in `pol_env/Tribes/src/core/levelgen/LevelGenerator.java`:
+  - updated quadrant-capital picker to enforce minimum pairwise capital distance with graceful relaxation:
+    - starts from `initialMinCapitalDistance = max(3, mapSize / 4)`,
+    - filters both local-domain and fallback candidates by `isFarEnoughFromCapitals(...)`,
+    - progressively relaxes distance threshold only when no candidates exist at current threshold.
+  - added helper:
+    - `isFarEnoughFromCapitals(int cell, ArrayList<Integer> capitals, int minDistance)`.
+  - effect: better-separated starting capitals by default without dead-ending map generation when strict spacing is infeasible.
+- Updated Phase1 pool generation tooling in `pol_env/Tribes/py/generate_phase1_map_pool.py`:
+  - added CLI arg `--start-index` (default `0`) to support append/mix generation without overwriting lower-index pool files.
+  - output filename index now uses `start_index + i` while seed progression remains based on loop index and seed-step.
+- Regenerated targeted subset of phase1 pool CSV maps in `pol_env/Tribes/levels/phase1_pool` to reflect generator updates:
+  - modified 78 map files:
+    - `phase1_12x12_pool_006.csv`,
+    - `phase1_12x12_pool_008.csv`,
+    - `phase1_12x12_pool_014.csv`-`phase1_12x12_pool_015.csv`,
+    - `phase1_12x12_pool_019.csv`,
+    - `phase1_12x12_pool_022.csv`,
+    - `phase1_12x12_pool_026.csv`-`phase1_12x12_pool_027.csv`,
+    - `phase1_12x12_pool_039.csv`,
+    - `phase1_12x12_pool_041.csv`,
+    - `phase1_12x12_pool_045.csv`,
+    - `phase1_12x12_pool_050.csv`,
+    - `phase1_12x12_pool_055.csv`-`phase1_12x12_pool_056.csv`,
+    - `phase1_12x12_pool_064.csv`-`phase1_12x12_pool_127.csv`.
+  - these updates are full-content map rewrites (terrain/resources/city/village layouts) produced by the revised generation path.
+- Updated benchmark registry in `model_run_benchmark_log.md`:
+  - added run mapping `Tribes-v0__ppo__1__1778175810` -> `Phase1-Learning-017 (1M)`.
+- Updated `CHANGELOG.md` with this detailed `[Phase1-Learning-017]` entry to keep source-control documentation synchronized with the update.
+
 ## [Phase1-Learning-016] - 2026-05-07
 
 ### Scope

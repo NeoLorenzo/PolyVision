@@ -15,6 +15,12 @@ def main():
     )
     parser.add_argument("--base-seed", type=int, default=1001, help="Base seed for map-seed stream.")
     parser.add_argument("--num-maps", type=int, default=32, help="Number of maps to generate.")
+    parser.add_argument(
+        "--start-index",
+        type=int,
+        default=0,
+        help="Starting output index (lets you append/mix pools without overwriting).",
+    )
     parser.add_argument("--size", type=int, default=12, help="Map size (12 for Phase1).")
     parser.add_argument(
         "--output-dir",
@@ -73,8 +79,9 @@ def main():
     run(compile_cmd, cwd=tribes_dir)
 
     for i in range(int(args.num_maps)):
+        out_idx = int(args.start_index) + i
         map_seed = int(args.base_seed) + (i * int(args.seed_step))
-        rel_out = os.path.join(args.output_dir, f"phase1_12x12_pool_{i:03d}.csv").replace("\\", "/")
+        rel_out = os.path.join(args.output_dir, f"phase1_12x12_pool_{out_idx:03d}.csv").replace("\\", "/")
         run_cmd = [
             "java",
             "-cp",
