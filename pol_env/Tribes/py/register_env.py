@@ -194,6 +194,7 @@ class TribesGymWrapper(gym.Env):
     }
     CATALOG_VERSION = "flat-v1"
     CANONICALIZER_VERSION = "flat-v1-structured"
+    MAX_LEGAL_ACTIONS_DEFAULT = 1024
 
     def __init__(self, level_file=None):
         self.tribes_env = make_default_env()
@@ -234,6 +235,10 @@ class TribesGymWrapper(gym.Env):
         self._info_mode = str(os.environ.get("POLYVISION_INFO_MODE", "fast")).strip().lower()
         if self._info_mode not in ("fast", "debug"):
             self._info_mode = "fast"
+        self._max_legal_actions = max(
+            1,
+            self._parse_int_env("POLYVISION_MAX_LEGAL_ACTIONS", default=self.MAX_LEGAL_ACTIONS_DEFAULT),
+        )
         self._current_legal_actions = []
         self._current_action_mask = None
         self._current_legal_id_to_raw_index = {}
@@ -330,11 +335,14 @@ class TribesGymWrapper(gym.Env):
             "map_height": int(self._catalog.height) if self._catalog is not None else None,
             "global_action_space_n": int(self.action_space.n),
             "action_offset_table_hash": self._catalog_fingerprint,
+            "max_legal_actions": int(self._max_legal_actions),
         }
+        legal_global_ids_padded, legal_action_valid_mask, legal_action_count = self._build_legal_slot_tensors(action_mask)
+        info["legal_global_ids_padded"] = legal_global_ids_padded
+        info["legal_action_valid_mask"] = legal_action_valid_mask
+        info["legal_action_count"] = int(legal_action_count)
         if self._is_debug_info_mode():
             info["action_mask"] = action_mask
-        else:
-            info["legal_global_ids"] = np.flatnonzero(action_mask).astype(np.int32).tolist()
         info.update(self._diag_for_info(diag))
         if self._is_debug_info_mode():
             info["map_path"] = self._current_level_file
@@ -389,14 +397,12 @@ class TribesGymWrapper(gym.Env):
             selected_raw_action = int(legal_id_to_raw_index[selected_global_id])
         else:
             illegal_sampled_global_id = True
-            fallback_to_end_turn = True
             self._illegal_sample_count += 1
-            self._fallback_end_turn_count += 1
-            selected_global_id = int(self._catalog.id_end_turn()) if self._catalog is not None else 0
-            selected_raw_action = legal_id_to_raw_index.get(selected_global_id, None)
-            if selected_raw_action is None:
-                end_turn_idx = next((i for i, a in enumerate(legal_actions) if a.get("type") == "END_TURN"), 0)
-                selected_raw_action = int(end_turn_idx)
+            raise RuntimeError(
+                f"Illegal selected global action ID {selected_global_id}; "
+                f"valid_count={len(legal_id_to_raw_index)} "
+                f"sample_valid_ids={list(sorted(legal_id_to_raw_index.keys()))[:20]}"
+            )
 
         selected_action_type = legal_actions[selected_raw_action].get("type", "UNKNOWN")
         self._total_action_decisions += 1
@@ -449,14 +455,10 @@ class TribesGymWrapper(gym.Env):
                 chosen_move_unit_id = int(parsed_move[0])
                 chosen_move_dest = (int(parsed_move[1]), int(parsed_move[2]))
             if not self._is_move_destination_within_board(selected_action, start_obs):
-                end_turn_idx = next((i for i, a in enumerate(legal_actions) if a.get("type") == "END_TURN"), 0)
-                selected_raw_action = end_turn_idx
-                selected_action_type = legal_actions[selected_raw_action].get("type", "UNKNOWN")
-                selected_global_id = int(self._catalog.id_end_turn()) if self._catalog is not None else selected_global_id
-                fallback_to_end_turn = True
-                self._fallback_end_turn_count += 1
-                if selected_action_type == "END_TURN":
-                    self._turn_count += 1
+                raise RuntimeError(
+                    f"Selected MOVE action has out-of-bounds destination: "
+                    f"global_id={selected_global_id}, raw_idx={selected_raw_action}, repr={selected_action.get('repr', '')}"
+                )
 
         obs, _, done, info = self.tribes_env.step(selected_raw_action)
         obs_after_selected = obs
@@ -586,6 +588,7 @@ class TribesGymWrapper(gym.Env):
         info["map_height"] = int(self._catalog.height) if self._catalog is not None else None
         info["global_action_space_n"] = int(self.action_space.n)
         info["action_offset_table_hash"] = self._catalog_fingerprint
+        info["max_legal_actions"] = int(self._max_legal_actions)
         info["turn_count"] = self._turn_count
         info["city_count"] = current_city_count
         info["fog_tiles_cleared_total"] = int(self._episode_fog_tiles_cleared)
@@ -595,6 +598,10 @@ class TribesGymWrapper(gym.Env):
         info["turn"] = int(self._turn_count)
         info["unit_count"] = int(self._get_owned_unit_count(obs))
         info["stars"] = int(self._get_tribe_stars(obs, tribe_id=0))
+        post_legal_global_ids_padded, post_legal_action_valid_mask, post_legal_action_count = self._build_legal_slot_tensors(post_action_mask)
+        info["legal_global_ids_padded"] = post_legal_global_ids_padded
+        info["legal_action_valid_mask"] = post_legal_action_valid_mask
+        info["legal_action_count"] = int(post_legal_action_count)
         info.update(self._diag_for_info(post_diag))
 
         if self._is_debug_info_mode() and selected_action_type == "MOVE" and chosen_move_unit_id is not None and chosen_move_dest is not None:
@@ -682,6 +689,28 @@ class TribesGymWrapper(gym.Env):
             "legal_action_count_by_type",
         )
         return {k: diag[k] for k in keep if k in diag}
+
+    def _build_legal_slot_tensors(self, action_mask):
+        if action_mask is None:
+            raise RuntimeError("action_mask is required to build legal slot tensors.")
+        legal_ids = np.flatnonzero(np.asarray(action_mask, dtype=np.int8)).astype(np.int32)
+        if legal_ids.size > int(self._max_legal_actions):
+            raise RuntimeError(
+                f"legal_action_count={int(legal_ids.size)} exceeded max_legal_actions={int(self._max_legal_actions)}"
+            )
+        if legal_ids.size > 0:
+            unique_size = np.unique(legal_ids).size
+            if int(unique_size) != int(legal_ids.size):
+                raise RuntimeError(
+                    f"Duplicate legal global IDs detected: count={int(legal_ids.size)} unique={int(unique_size)}"
+                )
+        padded = np.zeros((int(self._max_legal_actions),), dtype=np.int32)
+        valid_mask = np.zeros((int(self._max_legal_actions),), dtype=np.bool_)
+        n = int(legal_ids.size)
+        if n > 0:
+            padded[:n] = legal_ids
+            valid_mask[:n] = True
+        return padded, valid_mask, n
 
     def _sanitize_info_value(self, value):
         # Keep common scalar types as-is.

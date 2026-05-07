@@ -1,5 +1,6 @@
 import argparse
 import glob
+import json
 import os
 import re
 import time
@@ -24,6 +25,25 @@ def find_latest_model(explicit_path: str | None) -> str:
         raise FileNotFoundError("No .cleanrl_model files found under runs/**")
     candidates.sort(key=lambda p: os.path.getmtime(p), reverse=True)
     return candidates[0]
+
+
+def load_action_interface_meta(model_path: str) -> dict:
+    meta_path = model_path + ".action_interface.json"
+    if not os.path.isfile(meta_path):
+        return {}
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def infer_actor_mode_from_state_dict(state_dict: dict) -> str:
+    if not isinstance(state_dict, dict):
+        return "legal_only"
+    has_dense_actor = any(str(k).startswith("actor.") for k in state_dict.keys())
+    return "dense_debug" if has_dense_actor else "legal_only"
 
 
 def safe_array_mask(mask, action_n: int) -> np.ndarray:
@@ -352,6 +372,12 @@ def main() -> None:
         os.environ["POLYVISION_BASE_SEED"] = str(int(args.base_seed))
 
     model_path = find_latest_model(args.model_path)
+    meta = load_action_interface_meta(model_path)
+    meta_actor_mode = str(meta.get("actor_mode", "")).strip().lower()
+    state_dict = torch.load(model_path, map_location="cpu")
+    actor_mode = meta_actor_mode if meta_actor_mode in ("legal_only", "dense_debug") else infer_actor_mode_from_state_dict(state_dict)
+    max_legal_actions = int(meta.get("max_legal_actions", 1024))
+    os.environ["POLYVISION_MAX_LEGAL_ACTIONS"] = str(max(1, max_legal_actions))
     device = torch.device(args.device if torch.cuda.is_available() or args.device == "cpu" else "cpu")
 
     env = TribesGymWrapper()
@@ -360,7 +386,7 @@ def main() -> None:
             single_observation_space=env.observation_space,
             single_action_space=env.action_space,
         )
-        agent = Agent(env_adapter).to(device)
+        agent = Agent(env_adapter, actor_mode=actor_mode, max_legal_actions=max_legal_actions).to(device)
 
         state_dict = torch.load(model_path, map_location=device)
         agent.load_state_dict(state_dict, strict=False)
@@ -368,6 +394,7 @@ def main() -> None:
 
         print("=" * 100)
         print(f"Loaded model: {model_path}")
+        print(f"actor_mode={actor_mode} | max_legal_actions={max_legal_actions}")
         print("=" * 100)
 
         if args.show_opening:
@@ -443,11 +470,14 @@ def main() -> None:
             env._last_city_count = env._starting_city_count
             env._moved_on_t0 = False
             env._visible_village_streak_turns = 0
-            action_mask, allowed_indices = env._build_action_mask_and_indices()
+            legal_actions = env.tribes_env.list_actions()
+            action_mask, legal_id_to_raw_index, _diag = env._build_action_mask_and_mapping(legal_actions, obs=obs)
+            legal_global_ids = np.flatnonzero(action_mask).astype(np.int32).tolist()
+            allowed_indices = [int(legal_id_to_raw_index[int(gid)]) for gid in legal_global_ids if int(gid) in legal_id_to_raw_index]
             obs = env._dict_to_array(obs)
             info = {
-                "valid_actions": len(allowed_indices),
-                "raw_valid_actions": env.tribes_env.action_space_n,
+                "valid_actions": int(np.sum(action_mask)),
+                "raw_valid_actions": len(legal_actions),
                 "turn_count": env._turn_count,
                 "action_mask": action_mask,
             }
@@ -472,23 +502,48 @@ def main() -> None:
 
         while not done:
             legal_actions = env.tribes_env.list_actions()
-            action_mask, allowed_indices = env._build_action_mask_and_indices(legal_actions)
+            action_mask, legal_id_to_raw_index, _diag = env._build_action_mask_and_mapping(legal_actions)
+            legal_global_ids = np.flatnonzero(action_mask).astype(np.int32).tolist()
+            allowed_indices = [int(legal_id_to_raw_index[int(gid)]) for gid in legal_global_ids if int(gid) in legal_id_to_raw_index]
+            slot_mask = np.ones((len(allowed_indices),), dtype=np.float32)
 
             action_mask = safe_array_mask(action_mask, env.action_space.n)
             obs_t = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
-            mask_t = torch.tensor(action_mask, dtype=torch.float32, device=device).unsqueeze(0)
-
-            with torch.no_grad():
-                value_t = agent.get_value(obs_t)
-                logits = agent.actor(obs_t)
-                masked_logits = logits.masked_fill(mask_t <= 0, -1e8)
-                probs = torch.softmax(masked_logits, dim=-1)
-                dist = Categorical(logits=masked_logits)
-                action_t = dist.sample()
-
-            action = int(action_t.item())
-            value = float(value_t.squeeze().detach().cpu().item())
-            probs_np = probs.squeeze(0).detach().cpu().numpy()
+            chosen_pos = -1
+            if actor_mode == "dense_debug":
+                mask_t = torch.tensor(action_mask, dtype=torch.float32, device=device).unsqueeze(0)
+                with torch.no_grad():
+                    value_t = agent.get_value(obs_t)
+                    logits = agent.actor(obs_t)
+                    masked_logits = logits.masked_fill(mask_t <= 0, -1e8)
+                    probs = torch.softmax(masked_logits, dim=-1)
+                    dist = Categorical(logits=masked_logits)
+                    action_t = dist.sample()
+                action = int(action_t.item())
+                value = float(value_t.squeeze().detach().cpu().item())
+                probs_np_global = probs.squeeze(0).detach().cpu().numpy()
+                probs_np = np.array([float(probs_np_global[int(gid)]) for gid in legal_global_ids], dtype=np.float32)
+                if action in legal_global_ids:
+                    chosen_pos = int(legal_global_ids.index(action))
+            else:
+                padded_ids, valid_mask, legal_count = env._build_legal_slot_tensors(action_mask)
+                legal_ids_t = torch.tensor(padded_ids, dtype=torch.long, device=device).unsqueeze(0)
+                legal_valid_t = torch.tensor(valid_mask, dtype=torch.bool, device=device).unsqueeze(0)
+                with torch.no_grad():
+                    action_t, slot_t, _logp_t, _ent_t, value_t = agent.get_action_and_value(
+                        obs_t,
+                        legal_global_ids=legal_ids_t,
+                        legal_action_valid_mask=legal_valid_t,
+                    )
+                    h = agent.state_encoder(obs_t)
+                    legal_emb = agent.action_embedding(legal_ids_t.long())
+                    slot_logits = torch.einsum("bd,bkd->bk", h, legal_emb)
+                    slot_logits = slot_logits.masked_fill(~legal_valid_t, -1e8)
+                    probs_slot = torch.softmax(slot_logits, dim=-1)
+                action = int(action_t.item())
+                chosen_pos = int(slot_t.item())
+                value = float(value_t.squeeze().detach().cpu().item())
+                probs_np = probs_slot.squeeze(0).detach().cpu().numpy()[:int(legal_count)]
 
             turn = info.get("turn_count", getattr(env, "_turn_count", "NA")) if isinstance(info, dict) else "NA"
             spt = compute_current_spt(env)
@@ -505,15 +560,15 @@ def main() -> None:
                 for pos, raw_idx in enumerate(allowed_indices):
                     if pos >= len(probs_np):
                         continue
-                    if action_mask[pos] <= 0:
+                    if pos >= len(slot_mask) or slot_mask[pos] <= 0:
                         continue
                     act = legal_actions[raw_idx] if raw_idx < len(legal_actions) else {}
                     act_type = str(act.get("type", "UNKNOWN"))
                     raw_repr = str(act.get("repr", act_type))
                     act_repr = format_action_for_debug(raw_repr, act_type, env)
-                    chosen = "  <-- chosen" if pos == action else ""
+                    chosen = "  <-- chosen" if pos == chosen_pos else ""
                     print(f"  [{pos:03d}] {format_pct(float(probs_np[pos]))} | {act_type:16s} | {act_repr}{chosen}")
-                print_policy_move_grid(env, legal_actions, allowed_indices, action_mask, probs_np, action)
+                print_policy_move_grid(env, legal_actions, allowed_indices, slot_mask, probs_np, chosen_pos)
 
             if args.manual_step:
                 user_in = input("Press Enter for next action ('q' + Enter to quit): ").strip().lower()
@@ -525,9 +580,8 @@ def main() -> None:
             chosen_action_label = "UNKNOWN"
             chosen_move_unit = None
             chosen_move_dest = None
-            if allowed_indices:
-                selected_allowed_pos = action % len(allowed_indices)
-                chosen_raw_idx = allowed_indices[selected_allowed_pos]
+            if int(action) in legal_id_to_raw_index:
+                chosen_raw_idx = int(legal_id_to_raw_index[int(action)])
                 if 0 <= chosen_raw_idx < len(legal_actions):
                     chosen_act = legal_actions[chosen_raw_idx]
                     chosen_type = str(chosen_act.get("type", "UNKNOWN"))

@@ -2,7 +2,92 @@
 
 All notable changes to this project are documented in this file.
 
-## [Phase1-Data-014] - 2026-05-07
+## [Phase1-Data-015] - 2026-05-07
+
+### Scope
+- Complete the trainer/evaluator transition onto legal-slot action tensors backed by the global action-ID catalog.
+- Remove remaining fallback behavior in the wrapper and enforce strict fail-fast semantics for illegal IDs and out-of-bounds move selections.
+- Align run metadata, logging, and model-sidecar interface fields with the new actor-mode contract.
+
+### Implemented
+- Updated legal-slot interface and fail-fast behavior in `pol_env/Tribes/py/register_env.py`:
+  - added `MAX_LEGAL_ACTIONS_DEFAULT = 1024` and runtime override via `POLYVISION_MAX_LEGAL_ACTIONS`.
+  - added wrapper field `_max_legal_actions` with validated positive bound.
+  - reset/step info now includes:
+    - `max_legal_actions`,
+    - `legal_global_ids_padded`,
+    - `legal_action_valid_mask`,
+    - `legal_action_count`.
+  - removed fast-mode `legal_global_ids` emission path in favor of fixed-width padded legal-slot tensors.
+  - added `_build_legal_slot_tensors(action_mask)`:
+    - converts legal global IDs into fixed-width padded tensors,
+    - emits matching boolean valid-mask,
+    - raises if legal count exceeds `max_legal_actions`,
+    - raises on duplicate legal IDs.
+  - hardened action selection path:
+    - illegal sampled global IDs now raise `RuntimeError` immediately (instead of fallback-to-`END_TURN`).
+    - selected `MOVE` actions with out-of-bounds destination now raise `RuntimeError` immediately (instead of fallback-to-`END_TURN`).
+  - retained action-interface diagnostics while tightening enforcement semantics around illegal sampling and legal-slot integrity.
+- Updated PPO actor/training pipeline for legal-slot mode in `py_rl/cleanrl/cleanrl/ppo.py`:
+  - added args:
+    - `actor_mode` (`legal_only` default, `dense_debug` optional),
+    - `max_legal_actions`,
+    - `old_logprob_recompute_tol`.
+  - extended `Agent`:
+    - supports dual actor modes:
+      - `dense_debug`: legacy dense logits head over full action space,
+      - `legal_only`: state encoder + global action embedding scored only over legal-slot candidates.
+    - `get_action_and_value(...)` now supports:
+      - dense masked mode,
+      - legal-slot mode with `legal_global_ids` + `legal_action_valid_mask` + optional `selected_slot`.
+  - added padded legal-tensor extraction helpers:
+    - vector path: `_extract_vector_legal_tensors(...)`,
+    - single-env path: `_extract_action_mask_from_info_dict(...)` now reads padded legal tensors.
+    - vector dense-mask fallback path now also supports reconstructing mask from `legal_global_ids_padded` + `legal_action_valid_mask`.
+  - added startup guards:
+    - validates `actor_mode`,
+    - validates `max_legal_actions > 0`,
+    - exports `POLYVISION_MAX_LEGAL_ACTIONS`,
+    - checks actor/action-embedding dimensions against env action space.
+  - added rollout buffers for legal-slot mode:
+    - `selected_slots`,
+    - `legal_global_ids_buf`,
+    - `legal_action_valid_mask_buf`,
+    - and dense `action_masks` buffer for `dense_debug`.
+  - added strict invariants:
+    - selected slot must map back to sampled global action ID during rollout,
+    - env-reported `selected_global_id` must match sampled action,
+    - pre-update recompute of old logprobs must match stored values within tolerance,
+    - minibatch legal-slot mapping consistency checks during PPO updates.
+  - expanded validator checks:
+    - verifies padded legal ID/mask length consistency,
+    - checks `legal_action_count == valid_mask.sum`,
+    - checks duplicates absent in valid padded IDs.
+  - added action-interface metadata fields:
+    - now includes `actor_mode` and `max_legal_actions`.
+  - added action-interface startup print and tensorboard metadata dump (`meta/action_interface`).
+  - introduced `log_scalar(...)` helper:
+    - writes to TensorBoard and, when tracking is enabled, mirrors metrics to W&B with `global_step`.
+  - switched scalar logging calls to `log_scalar(...)` for charts/losses/SPS/end-of-episode metrics.
+- Updated evaluator compatibility with legal-slot actor mode in `evaluate_brain.py`:
+  - added model-sidecar action-interface metadata loading (`.action_interface.json`) via `load_action_interface_meta(...)`.
+  - added actor-mode inference fallback from state dict (`infer_actor_mode_from_state_dict(...)`).
+  - sets `POLYVISION_MAX_LEGAL_ACTIONS` from model metadata (default fallback retained).
+  - constructs `Agent(..., actor_mode=..., max_legal_actions=...)` to match training-side architecture.
+  - prints resolved actor mode and max legal actions at startup.
+  - replaced direct use of `_build_action_mask_and_indices(...)` with `_build_action_mask_and_mapping(...)`.
+  - in legal-only mode:
+    - builds legal-slot tensors with `_build_legal_slot_tensors(...)`,
+    - samples through `agent.get_action_and_value(...)` legal-slot interface,
+    - derives per-legal-action probabilities from slot logits for debug output.
+  - in dense-debug mode:
+    - preserves dense masked sampling behavior.
+  - action-to-raw mapping now resolves through canonical `legal_id_to_raw_index` instead of modulo position remapping.
+- Updated benchmark registry in `model_run_benchmark_log.md`:
+  - added run mapping `Tribes-v0__ppo__1__1778147403` -> `Phase1-Data-015 (1M)`.
+- Updated `CHANGELOG.md` with this detailed `[Phase1-Data-015]` entry to keep source-control documentation fully in sync with the update.
+
+## [Phase1-Data-014] - 2026-05-06
 
 ### Scope
 - Convert the Phase 1 Python action interface from positional/variable indexing to a deterministic global action-ID contract.

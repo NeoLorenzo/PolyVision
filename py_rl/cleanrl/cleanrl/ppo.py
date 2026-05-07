@@ -111,6 +111,12 @@ class Args:
     """abort training if illegal_sample_rate exceeds this threshold (0.0001 = 0.01%)"""
     max_fallback_end_turn_rate: float = 0.0001
     """abort training if fallback_end_turn_rate exceeds this threshold (0.0001 = 0.01%)"""
+    actor_mode: str = "legal_only"
+    """policy actor mode: legal_only (default) or dense_debug"""
+    max_legal_actions: int = 1024
+    """fixed legal-action slot tensor length for legal_only actor mode"""
+    old_logprob_recompute_tol: float = 1e-5
+    """absolute tolerance for pre-update old_logprob recomputation invariant"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -144,8 +150,12 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class Agent(nn.Module):
-    def __init__(self, envs):
+    def __init__(self, envs, actor_mode: str = "legal_only", max_legal_actions: int = 1024):
         super().__init__()
+        self.actor_mode = str(actor_mode).strip().lower()
+        if self.actor_mode not in ("legal_only", "dense_debug"):
+            raise ValueError(f"Unsupported actor_mode={actor_mode}. Expected legal_only or dense_debug.")
+        self.max_legal_actions = int(max_legal_actions)
         self.critic = nn.Sequential(
             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
             nn.Tanh(),
@@ -153,27 +163,86 @@ class Agent(nn.Module):
             nn.Tanh(),
             layer_init(nn.Linear(64, 1), std=1.0),
         )
-        self.actor = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, envs.single_action_space.n), std=0.01),
-        )
+        if self.actor_mode == "dense_debug":
+            self.actor = nn.Sequential(
+                layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
+                nn.Tanh(),
+                layer_init(nn.Linear(64, 64)),
+                nn.Tanh(),
+                layer_init(nn.Linear(64, envs.single_action_space.n), std=0.01),
+            )
+            self.state_encoder = None
+            self.action_embedding = None
+        else:
+            self.state_encoder = nn.Sequential(
+                layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
+                nn.Tanh(),
+                layer_init(nn.Linear(64, 64)),
+                nn.Tanh(),
+            )
+            self.action_embedding = nn.Embedding(envs.single_action_space.n, 64)
+            nn.init.normal_(self.action_embedding.weight, mean=0.0, std=0.02)
+            self.actor = None
 
     def get_value(self, x):
         return self.critic(x)
 
-    def get_action_and_value(self, x, action=None, action_mask=None):
-        logits = self.actor(x)
-        if action_mask is not None:
-            # Mask invalid actions by pushing logits to a very large negative value.
-            # action_mask is expected to be 1 for valid actions, 0 for invalid.
-            logits = logits.masked_fill(action_mask <= 0, -1e8)
+    def get_action_and_value(
+        self,
+        x,
+        action=None,
+        action_mask=None,
+        legal_global_ids=None,
+        legal_action_valid_mask=None,
+        selected_slot=None,
+    ):
+        if self.actor_mode == "dense_debug":
+            logits = self.actor(x)
+            if action_mask is not None:
+                logits = logits.masked_fill(action_mask <= 0, -1e8)
+            probs = Categorical(logits=logits)
+            if action is None:
+                action = probs.sample()
+            return action, None, probs.log_prob(action), probs.entropy(), self.critic(x)
+
+        if legal_global_ids is None or legal_action_valid_mask is None:
+            raise RuntimeError("legal_only actor_mode requires legal_global_ids and legal_action_valid_mask.")
+        if legal_global_ids.ndim != 2 or legal_action_valid_mask.ndim != 2:
+            raise RuntimeError("legal tensors must be rank-2: [batch, max_legal_actions].")
+        if legal_global_ids.shape != legal_action_valid_mask.shape:
+            raise RuntimeError(
+                f"legal tensor shape mismatch: ids={tuple(legal_global_ids.shape)} "
+                f"mask={tuple(legal_action_valid_mask.shape)}"
+            )
+
+        h = self.state_encoder(x)
+        legal_ids = legal_global_ids.long()
+        valid = legal_action_valid_mask.bool()
+        # Score only legal candidate IDs using state-action dot products.
+        legal_emb = self.action_embedding(legal_ids)
+        logits = torch.einsum("bd,bkd->bk", h, legal_emb)
+        logits = logits.masked_fill(~valid, -1e8)
         probs = Categorical(logits=logits)
-        if action is None:
-            action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy(), self.critic(x)
+
+        if selected_slot is None:
+            selected_slot = probs.sample()
+        else:
+            selected_slot = selected_slot.long()
+        if selected_slot.ndim != 1:
+            selected_slot = selected_slot.view(-1)
+        batch_n = legal_ids.shape[0]
+        if selected_slot.shape[0] != batch_n:
+            raise RuntimeError(
+                f"selected_slot batch mismatch: got {selected_slot.shape[0]}, expected {batch_n}"
+            )
+        if torch.any(selected_slot < 0) or torch.any(selected_slot >= legal_ids.shape[1]):
+            raise RuntimeError("selected_slot out of range for legal slot tensor.")
+        slot_valid = valid.gather(1, selected_slot.unsqueeze(1)).squeeze(1)
+        if not torch.all(slot_valid):
+            raise RuntimeError("selected_slot points to invalid/padded legal slot.")
+
+        selected_global_id = legal_ids.gather(1, selected_slot.unsqueeze(1)).squeeze(1)
+        return selected_global_id, selected_slot, probs.log_prob(selected_slot), probs.entropy(), self.critic(x)
 
 
 def _extract_vector_action_mask(infos, num_envs, action_dim, device):
@@ -199,6 +268,38 @@ def _extract_vector_action_mask(infos, num_envs, action_dim, device):
                 for i in range(num_envs):
                     if vmask[i]:
                         mask[i] = arr[i]
+    elif infos is not None and "legal_global_ids_padded" in infos and "legal_action_valid_mask" in infos:
+        mask = np.zeros((num_envs, action_dim), dtype=np.float32)
+        raw_ids = infos["legal_global_ids_padded"]
+        raw_valid = infos["legal_action_valid_mask"]
+        ids_present = infos.get("_legal_global_ids_padded", None)
+        valid_present = infos.get("_legal_action_valid_mask", None)
+
+        def _fill_from_padded(row, ids_like, valid_like):
+            ids_arr = np.asarray(ids_like, dtype=np.int64).reshape(-1)
+            valid_arr = np.asarray(valid_like, dtype=bool).reshape(-1)
+            if ids_arr.shape[0] != valid_arr.shape[0]:
+                return
+            ids_arr = ids_arr[valid_arr]
+            for gid in ids_arr:
+                g = int(gid)
+                if 0 <= g < action_dim:
+                    row[g] = 1.0
+
+        try:
+            if ids_present is None or valid_present is None:
+                for i in range(num_envs):
+                    _fill_from_padded(mask[i], raw_ids[i], raw_valid[i])
+            else:
+                ip = np.asarray(ids_present, dtype=bool).reshape(-1)
+                vp = np.asarray(valid_present, dtype=bool).reshape(-1)
+                for i in range(num_envs):
+                    if i < len(ip) and i < len(vp) and ip[i] and vp[i]:
+                        _fill_from_padded(mask[i], raw_ids[i], raw_valid[i])
+                    else:
+                        mask[i] = 1.0
+        except Exception:
+            mask = np.ones((num_envs, action_dim), dtype=np.float32)
     elif infos is not None and "legal_global_ids" in infos:
         # Fast path: each env returns sparse legal global IDs; rebuild dense mask locally.
         mask = np.zeros((num_envs, action_dim), dtype=np.float32)
@@ -249,6 +350,23 @@ def _extract_action_mask_from_info_dict(info, action_dim):
         arr = np.asarray(info.get("action_mask", None), dtype=np.float32)
         if arr.ndim == 1 and arr.shape[0] == action_dim:
             return arr
+    if "legal_global_ids_padded" in info and "legal_action_valid_mask" in info:
+        mask = np.zeros((action_dim,), dtype=np.float32)
+        try:
+            ids_arr = np.asarray(info.get("legal_global_ids_padded", []), dtype=np.int64).reshape(-1)
+            valid_arr = np.asarray(info.get("legal_action_valid_mask", []), dtype=bool).reshape(-1)
+            if ids_arr.shape[0] != valid_arr.shape[0]:
+                return None
+            valid_ids = ids_arr[valid_arr]
+        except Exception:
+            return None
+        if valid_ids.size > 0 and np.unique(valid_ids).size != valid_ids.size:
+            raise RuntimeError("Validator failed: duplicate IDs in valid legal_global_ids_padded.")
+        for gid in valid_ids:
+            g = int(gid)
+            if 0 <= g < action_dim:
+                mask[g] = 1.0
+        return mask
     if "legal_global_ids" in info:
         mask = np.zeros((action_dim,), dtype=np.float32)
         try:
@@ -264,6 +382,61 @@ def _extract_action_mask_from_info_dict(info, action_dim):
                 mask[g] = 1.0
         return mask
     return None
+
+
+def _extract_vector_legal_tensors(infos, num_envs, max_legal_actions, action_dim, device):
+    if infos is None:
+        raise RuntimeError("Missing infos payload; cannot extract legal tensors for legal_only actor.")
+    if "legal_global_ids_padded" not in infos or "legal_action_valid_mask" not in infos:
+        raise RuntimeError("Infos missing legal_global_ids_padded/legal_action_valid_mask for legal_only actor.")
+
+    raw_ids = np.asarray(infos["legal_global_ids_padded"])
+    raw_valid = np.asarray(infos["legal_action_valid_mask"])
+    ids_mask = infos.get("_legal_global_ids_padded", None)
+    valid_mask = infos.get("_legal_action_valid_mask", None)
+
+    ids_out = np.zeros((num_envs, max_legal_actions), dtype=np.int64)
+    valid_out = np.zeros((num_envs, max_legal_actions), dtype=np.bool_)
+
+    def _copy_row(i, src_ids, src_valid):
+        ids_row = np.asarray(src_ids, dtype=np.int64).reshape(-1)
+        valid_row = np.asarray(src_valid, dtype=bool).reshape(-1)
+        if ids_row.shape[0] != max_legal_actions or valid_row.shape[0] != max_legal_actions:
+            raise RuntimeError(
+                f"legal tensor shape mismatch at env={i}: ids={ids_row.shape}, valid={valid_row.shape}, "
+                f"expected=({max_legal_actions},)"
+            )
+        if valid_row.any():
+            valid_ids = ids_row[valid_row]
+            if np.unique(valid_ids).size != valid_ids.size:
+                raise RuntimeError(f"Duplicate valid legal_global_ids_padded detected at env={i}.")
+            if np.any(valid_ids < 0) or np.any(valid_ids >= action_dim):
+                raise RuntimeError(f"Out-of-range legal global ID detected at env={i}.")
+        ids_out[i] = ids_row
+        valid_out[i] = valid_row
+
+    if raw_ids.ndim == 2 and raw_valid.ndim == 2 and raw_ids.shape[0] == num_envs and raw_valid.shape[0] == num_envs:
+        for i in range(num_envs):
+            _copy_row(i, raw_ids[i], raw_valid[i])
+    else:
+        if ids_mask is None or valid_mask is None:
+            raise RuntimeError(
+                f"Cannot align legal tensors in vector infos: ids_shape={raw_ids.shape}, valid_shape={raw_valid.shape}"
+            )
+        ids_mask_arr = np.asarray(ids_mask, dtype=bool).reshape(-1)
+        valid_mask_arr = np.asarray(valid_mask, dtype=bool).reshape(-1)
+        if ids_mask_arr.shape[0] != num_envs or valid_mask_arr.shape[0] != num_envs:
+            raise RuntimeError("Invalid _legal_* validity masks in vector infos.")
+        for i in range(num_envs):
+            if ids_mask_arr[i] and valid_mask_arr[i]:
+                _copy_row(i, raw_ids[i], raw_valid[i])
+            else:
+                raise RuntimeError(f"Missing legal tensor row for env={i} in legal_only actor mode.")
+
+    return (
+        torch.tensor(ids_out, dtype=torch.long, device=device),
+        torch.tensor(valid_out, dtype=torch.bool, device=device),
+    )
 
 
 def _extract_vector_field(infos, key, num_envs, default_value=None):
@@ -357,6 +530,19 @@ def _validate_action_interface(env_id: str, states: int, seed: int):
                 raise RuntimeError("Validator failed: action_mask missing or not 1D.")
             if int(np.sum(action_mask)) != mask_ones:
                 raise RuntimeError("Validator failed: action_mask sum mismatch with mask_ones.")
+            if "legal_global_ids_padded" in info and "legal_action_valid_mask" in info:
+                ids_arr = np.asarray(info.get("legal_global_ids_padded", []), dtype=np.int64).reshape(-1)
+                valid_arr = np.asarray(info.get("legal_action_valid_mask", []), dtype=bool).reshape(-1)
+                if ids_arr.shape[0] != valid_arr.shape[0]:
+                    raise RuntimeError("Validator failed: legal ids/mask length mismatch.")
+                valid_ids = ids_arr[valid_arr]
+                if valid_ids.size > 0 and np.unique(valid_ids).size != valid_ids.size:
+                    raise RuntimeError("Validator failed: duplicate IDs in valid legal_global_ids_padded.")
+                legal_count = int(info.get("legal_action_count", -1))
+                if legal_count >= 0 and legal_count != int(valid_arr.sum()):
+                    raise RuntimeError(
+                        f"Validator failed: legal_action_count ({legal_count}) != valid_mask.sum ({int(valid_arr.sum())})."
+                    )
 
             valid_ids = np.where(action_mask > 0)[0]
             if len(valid_ids) == 0:
@@ -432,17 +618,24 @@ def _validate_action_interface(env_id: str, states: int, seed: int):
 
 if __name__ == "__main__":
     args = tyro.cli(Args)
+    args.actor_mode = str(args.actor_mode).strip().lower()
+    if args.actor_mode not in ("legal_only", "dense_debug"):
+        raise RuntimeError(f"Unsupported --actor-mode {args.actor_mode}. Expected legal_only or dense_debug.")
+    if int(args.max_legal_actions) <= 0:
+        raise RuntimeError("--max-legal-actions must be > 0.")
+    os.environ["POLYVISION_MAX_LEGAL_ACTIONS"] = str(int(args.max_legal_actions))
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     run_dir = os.path.join("runs", run_name)
     os.makedirs(run_dir, exist_ok=True)
+    wandb_run = None
     if args.track:
         import wandb
         import os
         import sys
-        wandb.init(
+        wandb_run = wandb.init(
             project=args.wandb_project_name,
             entity=args.wandb_entity,
             sync_tensorboard=True,
@@ -451,7 +644,16 @@ if __name__ == "__main__":
             monitor_gym=True,
             save_code=True,
         )
+        # Force W&B-native charts to use global_step as x-axis.
+        wandb_run.define_metric("global_step")
+        wandb_run.define_metric("*", step_metric="global_step")
     writer = SummaryWriter(run_dir)
+
+    def log_scalar(name, value, step):
+        writer.add_scalar(name, value, step)
+        if wandb_run is not None:
+            wandb_run.log({"global_step": int(step), name: float(value)})
+
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
@@ -485,7 +687,7 @@ if __name__ == "__main__":
     )
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
-    agent = Agent(envs).to(device)
+    agent = Agent(envs, actor_mode=args.actor_mode, max_legal_actions=args.max_legal_actions).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -495,6 +697,24 @@ if __name__ == "__main__":
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
     dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
     values = torch.zeros((args.num_steps, args.num_envs)).to(device)
+    selected_slots = torch.zeros((args.num_steps, args.num_envs), dtype=torch.long, device=device)
+    legal_global_ids_buf = torch.zeros(
+        (args.num_steps, args.num_envs, args.max_legal_actions),
+        dtype=torch.long,
+        device=device,
+    )
+    legal_action_valid_mask_buf = torch.zeros(
+        (args.num_steps, args.num_envs, args.max_legal_actions),
+        dtype=torch.bool,
+        device=device,
+    )
+    action_masks = None
+    if args.actor_mode == "dense_debug":
+        action_masks = torch.zeros(
+            (args.num_steps, args.num_envs, envs.single_action_space.n),
+            dtype=torch.bool,
+            device=device,
+        )
 
     # TRY NOT TO MODIFY: start the game
     global_step = 0
@@ -502,29 +722,52 @@ if __name__ == "__main__":
     next_obs, reset_infos = envs.reset(seed=args.seed)
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
-    next_action_mask = _extract_vector_action_mask(
-        reset_infos,
-        args.num_envs,
-        envs.single_action_space.n,
-        device,
-    )
-    if next_action_mask.shape[-1] != envs.single_action_space.n:
-        raise RuntimeError(
-            f"action_mask.shape[-1]={next_action_mask.shape[-1]} does not match action space n={envs.single_action_space.n}"
+    next_action_mask = None
+    next_legal_global_ids = None
+    next_legal_action_valid_mask = None
+    if args.actor_mode == "dense_debug":
+        next_action_mask = _extract_vector_action_mask(
+            reset_infos,
+            args.num_envs,
+            envs.single_action_space.n,
+            device,
         )
-    if agent.actor[-1].out_features != envs.single_action_space.n:
-        raise RuntimeError(
-            f"ppo_policy_output_dim={agent.actor[-1].out_features} does not match env.action_space.n={envs.single_action_space.n}"
+        if next_action_mask.shape[-1] != envs.single_action_space.n:
+            raise RuntimeError(
+                f"action_mask.shape[-1]={next_action_mask.shape[-1]} does not match action space n={envs.single_action_space.n}"
+            )
+    else:
+        next_legal_global_ids, next_legal_action_valid_mask = _extract_vector_legal_tensors(
+            reset_infos,
+            args.num_envs,
+            int(args.max_legal_actions),
+            envs.single_action_space.n,
+            device,
         )
+    if args.actor_mode == "dense_debug":
+        if agent.actor[-1].out_features != envs.single_action_space.n:
+            raise RuntimeError(
+                f"ppo_policy_output_dim={agent.actor[-1].out_features} does not match env.action_space.n={envs.single_action_space.n}"
+            )
+    else:
+        if agent.action_embedding is None:
+            raise RuntimeError("legal_only mode requires action_embedding to be initialized.")
+        if int(agent.action_embedding.num_embeddings) != int(envs.single_action_space.n):
+            raise RuntimeError(
+                f"action_embedding.num_embeddings={agent.action_embedding.num_embeddings} "
+                f"does not match env.action_space.n={envs.single_action_space.n}"
+            )
     action_interface_meta = {
+        "actor_mode": args.actor_mode,
         "catalog_version": None,
         "canonicalizer_version": None,
         "map_width": None,
         "map_height": None,
         "global_action_space_n": int(envs.single_action_space.n),
         "action_offset_table_hash": None,
+        "max_legal_actions": int(args.max_legal_actions),
     }
-    for k in ["catalog_version", "canonicalizer_version", "map_width", "map_height", "global_action_space_n", "action_offset_table_hash"]:
+    for k in ["catalog_version", "canonicalizer_version", "map_width", "map_height", "global_action_space_n", "action_offset_table_hash", "max_legal_actions"]:
         vals = _extract_vector_field(reset_infos, k, args.num_envs, default_value=None)
         first = next((v for v in vals if v is not None), None)
         action_interface_meta[k] = first
@@ -534,6 +777,14 @@ if __name__ == "__main__":
                 f"Reported global_action_space_n={action_interface_meta['global_action_space_n']} "
                 f"does not match env action space n={envs.single_action_space.n}"
             )
+    print(
+        "[ACTION_INTERFACE] "
+        f"actor_mode={args.actor_mode} "
+        f"catalog_version={action_interface_meta.get('catalog_version')} "
+        f"action_space_n={envs.single_action_space.n} "
+        f"max_legal_actions={args.max_legal_actions}"
+    )
+    writer.add_text("meta/action_interface", json.dumps(action_interface_meta, sort_keys=True, default=str))
 
     for iteration in range(1, args.num_iterations + 1):
         # Per-iteration diagnostics for dashboard clarity.
@@ -555,12 +806,35 @@ if __name__ == "__main__":
             global_step += args.num_envs
             obs[step] = next_obs
             dones[step] = next_done
+            if args.actor_mode == "dense_debug":
+                action_masks[step] = next_action_mask > 0
+            else:
+                legal_global_ids_buf[step] = next_legal_global_ids
+                legal_action_valid_mask_buf[step] = next_legal_action_valid_mask
 
             # ALGO LOGIC: action logic
             with torch.no_grad():
-                action, logprob, _, value = agent.get_action_and_value(next_obs, action_mask=next_action_mask)
+                if args.actor_mode == "dense_debug":
+                    action, action_slot, logprob, _, value = agent.get_action_and_value(
+                        next_obs,
+                        action_mask=next_action_mask,
+                    )
+                else:
+                    action, action_slot, logprob, _, value = agent.get_action_and_value(
+                        next_obs,
+                        legal_global_ids=next_legal_global_ids,
+                        legal_action_valid_mask=next_legal_action_valid_mask,
+                    )
+                    slot_valid = next_legal_action_valid_mask.gather(1, action_slot.unsqueeze(1)).squeeze(1)
+                    if not bool(torch.all(slot_valid)):
+                        raise RuntimeError("Illegal selected_slot sampled in rollout (invalid/padded slot).")
+                    selected_global_from_slot = next_legal_global_ids.gather(1, action_slot.unsqueeze(1)).squeeze(1)
+                    if not bool(torch.equal(selected_global_from_slot.long(), action.long())):
+                        raise RuntimeError("selected_global_id mismatch with selected_slot mapping during rollout.")
                 values[step] = value.flatten()
             actions[step] = action
+            if action_slot is not None:
+                selected_slots[step] = action_slot.long()
             logprobs[step] = logprob
 
             # TRY NOT TO MODIFY: execute the game and log data.
@@ -568,12 +842,29 @@ if __name__ == "__main__":
             next_done = np.logical_or(terminations, truncations)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
-            next_action_mask = _extract_vector_action_mask(
-                infos,
-                args.num_envs,
-                envs.single_action_space.n,
-                device,
-            )
+            if args.actor_mode == "dense_debug":
+                next_action_mask = _extract_vector_action_mask(
+                    infos,
+                    args.num_envs,
+                    envs.single_action_space.n,
+                    device,
+                )
+            else:
+                next_legal_global_ids, next_legal_action_valid_mask = _extract_vector_legal_tensors(
+                    infos,
+                    args.num_envs,
+                    int(args.max_legal_actions),
+                    envs.single_action_space.n,
+                    device,
+                )
+                selected_global_values = _extract_vector_field(infos, "selected_global_id", args.num_envs, default_value=None)
+                for env_i, v in enumerate(selected_global_values):
+                    if v is None:
+                        continue
+                    if int(v) != int(action[env_i].item()):
+                        raise RuntimeError(
+                            f"Env selected_global_id mismatch at env={env_i}: env={int(v)} actor={int(action[env_i].item())}"
+                        )
 
             collision_values = _extract_vector_field(infos, "duplicate_global_id_collisions", args.num_envs, default_value=0)
             if any(int(v) > 0 for v in collision_values if v is not None):
@@ -635,7 +926,7 @@ if __name__ == "__main__":
                     vals = _extract_vector_field(infos, key, args.num_envs, default_value=None)
                     clean = [float(v) for v in vals if v is not None]
                     if len(clean) > 0:
-                        writer.add_scalar(chart_name, float(np.mean(clean)), global_step)
+                        log_scalar(chart_name, float(np.mean(clean)), global_step)
 
                 # Custom Phase-1 telemetry:
                 # Log SPT for envs that just ended (typically via truncation at turn horizon).
@@ -675,21 +966,21 @@ if __name__ == "__main__":
                                     fog_cleared_total_value = finfo["fog_tiles_cleared_total"]
 
                         if spt_value is not None:
-                            writer.add_scalar("charts/custom_spt_return", float(spt_value), global_step)
-                            writer.add_scalar("charts/episode_end_spt", float(spt_value), global_step)
+                            log_scalar("charts/custom_spt_return", float(spt_value), global_step)
+                            log_scalar("charts/episode_end_spt", float(spt_value), global_step)
                         if city_count_value is not None:
-                            writer.add_scalar("charts/episode_end_village_count_t10", float(city_count_value), global_step)
+                            log_scalar("charts/episode_end_village_count_t10", float(city_count_value), global_step)
                         if fog_cleared_total_value is not None:
-                            writer.add_scalar("charts/episode_end_fog_tiles_cleared_t10", float(fog_cleared_total_value), global_step)
+                            log_scalar("charts/episode_end_fog_tiles_cleared_t10", float(fog_cleared_total_value), global_step)
 
             if "final_info" in infos:
                 for info in infos["final_info"]:
                     if info and "episode" in info:
                         print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                        writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                        writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+                        log_scalar("charts/episodic_return", info["episode"]["r"], global_step)
+                        log_scalar("charts/episodic_length", info["episode"]["l"], global_step)
                     if args.enable_step_diagnostics and info and "spt" in info:
-                        writer.add_scalar("charts/custom_spt_return", float(info["spt"]), global_step)
+                        log_scalar("charts/custom_spt_return", float(info["spt"]), global_step)
 
             # Periodic checkpointing. Save every crossed frequency milestone in case
             # num_envs does not divide save_frequency exactly.
@@ -732,6 +1023,33 @@ if __name__ == "__main__":
         b_advantages = advantages.reshape(-1)
         b_returns = returns.reshape(-1)
         b_values = values.reshape(-1)
+        b_action_masks = None
+        b_selected_slots = selected_slots.reshape(-1)
+        b_legal_global_ids = legal_global_ids_buf.reshape((-1, int(args.max_legal_actions)))
+        b_legal_action_valid_mask = legal_action_valid_mask_buf.reshape((-1, int(args.max_legal_actions)))
+        if args.actor_mode == "dense_debug":
+            b_action_masks = action_masks.reshape((-1, envs.single_action_space.n))
+
+        if args.actor_mode == "legal_only":
+            with torch.no_grad():
+                slot_valid = b_legal_action_valid_mask.gather(1, b_selected_slots.unsqueeze(1)).squeeze(1)
+                if not bool(torch.all(slot_valid)):
+                    raise RuntimeError("Pre-update invariant failed: selected_slot points to invalid slot.")
+                slot_global_ids = b_legal_global_ids.gather(1, b_selected_slots.unsqueeze(1)).squeeze(1)
+                if not bool(torch.equal(slot_global_ids.long(), b_actions.long().view(-1))):
+                    raise RuntimeError("Pre-update invariant failed: selected_slot does not map to selected_global_id.")
+                _, _, recomputed_old_logprob, _, _ = agent.get_action_and_value(
+                    b_obs,
+                    legal_global_ids=b_legal_global_ids,
+                    legal_action_valid_mask=b_legal_action_valid_mask,
+                    selected_slot=b_selected_slots,
+                )
+                max_abs_diff = float(torch.max(torch.abs(recomputed_old_logprob - b_logprobs)).item())
+                if max_abs_diff > float(args.old_logprob_recompute_tol):
+                    raise RuntimeError(
+                        f"Pre-update old_logprob invariant failed: max_abs_diff={max_abs_diff:.8f} "
+                        f"> tol={float(args.old_logprob_recompute_tol):.8f}"
+                    )
 
         # Optimizing the policy and value network
         b_inds = np.arange(args.batch_size)
@@ -742,10 +1060,25 @@ if __name__ == "__main__":
                 end = start + args.minibatch_size
                 mb_inds = b_inds[start:end]
 
-                _, newlogprob, entropy, newvalue = agent.get_action_and_value(
-                    b_obs[mb_inds],
-                    b_actions.long()[mb_inds],
-                )
+                if args.actor_mode == "dense_debug":
+                    _, _, newlogprob, entropy, newvalue = agent.get_action_and_value(
+                        b_obs[mb_inds],
+                        action=b_actions.long()[mb_inds],
+                        action_mask=b_action_masks[mb_inds],
+                    )
+                else:
+                    mb_slots = b_selected_slots[mb_inds]
+                    mb_legal_ids = b_legal_global_ids[mb_inds]
+                    mb_legal_valid = b_legal_action_valid_mask[mb_inds]
+                    slot_global_ids = mb_legal_ids.gather(1, mb_slots.unsqueeze(1)).squeeze(1)
+                    if not bool(torch.equal(slot_global_ids.long(), b_actions.long().view(-1)[mb_inds])):
+                        raise RuntimeError("Minibatch invariant failed: legal_global_ids_padded[selected_slot] != selected_global_id.")
+                    _, _, newlogprob, entropy, newvalue = agent.get_action_and_value(
+                        b_obs[mb_inds],
+                        legal_global_ids=mb_legal_ids,
+                        legal_action_valid_mask=mb_legal_valid,
+                        selected_slot=mb_slots,
+                    )
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
 
@@ -795,34 +1128,34 @@ if __name__ == "__main__":
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-        writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
-        writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
-        writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
-        writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
-        writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
-        writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
-        writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
-        writer.add_scalar("losses/explained_variance", explained_var, global_step)
+        log_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
+        log_scalar("losses/value_loss", v_loss.item(), global_step)
+        log_scalar("losses/policy_loss", pg_loss.item(), global_step)
+        log_scalar("losses/entropy", entropy_loss.item(), global_step)
+        log_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
+        log_scalar("losses/approx_kl", approx_kl.item(), global_step)
+        log_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
+        log_scalar("losses/explained_variance", explained_var, global_step)
         if args.enable_step_diagnostics and iter_valid_actions_count > 0:
-            writer.add_scalar(
+            log_scalar(
                 "charts/mean_valid_actions",
                 iter_valid_actions_sum / iter_valid_actions_count,
                 global_step,
             )
         if args.enable_step_diagnostics and iter_action_count > 0:
-            writer.add_scalar(
+            log_scalar(
                 "charts/non_endturn_rate",
                 iter_non_endturn_count / iter_action_count,
                 global_step,
             )
         if args.enable_step_diagnostics and iter_delta_spt_count > 0:
-            writer.add_scalar(
+            log_scalar(
                 "charts/mean_delta_spt",
                 iter_delta_spt_sum / iter_delta_spt_count,
                 global_step,
             )
         print("SPS:", int(global_step / (time.time() - start_time)))
-        writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+        log_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
     if args.save_model:
         model_path = args.model_path or os.path.join(run_dir, f"{args.exp_name}.cleanrl_model")
