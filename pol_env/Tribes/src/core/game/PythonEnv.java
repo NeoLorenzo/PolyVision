@@ -2,6 +2,17 @@ package core.game;
 
 import core.Types;
 import core.actions.Action;
+import core.actions.cityactions.Build;
+import core.actions.cityactions.ClearForest;
+import core.actions.cityactions.CityAction;
+import core.actions.cityactions.GrowForest;
+import core.actions.cityactions.LevelUp;
+import core.actions.cityactions.ResourceGathering;
+import core.actions.cityactions.Spawn;
+import core.actions.tribeactions.ResearchTech;
+import core.actions.unitactions.Capture;
+import core.actions.unitactions.Examine;
+import core.actions.unitactions.Move;
 import core.actors.City;
 import core.actors.Tribe;
 import core.actors.units.Battleship;
@@ -86,9 +97,152 @@ public class PythonEnv {
             jo.put("idx", i);
             jo.put("type", a.getActionType().toString());
             jo.put("repr", a.toString());
+            jo.put("schema_version", 1);
+            addStructuredActionFields(jo, a);
             out.add(jo.toString());
         }
         return out;
+    }
+
+    private void addStructuredActionFields(JSONObject jo, Action a) {
+        if (a == null) return;
+
+        if (a instanceof Move) {
+            Move m = (Move) a;
+            jo.put("unit_id", m.getUnitId());
+            Unit u = safeGetUnit(m.getUnitId());
+            if (u != null) {
+                jo.put("src_x", u.getPosition().x);
+                jo.put("src_y", u.getPosition().y);
+            }
+            if (m.getDestination() != null) {
+                jo.put("dst_x", m.getDestination().x);
+                jo.put("dst_y", m.getDestination().y);
+            }
+            return;
+        }
+
+        if (a instanceof Capture) {
+            Capture c = (Capture) a;
+            jo.put("unit_id", c.getUnitId());
+            jo.put("capture_type", c.getCaptureType() != null ? c.getCaptureType().toString() : JSONObject.NULL);
+            jo.put("target_city_id", c.getTargetCity());
+            Unit u = safeGetUnit(c.getUnitId());
+            if (u != null) {
+                jo.put("src_x", u.getPosition().x);
+                jo.put("src_y", u.getPosition().y);
+            }
+            City city = safeGetCity(c.getTargetCity());
+            if (city != null) {
+                jo.put("target_x", city.getPosition().x);
+                jo.put("target_y", city.getPosition().y);
+                jo.put("target_city_tile", city.getPosition().x * gs.getBoard().getSize() + city.getPosition().y);
+            } else if (u != null) {
+                // Village capture target is current unit tile.
+                jo.put("target_x", u.getPosition().x);
+                jo.put("target_y", u.getPosition().y);
+                jo.put("target_city_tile", u.getPosition().x * gs.getBoard().getSize() + u.getPosition().y);
+            }
+            return;
+        }
+
+        if (a instanceof Spawn) {
+            Spawn s = (Spawn) a;
+            addCityFields(jo, s);
+            jo.put("unit_type", s.getUnitType() != null ? s.getUnitType().toString() : JSONObject.NULL);
+            return;
+        }
+
+        if (a instanceof ResourceGathering) {
+            ResourceGathering rg = (ResourceGathering) a;
+            addCityFields(jo, rg);
+            jo.put("resource_type", rg.getResource() != null ? rg.getResource().toString() : JSONObject.NULL);
+            putTargetFieldsFromCityAction(jo, rg);
+            return;
+        }
+
+        if (a instanceof Build) {
+            Build b = (Build) a;
+            addCityFields(jo, b);
+            jo.put("building_type", b.getBuildingType() != null ? b.getBuildingType().toString() : JSONObject.NULL);
+            putTargetFieldsFromCityAction(jo, b);
+            return;
+        }
+
+        if (a instanceof ClearForest) {
+            ClearForest cf = (ClearForest) a;
+            addCityFields(jo, cf);
+            putTargetFieldsFromCityAction(jo, cf);
+            return;
+        }
+
+        if (a instanceof GrowForest) {
+            GrowForest gf = (GrowForest) a;
+            addCityFields(jo, gf);
+            putTargetFieldsFromCityAction(jo, gf);
+            return;
+        }
+
+        if (a instanceof LevelUp) {
+            LevelUp lu = (LevelUp) a;
+            addCityFields(jo, lu);
+            jo.put("levelup_choice", lu.getBonus() != null ? lu.getBonus().toString() : JSONObject.NULL);
+            putTargetFieldsFromCityAction(jo, lu);
+            return;
+        }
+
+        if (a instanceof ResearchTech) {
+            ResearchTech rt = (ResearchTech) a;
+            jo.put("tribe_id", rt.getTribeId());
+            jo.put("tech_type", rt.getTech() != null ? rt.getTech().toString() : JSONObject.NULL);
+            return;
+        }
+
+        if (a instanceof Examine) {
+            Examine ex = (Examine) a;
+            jo.put("unit_id", ex.getUnitId());
+            Unit u = safeGetUnit(ex.getUnitId());
+            if (u != null) {
+                jo.put("src_x", u.getPosition().x);
+                jo.put("src_y", u.getPosition().y);
+            }
+        }
+    }
+
+    private void addCityFields(JSONObject jo, CityAction action) {
+        int cityId = action.getCityId();
+        jo.put("city_id", cityId);
+        City city = safeGetCity(cityId);
+        if (city != null) {
+            jo.put("city_x", city.getPosition().x);
+            jo.put("city_y", city.getPosition().y);
+            jo.put("city_tile", city.getPosition().x * gs.getBoard().getSize() + city.getPosition().y);
+        }
+    }
+
+    private void putTargetFieldsFromCityAction(JSONObject jo, CityAction action) {
+        if (action.getTargetPos() == null) return;
+        int tx = action.getTargetPos().x;
+        int ty = action.getTargetPos().y;
+        jo.put("target_x", tx);
+        jo.put("target_y", ty);
+        jo.put("target_tile", tx * gs.getBoard().getSize() + ty);
+    }
+
+    private Unit safeGetUnit(int unitId) {
+        try {
+            Object actor = gs.getActor(unitId);
+            if (actor instanceof Unit) return (Unit) actor;
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private City safeGetCity(int cityId) {
+        try {
+            Object actor = gs.getActor(cityId);
+            if (actor instanceof City) return (City) actor;
+        } catch (Exception ignored) {}
+        return null;
     }
 
     public int actionCount() {

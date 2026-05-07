@@ -1,11 +1,166 @@
 import gymnasium as gym
 import glob
+import hashlib
+import json
 import numpy as np
 import os
 import pickle
 import re
 from gymnasium.envs.registration import register
 from .gym_env import TribesGymEnv, make_default_env
+
+
+class GlobalActionCatalog:
+    """Deterministic flat global action-ID catalog for fixed map dimensions."""
+
+    def __init__(self, width, height, tech_types, train_unit_types, resource_types, building_types, levelup_choices):
+        self.width = int(width)
+        self.height = int(height)
+        self.n_tiles = int(width * height)
+        self.tech_types = sorted(set(tech_types))
+        self.train_unit_types = sorted(set(train_unit_types))
+        self.resource_types = sorted(set(resource_types))
+        self.building_types = sorted(set(building_types))
+        self.levelup_choices = sorted(set(levelup_choices))
+
+        self.tech_to_idx = {k: i for i, k in enumerate(self.tech_types)}
+        self.unit_to_idx = {k: i for i, k in enumerate(self.train_unit_types)}
+        self.resource_to_idx = {k: i for i, k in enumerate(self.resource_types)}
+        self.building_to_idx = {k: i for i, k in enumerate(self.building_types)}
+        self.levelup_to_idx = {k: i for i, k in enumerate(self.levelup_choices)}
+
+        self.offsets = {}
+        cur = 0
+        self.offsets["END_TURN"] = cur
+        cur += 1
+
+        self.offsets["MOVE"] = cur
+        cur += self.n_tiles * self.n_tiles
+
+        self.offsets["CAPTURE"] = cur
+        # 3 capture modes max (CITY/VILLAGE/UNKNOWN) x src x target.
+        cur += 3 * self.n_tiles * self.n_tiles
+
+        self.offsets["TRAIN"] = cur
+        cur += max(1, len(self.train_unit_types)) * self.n_tiles
+
+        self.offsets["RESOURCE_GATHERING"] = cur
+        cur += max(1, len(self.resource_types)) * self.n_tiles
+
+        self.offsets["CLEAR_FOREST"] = cur
+        cur += self.n_tiles
+
+        self.offsets["GROW_FOREST"] = cur
+        cur += self.n_tiles
+
+        self.offsets["BUILD"] = cur
+        cur += max(1, len(self.building_types)) * self.n_tiles
+
+        self.offsets["RESEARCH_TECH"] = cur
+        cur += max(1, len(self.tech_types))
+
+        self.offsets["LEVEL_UP"] = cur
+        cur += max(1, len(self.levelup_choices)) * self.n_tiles
+
+        self.offsets["EXAMINE"] = cur
+        cur += self.n_tiles
+
+        self.total_size = int(cur)
+        self.end_turn_id = int(self.offsets["END_TURN"])
+
+    def tile_id(self, x, y):
+        x = int(x)
+        y = int(y)
+        if x < 0 or y < 0 or x >= self.width or y >= self.height:
+            return None
+        return x * self.height + y
+
+    def id_end_turn(self):
+        return self.end_turn_id
+
+    def id_move(self, src_tile, dst_tile):
+        if src_tile is None or dst_tile is None:
+            return None
+        return int(self.offsets["MOVE"] + src_tile * self.n_tiles + dst_tile)
+
+    def id_capture(self, src_tile, target_tile, capture_type):
+        if src_tile is None or target_tile is None:
+            return None
+        t_idx = 2
+        cap = str(capture_type or "").upper()
+        if "CITY" in cap:
+            t_idx = 0
+        elif "VILLAGE" in cap:
+            t_idx = 1
+        return int(self.offsets["CAPTURE"] + t_idx * self.n_tiles * self.n_tiles + src_tile * self.n_tiles + target_tile)
+
+    def id_train(self, unit_type, city_tile):
+        if city_tile is None:
+            return None
+        u_idx = self.unit_to_idx.get(str(unit_type or "").upper())
+        if u_idx is None:
+            return None
+        return int(self.offsets["TRAIN"] + u_idx * self.n_tiles + city_tile)
+
+    def id_resource(self, resource_type, resource_tile):
+        if resource_tile is None:
+            return None
+        r_idx = self.resource_to_idx.get(str(resource_type or "").upper())
+        if r_idx is None:
+            return None
+        return int(self.offsets["RESOURCE_GATHERING"] + r_idx * self.n_tiles + resource_tile)
+
+    def id_clear_forest(self, forest_tile):
+        if forest_tile is None:
+            return None
+        return int(self.offsets["CLEAR_FOREST"] + forest_tile)
+
+    def id_grow_forest(self, target_tile):
+        if target_tile is None:
+            return None
+        return int(self.offsets["GROW_FOREST"] + target_tile)
+
+    def id_build(self, building_type, target_tile):
+        if target_tile is None:
+            return None
+        b_idx = self.building_to_idx.get(str(building_type or "").upper())
+        if b_idx is None:
+            return None
+        return int(self.offsets["BUILD"] + b_idx * self.n_tiles + target_tile)
+
+    def id_research(self, tech_type):
+        t_idx = self.tech_to_idx.get(str(tech_type or "").upper())
+        if t_idx is None:
+            return None
+        return int(self.offsets["RESEARCH_TECH"] + t_idx)
+
+    def id_levelup(self, choice, city_tile):
+        if city_tile is None:
+            return None
+        l_idx = self.levelup_to_idx.get(str(choice or "").upper())
+        if l_idx is None:
+            return None
+        return int(self.offsets["LEVEL_UP"] + l_idx * self.n_tiles + city_tile)
+
+    def id_examine(self, unit_tile):
+        if unit_tile is None:
+            return None
+        return int(self.offsets["EXAMINE"] + unit_tile)
+
+    def fingerprint(self):
+        payload = {
+            "width": self.width,
+            "height": self.height,
+            "offsets": self.offsets,
+            "tech_types": self.tech_types,
+            "train_unit_types": self.train_unit_types,
+            "resource_types": self.resource_types,
+            "building_types": self.building_types,
+            "levelup_choices": self.levelup_choices,
+            "total_size": self.total_size,
+        }
+        dumped = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(dumped.encode("utf-8")).hexdigest()
 
 # wrapper to make it gym-compatible
 class TribesGymWrapper(gym.Env):
@@ -29,6 +184,7 @@ class TribesGymWrapper(gym.Env):
         "MOVE",
         "CAPTURE",
         "EXAMINE",
+        "SPAWN",
         "RESOURCE_GATHERING",
         "CLEAR_FOREST",
         "GROW_FOREST",
@@ -36,6 +192,8 @@ class TribesGymWrapper(gym.Env):
         "RESEARCH_TECH",
         "BUILD",
     }
+    CATALOG_VERSION = "flat-v1"
+    CANONICALIZER_VERSION = "flat-v1-structured"
 
     def __init__(self, level_file=None):
         self.tribes_env = make_default_env()
@@ -66,17 +224,48 @@ class TribesGymWrapper(gym.Env):
         self._queued_village_capture_unit_ids = set()
         self._initial_visible_tiles = 0
         self._episode_fog_tiles_cleared = 0
+        self._catalog = None
+        self._catalog_fingerprint = ""
+        self._last_step_canonical_diag = {}
+        self._illegal_sample_count = 0
+        self._fallback_end_turn_count = 0
+        self._total_action_decisions = 0
+        self._validation_mode = os.environ.get("POLYVISION_ACTION_VALIDATION_MODE", "0").lower() in ("1", "true", "yes", "on")
+        self._info_mode = str(os.environ.get("POLYVISION_INFO_MODE", "fast")).strip().lower()
+        if self._info_mode not in ("fast", "debug"):
+            self._info_mode = "fast"
+        self._current_legal_actions = []
+        self._current_action_mask = None
+        self._current_legal_id_to_raw_index = {}
+        self._current_diag = {}
+        self._current_raw_valid_actions = 0
         try:
             bootstrap_seed = self._resolve_episode_seed(seed=42)
             bootstrap_level, bootstrap_idx = self._select_level_for_reset(bootstrap_seed)
             self._current_level_file = bootstrap_level
             self._current_level_index = bootstrap_idx
             obs = self.tribes_env.reset(self._current_level_file, bootstrap_seed)
-            
-            # Use a fixed large action space to handle dynamic action counts
-            # Most games will have fewer actions, but this provides a safe upper bound
-            max_actions = 200  # Reasonable upper bound for this game
-            self.action_space = gym.spaces.Discrete(max_actions)
+            dims = self._board_dimensions_from_obs(obs)
+            if dims is None:
+                raise RuntimeError("Cannot infer board dimensions for action catalog.")
+            width, height = dims
+            vocab = self._load_action_vocab()
+            self._catalog = GlobalActionCatalog(
+                width=width,
+                height=height,
+                tech_types=vocab["TECHNOLOGY"],
+                train_unit_types=[u for u in vocab["UNIT"] if u not in ("BOAT", "SHIP", "BATTLESHIP", "SUPERUNIT")],
+                resource_types=[r for r in vocab["RESOURCE"] if r in ("ANIMAL", "FISH", "WHALES", "FRUIT", "CROPS", "ORE")],
+                building_types=vocab["BUILDING"],
+                levelup_choices=vocab["CITY_LEVEL_UP"],
+            )
+            self._catalog_fingerprint = self._catalog.fingerprint()
+            self.action_space = gym.spaces.Discrete(self._catalog.total_size)
+            if int(self.action_space.n) != int(self._catalog.total_size):
+                raise RuntimeError(
+                    f"Action space mismatch: action_space.n={self.action_space.n} "
+                    f"catalog_total={self._catalog.total_size}"
+                )
             
             # Get observation dimensions from actual observation
             obs_array = self._dict_to_array(obs)
@@ -89,7 +278,7 @@ class TribesGymWrapper(gym.Env):
         except Exception as e:
             # Fallback to placeholders if initialization fails
             print(f"Warning: Could not initialize environment properly: {e}")
-            self.action_space = gym.spaces.Discrete(200)  # reasonable default
+            self.action_space = gym.spaces.Discrete(200)  # safe fallback
             self.observation_space = gym.spaces.Box(
                 low=-np.inf, 
                 high=np.inf, 
@@ -116,28 +305,45 @@ class TribesGymWrapper(gym.Env):
         self._episode_fog_tiles_cleared = 0
         
         # Log action space info for debugging
-        action_count = self.tribes_env.action_space_n
-        action_mask, allowed_indices = self._build_action_mask_and_indices()
+        legal_actions = self.tribes_env.list_actions()
+        action_mask, legal_id_to_raw_index, diag = self._build_action_mask_and_mapping(legal_actions, obs=obs)
+        self._current_legal_actions = legal_actions
+        self._current_action_mask = action_mask
+        self._current_legal_id_to_raw_index = legal_id_to_raw_index
+        self._current_diag = diag
+        self._current_raw_valid_actions = int(len(legal_actions))
         if self.verbose_resets:
             print(
-                f"Reset: Available actions = {action_count}, allowed = {len(allowed_indices)}, "
+                f"Reset: Available actions = {self._current_raw_valid_actions}, canonicalized = {diag.get('canonicalized_legal_actions', 0)}, "
                 f"map={os.path.basename(self._current_level_file)}, seed={self._last_reset_seed}"
             )
         
         # convert your dict obs to numpy array here
         info = {
-            "valid_actions": len(allowed_indices),
-            "raw_valid_actions": action_count,
+            "valid_actions": int(np.sum(action_mask)),
+            "raw_valid_actions": int(self._current_raw_valid_actions),
             "turn_count": self._turn_count,
-            "action_mask": action_mask,
-            "map_path": self._current_level_file,
-            "map_id": os.path.basename(self._current_level_file),
-            "map_pool_index": int(self._current_level_index),
-            "map_pool_size": int(self._level_pool_size),
-            "episode_seed": int(self._last_reset_seed),
-            "level_selection_mode": self._level_selection_mode,
-            "initial_visible_tiles": int(self._initial_visible_tiles),
+            "info_mode": self._info_mode,
+            "catalog_version": self.CATALOG_VERSION,
+            "canonicalizer_version": self.CANONICALIZER_VERSION,
+            "map_width": int(self._catalog.width) if self._catalog is not None else None,
+            "map_height": int(self._catalog.height) if self._catalog is not None else None,
+            "global_action_space_n": int(self.action_space.n),
+            "action_offset_table_hash": self._catalog_fingerprint,
         }
+        if self._is_debug_info_mode():
+            info["action_mask"] = action_mask
+        else:
+            info["legal_global_ids"] = np.flatnonzero(action_mask).astype(np.int32).tolist()
+        info.update(self._diag_for_info(diag))
+        if self._is_debug_info_mode():
+            info["map_path"] = self._current_level_file
+            info["map_id"] = os.path.basename(self._current_level_file)
+            info["map_pool_index"] = int(self._current_level_index)
+            info["map_pool_size"] = int(self._level_pool_size)
+            info["episode_seed"] = int(self._last_reset_seed)
+            info["level_selection_mode"] = self._level_selection_mode
+            info["initial_visible_tiles"] = int(self._initial_visible_tiles)
         return self._dict_to_array(obs), self._sanitize_info_for_multiprocessing(info)
     
     def render(self, **kwargs):
@@ -155,23 +361,45 @@ class TribesGymWrapper(gym.Env):
         if self._get_active_tribe_id(start_obs) != 0:
             start_obs, forced_pre_end_turns, _ = self._force_non_bardur_turns_to_end(start_obs)
 
-        legal_actions = self.tribes_env.list_actions()
-        raw_count = len(legal_actions)
-        action_mask, allowed_indices = self._build_action_mask_and_indices(legal_actions)
+        legal_actions = self._current_legal_actions if self._current_legal_actions is not None else []
+        raw_count = int(self._current_raw_valid_actions)
+        action_mask = self._current_action_mask
+        legal_id_to_raw_index = self._current_legal_id_to_raw_index
+        diag = self._current_diag
+
+        if raw_count == 0 or not legal_actions or action_mask is None or not legal_id_to_raw_index:
+            # Recover from any stale cache by rebuilding once.
+            legal_actions = self.tribes_env.list_actions()
+            raw_count = len(legal_actions)
+            action_mask, legal_id_to_raw_index, diag = self._build_action_mask_and_mapping(legal_actions, obs=start_obs)
+            self._current_legal_actions = legal_actions
+            self._current_action_mask = action_mask
+            self._current_legal_id_to_raw_index = legal_id_to_raw_index
+            self._current_diag = diag
+            self._current_raw_valid_actions = int(raw_count)
 
         if raw_count == 0:
             raise RuntimeError("No legal actions available from Java environment.")
 
         sampled_action = int(action)
-        if len(allowed_indices) == 0:
-            # Fallback: if whitelist eliminates everything, force END_TURN if available.
-            end_turn_idx = next((i for i, a in enumerate(legal_actions) if a.get("type") == "END_TURN"), 0)
-            selected_raw_action = end_turn_idx
+        selected_global_id = sampled_action
+        illegal_sampled_global_id = False
+        fallback_to_end_turn = False
+        if selected_global_id in legal_id_to_raw_index:
+            selected_raw_action = int(legal_id_to_raw_index[selected_global_id])
         else:
-            selected_allowed_pos = sampled_action % len(allowed_indices)
-            selected_raw_action = allowed_indices[selected_allowed_pos]
+            illegal_sampled_global_id = True
+            fallback_to_end_turn = True
+            self._illegal_sample_count += 1
+            self._fallback_end_turn_count += 1
+            selected_global_id = int(self._catalog.id_end_turn()) if self._catalog is not None else 0
+            selected_raw_action = legal_id_to_raw_index.get(selected_global_id, None)
+            if selected_raw_action is None:
+                end_turn_idx = next((i for i, a in enumerate(legal_actions) if a.get("type") == "END_TURN"), 0)
+                selected_raw_action = int(end_turn_idx)
 
         selected_action_type = legal_actions[selected_raw_action].get("type", "UNKNOWN")
+        self._total_action_decisions += 1
 
         prev_bardur_spt = self._compute_bardur_spt(start_obs)
 
@@ -210,6 +438,7 @@ class TribesGymWrapper(gym.Env):
             end_turn_idx = next((i for i, a in enumerate(legal_actions) if a.get("type") == "END_TURN"), 0)
             selected_raw_action = end_turn_idx
             selected_action_type = "END_TURN"
+            selected_global_id = int(self._catalog.id_end_turn()) if self._catalog is not None else selected_global_id
 
         if selected_action_type == "END_TURN":
             self._turn_count += 1
@@ -223,6 +452,9 @@ class TribesGymWrapper(gym.Env):
                 end_turn_idx = next((i for i, a in enumerate(legal_actions) if a.get("type") == "END_TURN"), 0)
                 selected_raw_action = end_turn_idx
                 selected_action_type = legal_actions[selected_raw_action].get("type", "UNKNOWN")
+                selected_global_id = int(self._catalog.id_end_turn()) if self._catalog is not None else selected_global_id
+                fallback_to_end_turn = True
+                self._fallback_end_turn_count += 1
                 if selected_action_type == "END_TURN":
                     self._turn_count += 1
 
@@ -319,13 +551,53 @@ class TribesGymWrapper(gym.Env):
 
         reward = float(base_delta_spt) + reward_adjustment
 
-        info["valid_actions"] = len(allowed_indices)
-        info["raw_valid_actions"] = raw_count
-        info["sampled_action"] = sampled_action
-        info["selected_raw_action"] = selected_raw_action
-        info["selected_action_type"] = selected_action_type
+        # Build the next-state legal mask and mapping diagnostics (for policy step t+1).
+        post_legal_actions = self.tribes_env.list_actions()
+        post_raw_count = len(post_legal_actions)
+        post_action_mask, post_legal_id_to_raw_index, post_diag = self._build_action_mask_and_mapping(post_legal_actions, obs=obs)
+        self._current_legal_actions = post_legal_actions
+        self._current_action_mask = post_action_mask
+        self._current_legal_id_to_raw_index = post_legal_id_to_raw_index
+        self._current_diag = post_diag
+        self._current_raw_valid_actions = int(post_raw_count)
 
-        if selected_action_type == "MOVE" and chosen_move_unit_id is not None and chosen_move_dest is not None:
+        info["valid_actions"] = int(np.sum(post_action_mask))
+        info["raw_valid_actions"] = int(post_raw_count)
+        info["info_mode"] = self._info_mode
+        if self._is_debug_info_mode():
+            info["action_mask"] = post_action_mask
+        else:
+            info["legal_global_ids"] = np.flatnonzero(post_action_mask).astype(np.int32).tolist()
+        info["sampled_action"] = sampled_action
+        info["selected_global_id"] = int(selected_global_id)
+        info["selected_raw_action"] = selected_raw_action
+        info["selected_raw_java_index"] = int(selected_raw_action)
+        info["selected_action_type"] = selected_action_type
+        info["illegal_sampled_global_id"] = bool(illegal_sampled_global_id)
+        info["fallback_to_end_turn"] = bool(fallback_to_end_turn)
+        info["total_action_decisions"] = int(self._total_action_decisions)
+        info["illegal_sample_count"] = int(self._illegal_sample_count)
+        info["fallback_end_turn_count"] = int(self._fallback_end_turn_count)
+        info["illegal_sample_rate"] = float(self._illegal_sample_count / max(1, self._total_action_decisions))
+        info["fallback_end_turn_rate"] = float(self._fallback_end_turn_count / max(1, self._total_action_decisions))
+        info["catalog_version"] = self.CATALOG_VERSION
+        info["canonicalizer_version"] = self.CANONICALIZER_VERSION
+        info["map_width"] = int(self._catalog.width) if self._catalog is not None else None
+        info["map_height"] = int(self._catalog.height) if self._catalog is not None else None
+        info["global_action_space_n"] = int(self.action_space.n)
+        info["action_offset_table_hash"] = self._catalog_fingerprint
+        info["turn_count"] = self._turn_count
+        info["city_count"] = current_city_count
+        info["fog_tiles_cleared_total"] = int(self._episode_fog_tiles_cleared)
+        info["delta_spt"] = float(base_delta_spt)
+        info["spt"] = float(current_bardur_spt)
+        info["reward"] = float(reward)
+        info["turn"] = int(self._turn_count)
+        info["unit_count"] = int(self._get_owned_unit_count(obs))
+        info["stars"] = int(self._get_tribe_stars(obs, tribe_id=0))
+        info.update(self._diag_for_info(post_diag))
+
+        if self._is_debug_info_mode() and selected_action_type == "MOVE" and chosen_move_unit_id is not None and chosen_move_dest is not None:
             actual_pos = self._get_unit_position(obs, chosen_move_unit_id)
             dims = self._board_dimensions_from_obs(obs)
             in_bounds = False
@@ -348,43 +620,40 @@ class TribesGymWrapper(gym.Env):
                     f"Unit moved out of board bounds: unit={chosen_move_unit_id} "
                     f"requested={chosen_move_dest} actual={actual_pos} dims={dims}"
                 )
-        info["turn_count"] = self._turn_count
-        info["city_count"] = current_city_count
-        info["reward_adjustment"] = float(reward_adjustment)
-        info["starting_city_count"] = int(self._starting_city_count)
-        info["visible_uncaptured_village"] = bool(visible_uncaptured_village)
-        info["unit_on_visible_uncaptured_village"] = bool(unit_on_visible_uncaptured_village)
-        info["visible_village_streak_turns"] = int(self._visible_village_streak_turns)
-        info["moved_on_t0"] = bool(self._moved_on_t0)
-        info["reward_capture_city_bonus"] = float(capture_city_bonus)
-        info["reward_second_village_delay_penalty"] = 0.0
-        info["reward_visible_village_neglect_penalty"] = float(visible_village_neglect_penalty)
-        info["reward_village_breadcrumb"] = float(village_breadcrumb_reward)
-        info["reward_fog_clearance"] = float(fog_clearance_reward)
-        info["reward_reveal_uncaptured_village"] = float(reveal_uncaptured_village_reward)
-        info["reward_move_closer_to_visible_village"] = float(move_closer_to_visible_village_reward)
-        info["reward_move_onto_village"] = float(move_onto_village_reward)
-        info["newly_revealed_uncaptured_villages"] = int(len(newly_revealed_villages))
-        info["fog_tiles_cleared_step"] = int(fog_tiles_cleared)
-        info["fog_tiles_cleared_total"] = int(self._episode_fog_tiles_cleared)
-        info["visible_tiles"] = int(self._count_visible_tiles(obs))
-        info["initial_visible_tiles"] = int(self._initial_visible_tiles)
-        info["action_mask"] = action_mask
-        info["java_done"] = bool(java_done)
-        info["terminated_overridden"] = True
-        info["forced_pre_end_turns"] = int(forced_pre_end_turns)
-        info["forced_post_end_turns"] = int(forced_post_end_turns)
-        info["deferred_village_captures_before_end_turn"] = int(deferred_capture_count)
-        info["queued_village_capture_unit_ids"] = list(sorted(int(u) for u in self._queued_village_capture_unit_ids))
-        info["map_path"] = self._current_level_file
-        info["map_id"] = os.path.basename(self._current_level_file)
-        info["map_pool_index"] = int(self._current_level_index)
-        info["map_pool_size"] = int(self._level_pool_size)
-        info["episode_seed"] = int(self._last_reset_seed) if self._last_reset_seed is not None else None
-        info["level_selection_mode"] = self._level_selection_mode
-        info["delta_spt"] = float(base_delta_spt)
-        info["spt"] = float(current_bardur_spt)
-        info["activeTribeID"] = int(self._get_active_tribe_id(obs))
+        if self._is_debug_info_mode():
+            info["pre_step_raw_valid_actions"] = int(raw_count)
+            info["pre_step_mask_ones"] = int(np.sum(action_mask))
+            info["reward_adjustment"] = float(reward_adjustment)
+            info["starting_city_count"] = int(self._starting_city_count)
+            info["visible_uncaptured_village"] = bool(visible_uncaptured_village)
+            info["unit_on_visible_uncaptured_village"] = bool(unit_on_visible_uncaptured_village)
+            info["visible_village_streak_turns"] = int(self._visible_village_streak_turns)
+            info["moved_on_t0"] = bool(self._moved_on_t0)
+            info["reward_capture_city_bonus"] = float(capture_city_bonus)
+            info["reward_second_village_delay_penalty"] = 0.0
+            info["reward_visible_village_neglect_penalty"] = float(visible_village_neglect_penalty)
+            info["reward_village_breadcrumb"] = float(village_breadcrumb_reward)
+            info["reward_fog_clearance"] = float(fog_clearance_reward)
+            info["reward_reveal_uncaptured_village"] = float(reveal_uncaptured_village_reward)
+            info["reward_move_closer_to_visible_village"] = float(move_closer_to_visible_village_reward)
+            info["reward_move_onto_village"] = float(move_onto_village_reward)
+            info["newly_revealed_uncaptured_villages"] = int(len(newly_revealed_villages))
+            info["fog_tiles_cleared_step"] = int(fog_tiles_cleared)
+            info["visible_tiles"] = int(self._count_visible_tiles(obs))
+            info["initial_visible_tiles"] = int(self._initial_visible_tiles)
+            info["java_done"] = bool(java_done)
+            info["terminated_overridden"] = True
+            info["forced_pre_end_turns"] = int(forced_pre_end_turns)
+            info["forced_post_end_turns"] = int(forced_post_end_turns)
+            info["deferred_village_captures_before_end_turn"] = int(deferred_capture_count)
+            info["queued_village_capture_unit_ids"] = list(sorted(int(u) for u in self._queued_village_capture_unit_ids))
+            info["map_path"] = self._current_level_file
+            info["map_id"] = os.path.basename(self._current_level_file)
+            info["map_pool_index"] = int(self._current_level_index)
+            info["map_pool_size"] = int(self._level_pool_size)
+            info["episode_seed"] = int(self._last_reset_seed) if self._last_reset_seed is not None else None
+            info["level_selection_mode"] = self._level_selection_mode
+            info["activeTribeID"] = int(self._get_active_tribe_id(obs))
         self._last_city_count = current_city_count
         if selected_action_type == "MOVE" and self._turn_count == 0:
             self._moved_on_t0 = True
@@ -393,6 +662,26 @@ class TribesGymWrapper(gym.Env):
 
         info = self._sanitize_info_for_multiprocessing(info)
         return self._dict_to_array(obs), reward, terminated, truncated, info
+
+    def _is_debug_info_mode(self):
+        return self._info_mode == "debug"
+
+    def _diag_for_info(self, diag):
+        if not isinstance(diag, dict):
+            return {}
+        if self._is_debug_info_mode():
+            return dict(diag)
+        # Fast mode keeps only fields required by trainer safety gates and validators.
+        keep = (
+            "legal_actions_total",
+            "canonicalized_legal_actions",
+            "uncanonicalized_legal_actions",
+            "duplicate_global_id_collisions",
+            "mask_ones",
+            "unique_legal_global_ids",
+            "legal_action_count_by_type",
+        )
+        return {k: diag[k] for k in keep if k in diag}
 
     def _sanitize_info_value(self, value):
         # Keep common scalar types as-is.
@@ -445,6 +734,54 @@ class TribesGymWrapper(gym.Env):
             return int(str(raw).strip())
         except Exception:
             return int(default)
+
+    def _load_action_vocab(self):
+        types_path = os.path.join(self._tribes_root_dir(), "src", "core", "Types.java")
+        out = {
+            "TECHNOLOGY": [],
+            "UNIT": [],
+            "RESOURCE": [],
+            "BUILDING": [],
+            "CITY_LEVEL_UP": [],
+        }
+        for enum_name in list(out.keys()):
+            out[enum_name] = self._extract_enum_names_from_types_java(types_path, enum_name)
+        return out
+
+    def _extract_enum_names_from_types_java(self, path, enum_name):
+        if not os.path.exists(path):
+            return []
+        try:
+            lines = open(path, "r", encoding="utf-8").read().splitlines()
+        except Exception:
+            return []
+        start = None
+        marker = f"enum {enum_name}"
+        for i, ln in enumerate(lines):
+            if marker in ln:
+                start = i
+                break
+        if start is None:
+            return []
+
+        names = []
+        depth = 0
+        entered = False
+        constants_closed = False
+        for ln in lines[start:]:
+            depth += ln.count("{")
+            if "{" in ln:
+                entered = True
+            if entered and not constants_closed and depth == 1:
+                if ";" in ln:
+                    constants_closed = True
+                m = re.match(r"^\s*([A-Z][A-Z0-9_]+)\s*(\(|,)", ln)
+                if m is not None:
+                    names.append(m.group(1).strip().upper())
+            depth -= ln.count("}")
+            if entered and depth <= 0:
+                break
+        return names
 
     def _tribes_root_dir(self):
         return os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -506,30 +843,20 @@ class TribesGymWrapper(gym.Env):
         idx = int((self._level_pool_offset + self._episode_index) % self._level_pool_size)
         return self._level_pool[idx], idx
 
-    def _build_action_mask_and_indices(self, legal_actions=None):
-        if legal_actions is None:
-            legal_actions = self.tribes_env.list_actions()
-        obs = getattr(self.tribes_env, "_last_obs", {})
-        if not isinstance(obs, dict):
-            obs = {}
-
+    def _filter_allowed_raw_indices(self, legal_actions, obs):
         allowed_indices = []
         for idx, a in enumerate(legal_actions):
-            a_type = a.get("type")
+            a_type = str(a.get("type", "")).upper()
             if a_type not in self.ALLOWED_ACTION_TYPES:
                 continue
-            if a_type == "MOVE":
-                if not self._is_move_destination_within_board(a, obs):
-                    continue
+            if a_type == "MOVE" and not self._is_move_destination_within_board(a, obs):
+                continue
             if a_type == "RESOURCE_GATHERING":
                 if not self._is_resource_gather_legal_for_upgrade(a, legal_actions, obs):
                     continue
             allowed_indices.append(idx)
 
-        # Hard guardrail (Phase1-Learning-010):
-        # If we still have <2 cities and can capture a visible village now,
-        # freeze that unit and queue its capture to execute on END_TURN. Otherwise,
-        # if we can step onto one, force MOVE to village tiles.
+        # Hard guardrail: if <2 cities, prioritize village-capture lines.
         if self._get_city_count(obs) < 2 and allowed_indices:
             forced_village_captures = []
             for idx in allowed_indices:
@@ -577,10 +904,266 @@ class TribesGymWrapper(gym.Env):
         else:
             self._queued_village_capture_unit_ids = set()
 
+        return allowed_indices
+
+    def _build_action_mask_and_mapping(self, legal_actions=None, obs=None):
+        if legal_actions is None:
+            legal_actions = self.tribes_env.list_actions()
+        if obs is None:
+            obs = getattr(self.tribes_env, "_last_obs", {})
+        if not isinstance(obs, dict):
+            obs = {}
+        if self._catalog is None:
+            raise RuntimeError("Global action catalog is not initialized.")
+
+        allowed_indices = self._filter_allowed_raw_indices(legal_actions, obs)
+        legal_id_to_raw_index = {}
+        uncanonicalized = []
+        collisions = []
+        per_type_counts = {}
+
+        for raw_idx in allowed_indices:
+            action = legal_actions[raw_idx]
+            a_type = str(action.get("type", "UNKNOWN")).upper()
+            per_type_counts[a_type] = per_type_counts.get(a_type, 0) + 1
+            gid, reason = self._canonicalize_action_to_global_id(action, obs)
+            if gid is None:
+                uncanonicalized.append({"raw_idx": int(raw_idx), "type": a_type, "reason": str(reason), "repr": str(action.get("repr", ""))})
+                continue
+            if gid in legal_id_to_raw_index and legal_id_to_raw_index[gid] != raw_idx:
+                collisions.append({"global_id": int(gid), "raw_a": int(legal_id_to_raw_index[gid]), "raw_b": int(raw_idx), "type": a_type})
+            else:
+                legal_id_to_raw_index[int(gid)] = int(raw_idx)
+
         mask = np.zeros(self.action_space.n, dtype=np.int8)
-        for pos in range(min(len(allowed_indices), self.action_space.n)):
-            mask[pos] = 1
-        return mask, allowed_indices
+        for gid in legal_id_to_raw_index.keys():
+            if 0 <= int(gid) < self.action_space.n:
+                mask[int(gid)] = 1
+
+        diag = {
+            "legal_actions_total": int(len(allowed_indices)),
+            "canonicalized_legal_actions": int(len(legal_id_to_raw_index)),
+            "uncanonicalized_legal_actions": int(len(uncanonicalized)),
+            "uncanonicalized_legal_actions_by_type": self._summarize_by_type(uncanonicalized),
+            "uncanonicalized_repr_examples": [u.get("repr", "") for u in uncanonicalized[:20]],
+            "duplicate_global_id_collisions": int(len(collisions)),
+            "mask_ones": int(np.sum(mask)),
+            "unique_legal_global_ids": int(len(legal_id_to_raw_index)),
+            "legal_action_count_by_type": per_type_counts,
+            "global_id_collisions": collisions[:20],
+        }
+
+        # Fail-fast: never silently continue on canonicalization or collision gaps.
+        if len(collisions) > 0:
+            raise RuntimeError(f"[ACTION_CATALOG] Global-ID collision detected: {json.dumps(diag, default=str)}")
+        if len(uncanonicalized) > 0:
+            raise RuntimeError(f"[ACTION_CATALOG] Uncanonicalized allowed legal actions detected: {json.dumps(diag, default=str)}")
+
+        return mask, legal_id_to_raw_index, diag
+
+    def _summarize_by_type(self, rows):
+        out = {}
+        for r in rows:
+            t = str(r.get("type", "UNKNOWN"))
+            out[t] = out.get(t, 0) + 1
+        return out
+
+    def _action_int(self, action, key, default=None):
+        try:
+            if key not in action:
+                return default
+            v = action.get(key)
+            if v is None:
+                return default
+            return int(v)
+        except Exception:
+            return default
+
+    def _action_str(self, action, key, default=None):
+        try:
+            if key not in action:
+                return default
+            v = action.get(key)
+            if v is None:
+                return default
+            return str(v).upper()
+        except Exception:
+            return default
+
+    def _unit_position_by_id(self, obs, unit_id):
+        units = obs.get("unit", {})
+        if not isinstance(units, dict):
+            return None
+        unit = units.get(str(unit_id), None)
+        if not isinstance(unit, dict):
+            return None
+        try:
+            return int(unit.get("x", -1)), int(unit.get("y", -1))
+        except Exception:
+            return None
+
+    def _city_position_by_id(self, obs, city_id):
+        cities = obs.get("city", {})
+        if not isinstance(cities, dict):
+            return None
+        city = cities.get(str(city_id), None)
+        if not isinstance(city, dict):
+            return None
+        try:
+            return int(city.get("x", -1)), int(city.get("y", -1))
+        except Exception:
+            return None
+
+    def _parse_target_xy_from_action_repr(self, action_repr):
+        if not isinstance(action_repr, str):
+            return None
+        m = re.search(r"\bat\s+(-?\d+)\s*:\s*(-?\d+)", action_repr, flags=re.IGNORECASE)
+        if m is not None:
+            try:
+                return int(m.group(1)), int(m.group(2))
+            except Exception:
+                return None
+        return None
+
+    def _canonicalize_action_to_global_id(self, action, obs):
+        if self._catalog is None:
+            return None, "catalog_uninitialized"
+        a_type = str(action.get("type", "UNKNOWN")).upper()
+        repr_s = str(action.get("repr", ""))
+
+        if a_type == "END_TURN":
+            return self._catalog.id_end_turn(), None
+
+        if a_type == "MOVE":
+            src_x = self._action_int(action, "src_x", None)
+            src_y = self._action_int(action, "src_y", None)
+            dst_x = self._action_int(action, "dst_x", None)
+            dst_y = self._action_int(action, "dst_y", None)
+            unit_id = self._action_int(action, "unit_id", None)
+            if (src_x is None or src_y is None) and unit_id is not None:
+                pos = self._unit_position_by_id(obs, unit_id)
+                if pos is not None:
+                    src_x, src_y = pos
+            if dst_x is None or dst_y is None:
+                parsed = self._parse_move_unit_and_dest_from_action_repr(repr_s)
+                if parsed is not None:
+                    _, dst_x, dst_y = parsed
+            src_tile = self._catalog.tile_id(src_x, src_y)
+            dst_tile = self._catalog.tile_id(dst_x, dst_y)
+            gid = self._catalog.id_move(src_tile, dst_tile)
+            return gid, "missing_move_coords" if gid is None else None
+
+        if a_type == "CAPTURE":
+            unit_id = self._action_int(action, "unit_id", None)
+            src_x = self._action_int(action, "src_x", None)
+            src_y = self._action_int(action, "src_y", None)
+            if (src_x is None or src_y is None) and unit_id is not None:
+                pos = self._unit_position_by_id(obs, unit_id)
+                if pos is not None:
+                    src_x, src_y = pos
+            tgt_x = self._action_int(action, "target_x", None)
+            tgt_y = self._action_int(action, "target_y", None)
+            if tgt_x is None or tgt_y is None:
+                tgt_x, tgt_y = src_x, src_y
+            src_tile = self._catalog.tile_id(src_x, src_y)
+            tgt_tile = self._catalog.tile_id(tgt_x, tgt_y)
+            cap_type = self._action_str(action, "capture_type", "UNKNOWN")
+            gid = self._catalog.id_capture(src_tile, tgt_tile, cap_type)
+            return gid, "missing_capture_coords" if gid is None else None
+
+        if a_type in ("SPAWN", "TRAIN"):
+            unit_type = self._action_str(action, "unit_type", None)
+            city_x = self._action_int(action, "city_x", None)
+            city_y = self._action_int(action, "city_y", None)
+            if city_x is None or city_y is None:
+                city_id = self._action_int(action, "city_id", None)
+                if city_id is not None:
+                    pos = self._city_position_by_id(obs, city_id)
+                    if pos is not None:
+                        city_x, city_y = pos
+            city_tile = self._catalog.tile_id(city_x, city_y)
+            gid = self._catalog.id_train(unit_type, city_tile)
+            return gid, "missing_spawn_fields" if gid is None else None
+
+        if a_type == "RESOURCE_GATHERING":
+            r_type = self._action_str(action, "resource_type", None)
+            tx = self._action_int(action, "target_x", None)
+            ty = self._action_int(action, "target_y", None)
+            if tx is None or ty is None:
+                parsed = self._parse_target_xy_from_action_repr(repr_s)
+                if parsed is not None:
+                    tx, ty = parsed
+            res_tile = self._catalog.tile_id(tx, ty)
+            gid = self._catalog.id_resource(r_type, res_tile)
+            return gid, "missing_resource_fields" if gid is None else None
+
+        if a_type == "CLEAR_FOREST":
+            tx = self._action_int(action, "target_x", None)
+            ty = self._action_int(action, "target_y", None)
+            if tx is None or ty is None:
+                parsed = self._parse_target_xy_from_action_repr(repr_s)
+                if parsed is not None:
+                    tx, ty = parsed
+            tile = self._catalog.tile_id(tx, ty)
+            gid = self._catalog.id_clear_forest(tile)
+            return gid, "missing_clear_forest_target" if gid is None else None
+
+        if a_type == "GROW_FOREST":
+            tx = self._action_int(action, "target_x", None)
+            ty = self._action_int(action, "target_y", None)
+            if tx is None or ty is None:
+                parsed = self._parse_target_xy_from_action_repr(repr_s)
+                if parsed is not None:
+                    tx, ty = parsed
+            tile = self._catalog.tile_id(tx, ty)
+            gid = self._catalog.id_grow_forest(tile)
+            return gid, "missing_grow_forest_target" if gid is None else None
+
+        if a_type == "BUILD":
+            b_type = self._action_str(action, "building_type", None)
+            tx = self._action_int(action, "target_x", None)
+            ty = self._action_int(action, "target_y", None)
+            if tx is None or ty is None:
+                parsed = self._parse_target_xy_from_action_repr(repr_s)
+                if parsed is not None:
+                    tx, ty = parsed
+            tile = self._catalog.tile_id(tx, ty)
+            gid = self._catalog.id_build(b_type, tile)
+            return gid, "missing_build_fields" if gid is None else None
+
+        if a_type == "RESEARCH_TECH":
+            tech = self._action_str(action, "tech_type", None)
+            gid = self._catalog.id_research(tech)
+            return gid, "missing_research_tech" if gid is None else None
+
+        if a_type == "LEVEL_UP":
+            choice = self._action_str(action, "levelup_choice", None)
+            city_x = self._action_int(action, "city_x", None)
+            city_y = self._action_int(action, "city_y", None)
+            if city_x is None or city_y is None:
+                city_id = self._action_int(action, "city_id", None)
+                if city_id is not None:
+                    pos = self._city_position_by_id(obs, city_id)
+                    if pos is not None:
+                        city_x, city_y = pos
+            city_tile = self._catalog.tile_id(city_x, city_y)
+            gid = self._catalog.id_levelup(choice, city_tile)
+            return gid, "missing_levelup_fields" if gid is None else None
+
+        if a_type == "EXAMINE":
+            src_x = self._action_int(action, "src_x", None)
+            src_y = self._action_int(action, "src_y", None)
+            if src_x is None or src_y is None:
+                unit_id = self._action_int(action, "unit_id", None)
+                if unit_id is not None:
+                    pos = self._unit_position_by_id(obs, unit_id)
+                    if pos is not None:
+                        src_x, src_y = pos
+            unit_tile = self._catalog.tile_id(src_x, src_y)
+            gid = self._catalog.id_examine(unit_tile)
+            return gid, "missing_examine_source" if gid is None else None
+
+        return None, f"unsupported_action_type:{a_type}"
 
     def _apply_bardur_opening(self, obs):
         """Force deterministic opening through the start of Turn 2."""
@@ -1232,6 +1815,21 @@ class TribesGymWrapper(gym.Env):
             if x >= 0 and y >= 0:
                 out.add((x, y))
         return out
+
+    def _get_owned_unit_count(self, obs):
+        return len(self._get_owned_unit_tiles(obs))
+
+    def _get_tribe_stars(self, obs, tribe_id=0):
+        tribes = obs.get("tribes", {})
+        if not isinstance(tribes, dict):
+            return 0
+        t = tribes.get(str(int(tribe_id)), {})
+        if not isinstance(t, dict):
+            return 0
+        try:
+            return int(t.get("star", 0))
+        except Exception:
+            return 0
 
     def _has_visible_uncaptured_village(self, obs):
         return len(self._get_visible_uncaptured_village_positions(obs)) > 0

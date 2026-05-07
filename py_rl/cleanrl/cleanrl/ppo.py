@@ -1,5 +1,6 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppopy
 import os
+import json
 import random
 import time
 from dataclasses import dataclass
@@ -100,6 +101,16 @@ class Args:
     """maximum randomized startup delay (seconds) before each env launches its JVM"""
     enable_step_diagnostics: bool = False
     """if toggled, compute and log extra per-step wrapper diagnostics (slower)"""
+    validate_action_interface: bool = True
+    """if toggled, run strict pre-training action-interface validation and fail on any issue"""
+    validation_states: int = 10000
+    """number of decision states to validate before training starts"""
+    validation_seed: int = 12345
+    """seed for pre-training action-interface validation"""
+    max_illegal_sample_rate: float = 0.0001
+    """abort training if illegal_sample_rate exceeds this threshold (0.0001 = 0.01%)"""
+    max_fallback_end_turn_rate: float = 0.0001
+    """abort training if fallback_end_turn_rate exceeds this threshold (0.0001 = 0.01%)"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -188,7 +199,71 @@ def _extract_vector_action_mask(infos, num_envs, action_dim, device):
                 for i in range(num_envs):
                     if vmask[i]:
                         mask[i] = arr[i]
+    elif infos is not None and "legal_global_ids" in infos:
+        # Fast path: each env returns sparse legal global IDs; rebuild dense mask locally.
+        mask = np.zeros((num_envs, action_dim), dtype=np.float32)
+        raw_ids = infos["legal_global_ids"]
+        valid_mask = infos.get("_legal_global_ids", None)
+
+        def _fill_from_ids(row, ids_like):
+            try:
+                ids_arr = np.asarray(ids_like).reshape(-1)
+            except Exception:
+                ids_arr = np.asarray([], dtype=np.int64)
+            for gid in ids_arr:
+                try:
+                    g = int(gid)
+                except Exception:
+                    continue
+                if 0 <= g < action_dim:
+                    row[g] = 1.0
+
+        try:
+            if valid_mask is None:
+                if len(raw_ids) == num_envs:
+                    for i in range(num_envs):
+                        _fill_from_ids(mask[i], raw_ids[i])
+                else:
+                    # Broadcast singleton payload if needed.
+                    for i in range(num_envs):
+                        _fill_from_ids(mask[i], raw_ids)
+            else:
+                vmask = np.asarray(valid_mask, dtype=bool)
+                if len(vmask) == num_envs and len(raw_ids) == num_envs:
+                    for i in range(num_envs):
+                        if vmask[i]:
+                            _fill_from_ids(mask[i], raw_ids[i])
+                        else:
+                            mask[i] = 1.0
+        except Exception:
+            # Keep robust fallback behavior.
+            mask = np.ones((num_envs, action_dim), dtype=np.float32)
     return torch.tensor(mask, dtype=torch.float32, device=device)
+
+
+def _extract_action_mask_from_info_dict(info, action_dim):
+    """Single-env mask extraction for validator; supports dense and sparse formats."""
+    if not isinstance(info, dict):
+        return None
+    if "action_mask" in info:
+        arr = np.asarray(info.get("action_mask", None), dtype=np.float32)
+        if arr.ndim == 1 and arr.shape[0] == action_dim:
+            return arr
+    if "legal_global_ids" in info:
+        mask = np.zeros((action_dim,), dtype=np.float32)
+        try:
+            ids_arr = np.asarray(info.get("legal_global_ids", [])).reshape(-1)
+        except Exception:
+            ids_arr = np.asarray([], dtype=np.int64)
+        for gid in ids_arr:
+            try:
+                g = int(gid)
+            except Exception:
+                continue
+            if 0 <= g < action_dim:
+                mask[g] = 1.0
+        return mask
+    return None
 
 
 def _extract_vector_field(infos, key, num_envs, default_value=None):
@@ -221,6 +296,138 @@ def _extract_vector_field(infos, key, num_envs, default_value=None):
     except Exception:
         pass
     return out
+
+
+def _validate_action_interface(env_id: str, states: int, seed: int):
+    env = gym.make(env_id)
+    try:
+        obs, info = env.reset(seed=seed)
+        checked = 0
+        saw_spawn_warrior = False
+        saw_resource_animal = False
+        saw_capture_village = False
+        saw_research_forestry = False
+        saw_clear_forest = False
+
+        # Gate: no modulo mapping remnants in wrapper selection path.
+        try:
+            wrapper_path = os.path.join(_repo_root, "pol_env", "Tribes", "py", "register_env.py")
+            src = open(wrapper_path, "r", encoding="utf-8").read()
+            if "selected_allowed_pos" in src or "% len(allowed_indices)" in src:
+                raise RuntimeError("Modulo-based allowed-index mapping remnants detected in register_env.py")
+        except Exception as e:
+            raise RuntimeError(f"Failed modulo-mapping gate check: {e}")
+
+        while checked < int(states):
+            if not isinstance(info, dict):
+                raise RuntimeError("Validator expected dict info payload from env reset/step.")
+
+            legal_total = int(info.get("legal_actions_total", 0))
+            canonicalized = int(info.get("canonicalized_legal_actions", 0))
+            uncanonicalized = int(info.get("uncanonicalized_legal_actions", 0))
+            collisions = int(info.get("duplicate_global_id_collisions", 0))
+            mask_ones = int(info.get("mask_ones", -1))
+            unique_ids = int(info.get("unique_legal_global_ids", -1))
+
+            if collisions != 0:
+                raise RuntimeError(f"Validator failed: collisions={collisions} at checked_state={checked}")
+            if uncanonicalized != 0:
+                raise RuntimeError(
+                    f"Validator failed: uncanonicalized={uncanonicalized} at checked_state={checked}; "
+                    f"examples={info.get('uncanonicalized_repr_examples', [])}"
+                )
+            if mask_ones != unique_ids:
+                raise RuntimeError(
+                    f"Validator failed: mask_ones ({mask_ones}) != unique_legal_global_ids ({unique_ids}) "
+                    f"at checked_state={checked}"
+                )
+            if canonicalized != unique_ids:
+                raise RuntimeError(
+                    f"Validator failed: canonicalized ({canonicalized}) != unique_ids ({unique_ids}) "
+                    f"at checked_state={checked}"
+                )
+            if legal_total < canonicalized:
+                raise RuntimeError(
+                    f"Validator failed: legal_total ({legal_total}) < canonicalized ({canonicalized}) "
+                    f"at checked_state={checked}"
+                )
+
+            action_mask = _extract_action_mask_from_info_dict(info, env.action_space.n)
+            if action_mask is None or action_mask.ndim != 1:
+                raise RuntimeError("Validator failed: action_mask missing or not 1D.")
+            if int(np.sum(action_mask)) != mask_ones:
+                raise RuntimeError("Validator failed: action_mask sum mismatch with mask_ones.")
+
+            valid_ids = np.where(action_mask > 0)[0]
+            if len(valid_ids) == 0:
+                raise RuntimeError("Validator failed: no valid masked IDs.")
+
+            # Situation-specific coverage checks against current legal actions.
+            try:
+                uw = env.unwrapped
+                legal_actions = uw.tribes_env.list_actions()
+                for a in legal_actions:
+                    a_type = str(a.get("type", "")).upper()
+                    gid, _reason = uw._canonicalize_action_to_global_id(a, uw.tribes_env._last_obs)
+                    if gid is None:
+                        continue
+                    if action_mask[int(gid)] <= 0:
+                        continue
+                    repr_s = str(a.get("repr", "")).upper()
+                    if a_type in ("SPAWN", "TRAIN") and "WARRIOR" in repr_s:
+                        saw_spawn_warrior = True
+                    if a_type == "RESOURCE_GATHERING" and "ANIMAL" in repr_s:
+                        saw_resource_animal = True
+                    if a_type == "CAPTURE" and "VILLAGE" in repr_s:
+                        saw_capture_village = True
+                    if a_type == "RESEARCH_TECH" and "FORESTRY" in repr_s:
+                        saw_research_forestry = True
+                    if a_type == "CLEAR_FOREST":
+                        saw_clear_forest = True
+            except Exception as e:
+                raise RuntimeError(f"Validator failed in situation-specific coverage checks: {e}")
+
+            sampled = int(np.random.choice(valid_ids))
+            obs, reward, terminated, truncated, info = env.step(sampled)
+
+            if bool(info.get("illegal_sampled_global_id", False)):
+                raise RuntimeError(f"Validator failed: sampled legal id {sampled} marked illegal at checked_state={checked}")
+            if bool(info.get("fallback_to_end_turn", False)):
+                raise RuntimeError(f"Validator failed: fallback_to_end_turn triggered for sampled legal id {sampled}")
+            if int(info.get("selected_global_id", -1)) != sampled:
+                raise RuntimeError(
+                    f"Validator failed: selected_global_id {info.get('selected_global_id')} "
+                    f"!= sampled {sampled}"
+                )
+
+            # Situational coverage checks from exposed type counts and selected legal actions.
+            by_type = info.get("legal_action_count_by_type", {}) if isinstance(info.get("legal_action_count_by_type", {}), dict) else {}
+            if by_type.get("SPAWN", 0) > 0 and by_type.get("SPAWN", 0) != 0 and int(info.get("mask_ones", 0)) <= 0:
+                raise RuntimeError("Validator failed: SPAWN opportunities present but no masked legal IDs.")
+            if by_type.get("CAPTURE", 0) > 0 and int(info.get("mask_ones", 0)) <= 0:
+                raise RuntimeError("Validator failed: CAPTURE opportunities present but no masked legal IDs.")
+            if by_type.get("RESOURCE_GATHERING", 0) > 0 and int(info.get("mask_ones", 0)) <= 0:
+                raise RuntimeError("Validator failed: RESOURCE_GATHERING opportunities present but no masked legal IDs.")
+            if by_type.get("RESEARCH_TECH", 0) > 0 and int(info.get("mask_ones", 0)) <= 0:
+                raise RuntimeError("Validator failed: RESEARCH_TECH opportunities present but no masked legal IDs.")
+            if by_type.get("CLEAR_FOREST", 0) > 0 and int(info.get("mask_ones", 0)) <= 0:
+                raise RuntimeError("Validator failed: CLEAR_FOREST opportunities present but no masked legal IDs.")
+
+            checked += 1
+            if terminated or truncated:
+                obs, info = env.reset()
+
+        print(f"[ACTION_VALIDATOR] Passed strict validation over {checked} decision states.")
+        print(
+            "[ACTION_VALIDATOR] Situation coverage seen:"
+            f" spawn_warrior={saw_spawn_warrior},"
+            f" resource_animal={saw_resource_animal},"
+            f" capture_village={saw_capture_village},"
+            f" research_forestry={saw_research_forestry},"
+            f" clear_forest={saw_clear_forest}"
+        )
+    finally:
+        env.close()
 
 
 if __name__ == "__main__":
@@ -257,6 +464,9 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+
+    if args.validate_action_interface:
+        _validate_action_interface(args.env_id, args.validation_states, args.validation_seed)
 
     # env setup
     envs = gym.vector.AsyncVectorEnv(
@@ -298,6 +508,32 @@ if __name__ == "__main__":
         envs.single_action_space.n,
         device,
     )
+    if next_action_mask.shape[-1] != envs.single_action_space.n:
+        raise RuntimeError(
+            f"action_mask.shape[-1]={next_action_mask.shape[-1]} does not match action space n={envs.single_action_space.n}"
+        )
+    if agent.actor[-1].out_features != envs.single_action_space.n:
+        raise RuntimeError(
+            f"ppo_policy_output_dim={agent.actor[-1].out_features} does not match env.action_space.n={envs.single_action_space.n}"
+        )
+    action_interface_meta = {
+        "catalog_version": None,
+        "canonicalizer_version": None,
+        "map_width": None,
+        "map_height": None,
+        "global_action_space_n": int(envs.single_action_space.n),
+        "action_offset_table_hash": None,
+    }
+    for k in ["catalog_version", "canonicalizer_version", "map_width", "map_height", "global_action_space_n", "action_offset_table_hash"]:
+        vals = _extract_vector_field(reset_infos, k, args.num_envs, default_value=None)
+        first = next((v for v in vals if v is not None), None)
+        action_interface_meta[k] = first
+    if action_interface_meta.get("global_action_space_n") is not None:
+        if int(action_interface_meta["global_action_space_n"]) != int(envs.single_action_space.n):
+            raise RuntimeError(
+                f"Reported global_action_space_n={action_interface_meta['global_action_space_n']} "
+                f"does not match env action space n={envs.single_action_space.n}"
+            )
 
     for iteration in range(1, args.num_iterations + 1):
         # Per-iteration diagnostics for dashboard clarity.
@@ -339,6 +575,31 @@ if __name__ == "__main__":
                 device,
             )
 
+            collision_values = _extract_vector_field(infos, "duplicate_global_id_collisions", args.num_envs, default_value=0)
+            if any(int(v) > 0 for v in collision_values if v is not None):
+                raise RuntimeError(f"Detected duplicate_global_id_collisions in training step at global_step={global_step}")
+
+            uncanonicalized_values = _extract_vector_field(infos, "uncanonicalized_legal_actions", args.num_envs, default_value=0)
+            if any(int(v) > 0 for v in uncanonicalized_values if v is not None):
+                raise RuntimeError(
+                    f"Detected uncanonicalized_legal_actions in training step at global_step={global_step}"
+                )
+
+            illegal_rate_values = _extract_vector_field(infos, "illegal_sample_rate", args.num_envs, default_value=0.0)
+            fallback_rate_values = _extract_vector_field(infos, "fallback_end_turn_rate", args.num_envs, default_value=0.0)
+            max_illegal_rate = max(float(v) for v in illegal_rate_values if v is not None) if illegal_rate_values else 0.0
+            max_fallback_rate = max(float(v) for v in fallback_rate_values if v is not None) if fallback_rate_values else 0.0
+            if max_illegal_rate > float(args.max_illegal_sample_rate):
+                raise RuntimeError(
+                    f"illegal_sample_rate={max_illegal_rate:.6f} exceeded threshold={args.max_illegal_sample_rate:.6f} "
+                    f"at global_step={global_step}"
+                )
+            if max_fallback_rate > float(args.max_fallback_end_turn_rate):
+                raise RuntimeError(
+                    f"fallback_end_turn_rate={max_fallback_rate:.6f} exceeded threshold={args.max_fallback_end_turn_rate:.6f} "
+                    f"at global_step={global_step}"
+                )
+
             if args.enable_step_diagnostics:
                 # ---- Custom diagnostics from wrapper infos ----
                 valid_actions_values = _extract_vector_field(infos, "valid_actions", args.num_envs, default_value=None)
@@ -361,6 +622,20 @@ if __name__ == "__main__":
                     if dspt is not None:
                         iter_delta_spt_sum += float(dspt)
                         iter_delta_spt_count += 1
+
+                # Core action-interface telemetry (means across envs where available).
+                for key, chart_name in [
+                    ("turn", "charts/turn"),
+                    ("unit_count", "charts/unit_count"),
+                    ("stars", "charts/stars"),
+                    ("reward", "charts/reward"),
+                    ("selected_global_id", "charts/selected_global_id"),
+                    ("selected_raw_java_index", "charts/selected_raw_java_index"),
+                ]:
+                    vals = _extract_vector_field(infos, key, args.num_envs, default_value=None)
+                    clean = [float(v) for v in vals if v is not None]
+                    if len(clean) > 0:
+                        writer.add_scalar(chart_name, float(np.mean(clean)), global_step)
 
                 # Custom Phase-1 telemetry:
                 # Log SPT for envs that just ended (typically via truncation at turn horizon).
@@ -426,6 +701,12 @@ if __name__ == "__main__":
                         if checkpoint_step > 0 and checkpoint_step % args.save_frequency == 0:
                             checkpoint_path = os.path.join(run_dir, f"model_checkpoint_{checkpoint_step}.cleanrl_model")
                             torch.save(agent.state_dict(), checkpoint_path)
+                            meta_path = checkpoint_path + ".action_interface.json"
+                            try:
+                                with open(meta_path, "w", encoding="utf-8") as f:
+                                    json.dump(action_interface_meta, f, indent=2, sort_keys=True, default=str)
+                            except Exception as e:
+                                print(f"warning: failed to save action interface metadata: {e}")
                             print(f"checkpoint_saved={checkpoint_path}")
 
         # bootstrap value if not done
@@ -546,6 +827,12 @@ if __name__ == "__main__":
     if args.save_model:
         model_path = args.model_path or os.path.join(run_dir, f"{args.exp_name}.cleanrl_model")
         torch.save(agent.state_dict(), model_path)
+        meta_path = model_path + ".action_interface.json"
+        try:
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(action_interface_meta, f, indent=2, sort_keys=True, default=str)
+        except Exception as e:
+            print(f"warning: failed to save action interface metadata: {e}")
         print(f"model_saved={model_path}")
 
     envs.close()

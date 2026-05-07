@@ -2,6 +2,120 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Data-014] - 2026-05-07
+
+### Scope
+- Convert the Phase 1 Python action interface from positional/variable indexing to a deterministic global action-ID contract.
+- Add structured Java action metadata and strict pre-training/runtime validation so action-mask correctness is enforced end-to-end.
+- Add explicit validator tooling and run-registry bookkeeping for the data-interface migration.
+
+### Implemented
+- Reworked action-space/canonicalization pipeline in `pol_env/Tribes/py/register_env.py`:
+  - added `GlobalActionCatalog` class to build a deterministic flat global action-ID space for fixed board dimensions.
+  - catalog now owns typed/global offsets and ID mapping for:
+    - `END_TURN`,
+    - `MOVE`,
+    - `CAPTURE`,
+    - `TRAIN`/`SPAWN`,
+    - `RESOURCE_GATHERING`,
+    - `CLEAR_FOREST`,
+    - `GROW_FOREST`,
+    - `BUILD`,
+    - `RESEARCH_TECH`,
+    - `LEVEL_UP`,
+    - `EXAMINE`.
+  - added action-catalog fingerprinting via deterministic JSON + SHA-256 hash to track offset-table integrity.
+  - wrapper action space is now driven by catalog size (`Discrete(catalog.total_size)`) instead of fixed placeholder `Discrete(200)` when bootstrap succeeds.
+  - added `CATALOG_VERSION = "flat-v1"` and `CANONICALIZER_VERSION = "flat-v1-structured"` telemetry/version guards.
+  - expanded allowed action types to include `SPAWN`.
+  - added Java enum vocabulary loading from `src/core/Types.java`:
+    - `_load_action_vocab(...)`,
+    - `_extract_enum_names_from_types_java(...)`,
+    - and typed lookup tables for technologies/units/resources/buildings/city-level-up options.
+  - replaced positional mask builder with deterministic global-ID mapping flow:
+    - `_filter_allowed_raw_indices(...)` for legality/guardrail filtering,
+    - `_build_action_mask_and_mapping(...)` for global-ID canonicalization + dense mask generation.
+  - added canonicalization for structured action payloads:
+    - `_canonicalize_action_to_global_id(...)` now maps per-action typed fields + coordinate payloads into global IDs.
+  - added fail-fast canonicalization guards:
+    - raises on any uncanonicalized allowed legal action,
+    - raises on duplicate global-ID collisions.
+  - switched sampling semantics from modulo remap to direct global-ID selection:
+    - sampled global ID must exist in current legal ID mapping,
+    - illegal sampled IDs increment counters and force `END_TURN` fallback.
+  - added runtime counters/telemetry for safety monitoring:
+    - `illegal_sample_count`, `fallback_end_turn_count`, `total_action_decisions`,
+    - `illegal_sample_rate`, `fallback_end_turn_rate`,
+    - `selected_global_id`, `selected_raw_java_index`,
+    - canonicalization diagnostics and by-type legal-action counts.
+  - added info-mode split with environment knob `POLYVISION_INFO_MODE`:
+    - `fast` mode emits sparse `legal_global_ids` (instead of full dense mask),
+    - `debug` mode retains richer payloads (including dense `action_mask` and detailed diagnostics).
+  - added action validation mode knob `POLYVISION_ACTION_VALIDATION_MODE` and wrapper state for per-step canonicalization diagnostics.
+  - added helper `_diag_for_info(...)` to trim/shape diagnostic payloads by info mode.
+  - retained/extended debug-only move verification and game-state telemetry path under debug info mode.
+  - added utility helpers:
+    - `_action_int(...)`, `_action_str(...)`,
+    - `_unit_position_by_id(...)`, `_city_position_by_id(...)`,
+    - `_parse_target_xy_from_action_repr(...)`,
+    - `_get_owned_unit_count(...)`, `_get_tribe_stars(...)`.
+- Added structured legal-action schema export in `pol_env/Tribes/src/core/game/PythonEnv.java`:
+  - `listActionsJson()` now adds `schema_version = 1` and enriches every action with typed fields through `addStructuredActionFields(...)`.
+  - added typed field extraction per action class:
+    - `Move`: `unit_id`, `src_x/src_y`, `dst_x/dst_y`,
+    - `Capture`: `unit_id`, `capture_type`, `target_city_id`, source/target coordinates/tiles,
+    - `Spawn`: `city_id` + city coordinates/tile + `unit_type`,
+    - `ResourceGathering`: city fields + `resource_type` + target fields,
+    - `Build`: city fields + `building_type` + target fields,
+    - `ClearForest` / `GrowForest`: city fields + target fields,
+    - `LevelUp`: city fields + `levelup_choice` + target fields,
+    - `ResearchTech`: `tribe_id` + `tech_type`,
+    - `Examine`: `unit_id` + source coordinates.
+  - added shared helpers:
+    - `addCityFields(...)`,
+    - `putTargetFieldsFromCityAction(...)`,
+    - `safeGetUnit(...)`, `safeGetCity(...)`.
+  - this provides structured canonicalization inputs to Python without relying solely on `repr` parsing.
+- Hardened PPO training against action-interface drift in `py_rl/cleanrl/cleanrl/ppo.py`:
+  - added CLI/runtime args:
+    - `validate_action_interface` (default `True`),
+    - `validation_states` (default `10000`),
+    - `validation_seed` (default `12345`),
+    - `max_illegal_sample_rate` (default `0.0001`),
+    - `max_fallback_end_turn_rate` (default `0.0001`).
+  - extended vector mask extraction to support sparse fast-mode payload:
+    - reconstructs dense masks from `legal_global_ids` + optional `_legal_global_ids` validity mask.
+  - added `_extract_action_mask_from_info_dict(...)` for single-env validator compatibility with dense/sparse info formats.
+  - added strict `_validate_action_interface(...)` pre-training validator:
+    - fails on canonicalization gaps/collisions/mask inconsistencies,
+    - verifies no modulo-mapping remnant gate in wrapper source,
+    - checks sampled legal IDs are never reclassified illegal/fallbacked,
+    - performs scenario coverage checks over legal action types (spawn/resource/capture/research/clear-forest).
+  - validator is executed before vectorized training when `validate_action_interface=True`.
+  - added startup action-interface contract checks:
+    - `action_mask` width must match `env.action_space.n`,
+    - actor output dimension must match `env.action_space.n`,
+    - reported wrapper `global_action_space_n` must match trainer action space.
+  - added runtime fail-fast guards during rollout:
+    - abort on any non-zero `duplicate_global_id_collisions`,
+    - abort on any non-zero `uncanonicalized_legal_actions`,
+    - abort if illegal/fallback rates exceed configured thresholds.
+  - added action-interface metadata capture (`catalog/canonicalizer/map dims/hash/action-space`) and sidecar persistence to:
+    - checkpoint files (`.action_interface.json`),
+    - final saved model (`.action_interface.json`).
+  - added additional diagnostic scalar logging for core action telemetry (`turn`, `unit_count`, `stars`, `reward`, selected IDs).
+- Added standalone strict validator tool `pol_env/Tribes/py/validate_action_interface.py`:
+  - CLI utility to run deterministic action-interface validation outside training loop.
+  - validates:
+    - zero collisions,
+    - zero uncanonicalized legal actions,
+    - `mask_ones == unique_legal_global_ids`,
+    - legal sampled IDs remain legal and do not trigger fallback.
+  - includes situation-coverage tracking for spawn/resource/capture/research/clear-forest legal opportunities.
+  - supports configurable `--states` and `--seed`.
+- Updated benchmark registry in `model_run_benchmark_log.md`:
+  - added run mapping `Tribes-v0__ppo__1__1778104307` -> `Phase1-Data-014 (3M)`.
+
 ## [Phase1-Learning-013] - 2026-05-06
 
 ### Scope
