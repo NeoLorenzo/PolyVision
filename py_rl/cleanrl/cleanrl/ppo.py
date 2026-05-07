@@ -638,7 +638,7 @@ if __name__ == "__main__":
         wandb_run = wandb.init(
             project=args.wandb_project_name,
             entity=args.wandb_entity,
-            sync_tensorboard=True,
+            sync_tensorboard=False,
             config=vars(args),
             name=run_name,
             monitor_gym=True,
@@ -777,9 +777,13 @@ if __name__ == "__main__":
                 f"Reported global_action_space_n={action_interface_meta['global_action_space_n']} "
                 f"does not match env action space n={envs.single_action_space.n}"
             )
+    info_mode_values = _extract_vector_field(reset_infos, "info_mode", args.num_envs, default_value=None)
+    detected_info_mode = next((str(v).strip().lower() for v in info_mode_values if v is not None), "fast")
+    debug_chart_mode = detected_info_mode == "debug"
     print(
         "[ACTION_INTERFACE] "
         f"actor_mode={args.actor_mode} "
+        f"info_mode={detected_info_mode} "
         f"catalog_version={action_interface_meta.get('catalog_version')} "
         f"action_space_n={envs.single_action_space.n} "
         f"max_legal_actions={args.max_legal_actions}"
@@ -915,14 +919,22 @@ if __name__ == "__main__":
                         iter_delta_spt_count += 1
 
                 # Core action-interface telemetry (means across envs where available).
-                for key, chart_name in [
-                    ("turn", "charts/turn"),
+                diagnostic_series = [
                     ("unit_count", "charts/unit_count"),
                     ("stars", "charts/stars"),
                     ("reward", "charts/reward"),
-                    ("selected_global_id", "charts/selected_global_id"),
-                    ("selected_raw_java_index", "charts/selected_raw_java_index"),
-                ]:
+                ]
+                # Low-signal internals are debug-only to keep dashboards clean.
+                if debug_chart_mode:
+                    diagnostic_series.extend(
+                        [
+                            ("turn", "charts/turn"),
+                            ("selected_global_id", "charts/selected_global_id"),
+                            ("selected_raw_java_index", "charts/selected_raw_java_index"),
+                        ]
+                    )
+
+                for key, chart_name in diagnostic_series:
                     vals = _extract_vector_field(infos, key, args.num_envs, default_value=None)
                     clean = [float(v) for v in vals if v is not None]
                     if len(clean) > 0:
@@ -979,8 +991,6 @@ if __name__ == "__main__":
                         print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
                         log_scalar("charts/episodic_return", info["episode"]["r"], global_step)
                         log_scalar("charts/episodic_length", info["episode"]["l"], global_step)
-                    if args.enable_step_diagnostics and info and "spt" in info:
-                        log_scalar("charts/custom_spt_return", float(info["spt"]), global_step)
 
             # Periodic checkpointing. Save every crossed frequency milestone in case
             # num_envs does not divide save_frequency exactly.

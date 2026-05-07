@@ -76,6 +76,7 @@ def print_reward_breakdown(info, total_reward: float, truncated: bool = False):
         return
 
     delta_spt = float(info.get("delta_spt", 0.0))
+    delta_spt_reward = float(info.get("delta_spt_reward", delta_spt))
     capture_bonus = float(info.get("reward_capture_city_bonus", 0.0))
     delay_penalty = float(info.get("reward_second_village_delay_penalty", 0.0))
     neglect_penalty = float(info.get("reward_visible_village_neglect_penalty", 0.0))
@@ -90,13 +91,14 @@ def print_reward_breakdown(info, total_reward: float, truncated: bool = False):
             t10_penalty = -3.0
 
     shaping_sum = capture_bonus + delay_penalty + neglect_penalty + breadcrumb + fog_clearance + t10_penalty
-    reconstructed_total = delta_spt + shaping_sum
+    reconstructed_total = delta_spt_reward + shaping_sum
     reward_adjustment = float(info.get("reward_adjustment", shaping_sum))
     selected_action_type = str(info.get("selected_action_type", "UNKNOWN"))
 
     print("Reward Breakdown:")
     print(f"  selected_action_type:            {selected_action_type}")
     print(f"  base_delta_spt:                  {delta_spt:+.4f}")
+    print(f"  delta_spt_reward:                {delta_spt_reward:+.4f}")
     print(f"  capture_city_bonus:              {capture_bonus:+.4f}")
     print(f"  second_village_delay_penalty:    {delay_penalty:+.4f}")
     print(f"  visible_village_neglect_penalty: {neglect_penalty:+.4f}")

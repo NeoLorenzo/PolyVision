@@ -172,8 +172,10 @@ class TribesGymWrapper(gym.Env):
     REVEAL_UNCAPTURED_VILLAGE_REWARD = 1.0
     MOVE_CLOSER_TO_VISIBLE_VILLAGE_REWARD = 0.5
     MOVE_ONTO_VILLAGE_REWARD = 1.0
-    CAPTURE_CITY_BONUS_MIN = 4.0
-    CAPTURE_CITY_BONUS_MAX = 8.0
+    CAPTURE_CITY_BONUS_MIN = 3.0
+    CAPTURE_CITY_BONUS_MAX = 6.0
+    SPT_INCREASE_REWARD_MULTIPLIER = 5.0
+    SPT_NONPOSITIVE_REWARD_MULTIPLIER = 1.0
     VISIBLE_VILLAGE_NEGLECT_PENALTY = -0.5
     VISIBLE_VILLAGE_NEGLECT_GRACE_TURNS = 2
     VILLAGE_BREADCRUMB_REWARD = 0.5
@@ -223,6 +225,7 @@ class TribesGymWrapper(gym.Env):
         self._moved_on_t0 = False
         self._visible_village_streak_turns = 0
         self._queued_village_capture_unit_ids = set()
+        self._unit_previous_tiles = {}
         self._initial_visible_tiles = 0
         self._episode_fog_tiles_cleared = 0
         self._catalog = None
@@ -300,6 +303,7 @@ class TribesGymWrapper(gym.Env):
         obs = self.tribes_env.reset(self._current_level_file, self._last_reset_seed)
         self._episode_index += 1
         self._turn_count = 0
+        self._unit_previous_tiles = {}
         obs = self._apply_bardur_opening(obs)
         self._starting_city_count = self._get_city_count(obs)
         self._last_city_count = self._starting_city_count
@@ -450,10 +454,13 @@ class TribesGymWrapper(gym.Env):
             self._turn_count += 1
         elif selected_action_type == "MOVE":
             selected_action = legal_actions[selected_raw_action]
-            parsed_move = self._parse_move_unit_and_dest_from_action_repr(str(selected_action.get("repr", "")))
-            if parsed_move is not None:
-                chosen_move_unit_id = int(parsed_move[0])
-                chosen_move_dest = (int(parsed_move[1]), int(parsed_move[2]))
+            unit_id, src_x, src_y, dst_x, dst_y = self._extract_move_components(selected_action, start_obs)
+            if unit_id is not None:
+                chosen_move_unit_id = int(unit_id)
+            if dst_x is not None and dst_y is not None:
+                chosen_move_dest = (int(dst_x), int(dst_y))
+            if unit_id is not None and src_x is not None and src_y is not None:
+                self._unit_previous_tiles[int(unit_id)] = (int(src_x), int(src_y))
             if not self._is_move_destination_within_board(selected_action, start_obs):
                 raise RuntimeError(
                     f"Selected MOVE action has out-of-bounds destination: "
@@ -473,13 +480,18 @@ class TribesGymWrapper(gym.Env):
 
         current_bardur_spt = self._compute_bardur_spt(obs)
         base_delta_spt = float(current_bardur_spt - prev_bardur_spt)
+        delta_spt_reward = float(base_delta_spt)
+        if base_delta_spt > 0:
+            delta_spt_reward = float(base_delta_spt) * float(self.SPT_INCREASE_REWARD_MULTIPLIER)
+        else:
+            delta_spt_reward = float(base_delta_spt) * float(self.SPT_NONPOSITIVE_REWARD_MULTIPLIER)
         current_city_count = self._get_city_count(obs)
         reward_adjustment = 0.0
 
         capture_city_bonus = 0.0
         if current_city_count > self._last_city_count:
             n_new_cities = current_city_count - self._last_city_count
-            # +4.0 per newly captured city in this step, capped at +8.0.
+            # +3.0 per newly captured city in this step, capped at +6.0.
             capture_city_bonus = min(
                 self.CAPTURE_CITY_BONUS_MAX,
                 max(0, n_new_cities) * self.CAPTURE_CITY_BONUS_MIN,
@@ -551,7 +563,7 @@ class TribesGymWrapper(gym.Env):
         terminated = False
         truncated = self._turn_count >= self.MAX_TURNS
 
-        reward = float(base_delta_spt) + reward_adjustment
+        reward = float(delta_spt_reward) + reward_adjustment
 
         # Build the next-state legal mask and mapping diagnostics (for policy step t+1).
         post_legal_actions = self.tribes_env.list_actions()
@@ -593,6 +605,7 @@ class TribesGymWrapper(gym.Env):
         info["city_count"] = current_city_count
         info["fog_tiles_cleared_total"] = int(self._episode_fog_tiles_cleared)
         info["delta_spt"] = float(base_delta_spt)
+        info["delta_spt_reward"] = float(delta_spt_reward)
         info["spt"] = float(current_bardur_spt)
         info["reward"] = float(reward)
         info["turn"] = int(self._turn_count)
@@ -933,7 +946,67 @@ class TribesGymWrapper(gym.Env):
         else:
             self._queued_village_capture_unit_ids = set()
 
+        # Early-turn constraint: only block unit 2 immediate backtracking on T1/T2.
+        allowed_indices = self._apply_t1_t2_unit2_backtrack_mask(allowed_indices, legal_actions, obs)
+
         return allowed_indices
+
+    def _apply_t1_t2_unit2_backtrack_mask(self, allowed_indices, legal_actions, obs):
+        if not allowed_indices:
+            return allowed_indices
+        if int(self._turn_count) not in (1, 2):
+            return allowed_indices
+
+        target_unit_id = 2
+        prev_tile = self._unit_previous_tiles.get(int(target_unit_id), None)
+        if prev_tile is None:
+            return allowed_indices
+        prev_tile = (int(prev_tile[0]), int(prev_tile[1]))
+
+        filtered = []
+        removed_any = False
+        for idx in allowed_indices:
+            a = legal_actions[idx]
+            if str(a.get("type", "")).upper() != "MOVE":
+                filtered.append(idx)
+                continue
+
+            unit_id, _sx, _sy, dst_x, dst_y = self._extract_move_components(a, obs)
+            if unit_id is None or dst_x is None or dst_y is None:
+                filtered.append(idx)
+                continue
+
+            if int(unit_id) == int(target_unit_id) and (int(dst_x), int(dst_y)) == prev_tile:
+                removed_any = True
+                continue
+
+            filtered.append(idx)
+
+        # Safety: never collapse legal set to empty from this one-tile rule.
+        if removed_any and len(filtered) == 0:
+            return allowed_indices
+        return filtered
+
+    def _extract_move_components(self, action, obs):
+        unit_id = self._action_int(action, "unit_id", None)
+        src_x = self._action_int(action, "src_x", None)
+        src_y = self._action_int(action, "src_y", None)
+        dst_x = self._action_int(action, "dst_x", None)
+        dst_y = self._action_int(action, "dst_y", None)
+        if (dst_x is None or dst_y is None) or (unit_id is None):
+            parsed_move = self._parse_move_unit_and_dest_from_action_repr(str(action.get("repr", "")))
+            if parsed_move is not None:
+                if unit_id is None:
+                    unit_id = int(parsed_move[0])
+                if dst_x is None:
+                    dst_x = int(parsed_move[1])
+                if dst_y is None:
+                    dst_y = int(parsed_move[2])
+        if (src_x is None or src_y is None) and unit_id is not None:
+            pos = self._unit_position_by_id(obs, unit_id)
+            if pos is not None:
+                src_x, src_y = int(pos[0]), int(pos[1])
+        return unit_id, src_x, src_y, dst_x, dst_y
 
     def _build_action_mask_and_mapping(self, legal_actions=None, obs=None):
         if legal_actions is None:
@@ -1444,6 +1517,18 @@ class TribesGymWrapper(gym.Env):
             if best is None:
                 return local_obs
             try:
+                chosen = next((m for m in scored_moves if m.get("idx", None) == best), None)
+                if isinstance(chosen, dict):
+                    unit_id = chosen.get("unit_id", None)
+                    cur = chosen.get("cur", (None, None))
+                    cur_x = cur[0] if isinstance(cur, tuple) and len(cur) > 0 else None
+                    cur_y = cur[1] if isinstance(cur, tuple) and len(cur) > 1 else None
+                    if unit_id is not None and (cur_x is None or cur_y is None):
+                        fallback_pos = get_unit_pos_from_obs(local_obs, int(unit_id))
+                        if fallback_pos is not None:
+                            cur_x, cur_y = int(fallback_pos[0]), int(fallback_pos[1])
+                    if unit_id is not None and cur_x is not None and cur_y is not None:
+                        self._unit_previous_tiles[int(unit_id)] = (int(cur_x), int(cur_y))
                 new_obs, _, _, _ = self.tribes_env.step(best)
                 return new_obs
             except Exception:

@@ -2,6 +2,56 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Learning-016] - 2026-05-07
+
+### Scope
+- Learning-focused reward retuning to emphasize productive SPT gains while damping city-capture bonus magnitude.
+- Add a narrow early-turn movement anti-backtrack constraint for a specific opening unit to stabilize early trajectory quality.
+- Keep evaluator/trainer diagnostics aligned with the new reward decomposition and reduce dashboard noise in fast info mode.
+
+### Implemented
+- Updated reward shaping and early-turn movement constraints in `pol_env/Tribes/py/register_env.py`:
+  - tuned city-capture shaping constants:
+    - `CAPTURE_CITY_BONUS_MIN`: `4.0 -> 3.0`,
+    - `CAPTURE_CITY_BONUS_MAX`: `8.0 -> 6.0`.
+  - added SPT reward scaling constants:
+    - `SPT_INCREASE_REWARD_MULTIPLIER = 5.0`,
+    - `SPT_NONPOSITIVE_REWARD_MULTIPLIER = 1.0`.
+  - reward computation now distinguishes:
+    - raw `base_delta_spt`,
+    - shaped `delta_spt_reward` (positive deltas amplified 5x, non-positive unchanged).
+  - final reward now uses:
+    - `reward = delta_spt_reward + reward_adjustment`
+    - (instead of `base_delta_spt + reward_adjustment`).
+  - added `info["delta_spt_reward"]` telemetry for explicit shaped-vs-raw SPT attribution.
+  - added unit previous-tile tracking state:
+    - wrapper field `_unit_previous_tiles`,
+    - reset clearing in episode reset path,
+    - move-source updates in selected action path and opening autoplayer path.
+  - replaced ad-hoc move parse path with structured extractor:
+    - added `_extract_move_components(...)` to recover `unit_id/src/dst` from structured fields first, with repr/obs fallback.
+  - added targeted early-turn anti-backtrack filter:
+    - `_apply_t1_t2_unit2_backtrack_mask(...)` runs during allowed-index filtering,
+    - active only on turns 1-2,
+    - blocks `MOVE` actions where unit `2` immediately returns to its previous tile,
+    - preserves safety by reverting to original allowed set if filtering would produce zero legal actions.
+  - integrated backtrack filter into action filtering pipeline immediately before mask/mapping construction.
+- Updated reward-debug reconstruction in `evaluate_brain.py`:
+  - `print_reward_breakdown(...)` now reads `delta_spt_reward` from info payload (fallback to `delta_spt`).
+  - added explicit `delta_spt_reward` line in printed breakdown.
+  - reconstructed total now uses `delta_spt_reward + shaping_sum` for parity with wrapper reward output.
+- Updated trainer diagnostics behavior in `py_rl/cleanrl/cleanrl/ppo.py`:
+  - set W&B init to `sync_tensorboard=False` (explicit manual metric logging path retained).
+  - detects wrapper `info_mode` from reset infos and derives `debug_chart_mode`.
+  - startup action-interface banner now prints detected `info_mode`.
+  - core diagnostic series is now mode-aware:
+    - always logs high-signal metrics: `unit_count`, `stars`, `reward`,
+    - logs lower-signal internals (`turn`, `selected_global_id`, `selected_raw_java_index`) only in debug chart mode.
+  - removed duplicate per-episode-end `custom_spt_return` logging branch to reduce redundant chart noise.
+- Updated benchmark registry in `model_run_benchmark_log.md`:
+  - added run mapping `Tribes-v0__ppo__1__1778158665` -> `Phase1-Learning-016 (4M)`.
+- Updated `CHANGELOG.md` with this detailed `[Phase1-Learning-016]` entry to keep source-control documentation synchronized with the update.
+
 ## [Phase1-Data-015] - 2026-05-07
 
 ### Scope
