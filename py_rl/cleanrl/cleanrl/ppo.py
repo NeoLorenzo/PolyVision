@@ -112,9 +112,11 @@ class Args:
     max_fallback_end_turn_rate: float = 0.0001
     """abort training if fallback_end_turn_rate exceeds this threshold (0.0001 = 0.01%)"""
     actor_mode: str = "legal_only"
-    """policy actor mode: legal_only (default) or dense_debug"""
+    """policy actor mode: legal_only (default), legal_features, or dense_debug"""
     max_legal_actions: int = 1024
     """fixed legal-action slot tensor length for legal_only actor mode"""
+    legal_action_feature_dim: int = 22
+    """per-legal-slot feature width for legal_features actor mode"""
     old_logprob_recompute_tol: float = 1e-5
     """absolute tolerance for pre-update old_logprob recomputation invariant"""
 
@@ -150,12 +152,13 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class Agent(nn.Module):
-    def __init__(self, envs, actor_mode: str = "legal_only", max_legal_actions: int = 1024):
+    def __init__(self, envs, actor_mode: str = "legal_only", max_legal_actions: int = 1024, legal_action_feature_dim: int = 22):
         super().__init__()
         self.actor_mode = str(actor_mode).strip().lower()
-        if self.actor_mode not in ("legal_only", "dense_debug"):
-            raise ValueError(f"Unsupported actor_mode={actor_mode}. Expected legal_only or dense_debug.")
+        if self.actor_mode not in ("legal_only", "legal_features", "dense_debug"):
+            raise ValueError(f"Unsupported actor_mode={actor_mode}. Expected legal_only, legal_features, or dense_debug.")
         self.max_legal_actions = int(max_legal_actions)
+        self.legal_action_feature_dim = int(legal_action_feature_dim)
         self.critic = nn.Sequential(
             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
             nn.Tanh(),
@@ -183,6 +186,21 @@ class Agent(nn.Module):
             self.action_embedding = nn.Embedding(envs.single_action_space.n, 64)
             nn.init.normal_(self.action_embedding.weight, mean=0.0, std=0.02)
             self.actor = None
+            if self.actor_mode == "legal_features":
+                self.action_feature_encoder = nn.Sequential(
+                    layer_init(nn.Linear(self.legal_action_feature_dim, 32)),
+                    nn.Tanh(),
+                    layer_init(nn.Linear(32, 32)),
+                    nn.Tanh(),
+                )
+                self.action_scorer = nn.Sequential(
+                    layer_init(nn.Linear(64 + 64 + 32, 64)),
+                    nn.Tanh(),
+                    layer_init(nn.Linear(64, 1), std=0.01),
+                )
+            else:
+                self.action_feature_encoder = None
+                self.action_scorer = None
 
     def get_value(self, x):
         return self.critic(x)
@@ -194,6 +212,7 @@ class Agent(nn.Module):
         action_mask=None,
         legal_global_ids=None,
         legal_action_valid_mask=None,
+        legal_action_features=None,
         selected_slot=None,
     ):
         if self.actor_mode == "dense_debug":
@@ -218,9 +237,28 @@ class Agent(nn.Module):
         h = self.state_encoder(x)
         legal_ids = legal_global_ids.long()
         valid = legal_action_valid_mask.bool()
-        # Score only legal candidate IDs using state-action dot products.
         legal_emb = self.action_embedding(legal_ids)
-        logits = torch.einsum("bd,bkd->bk", h, legal_emb)
+        if self.actor_mode == "legal_only":
+            # Score only legal candidate IDs using state-action dot products.
+            logits = torch.einsum("bd,bkd->bk", h, legal_emb)
+        else:
+            if legal_action_features is None:
+                raise RuntimeError("legal_features actor_mode requires legal_action_features.")
+            if legal_action_features.ndim != 3:
+                raise RuntimeError("legal_action_features must be rank-3: [batch, max_legal_actions, feature_dim].")
+            if legal_action_features.shape[0] != legal_ids.shape[0] or legal_action_features.shape[1] != legal_ids.shape[1]:
+                raise RuntimeError(
+                    f"legal_action_features shape mismatch: got={tuple(legal_action_features.shape)} "
+                    f"expected_prefix=({legal_ids.shape[0]}, {legal_ids.shape[1]})"
+                )
+            if int(legal_action_features.shape[2]) != int(self.legal_action_feature_dim):
+                raise RuntimeError(
+                    f"legal_action_features last dim mismatch: got={legal_action_features.shape[2]} "
+                    f"expected={self.legal_action_feature_dim}"
+                )
+            feat_emb = self.action_feature_encoder(legal_action_features.float())
+            repeated_state = h.unsqueeze(1).expand(-1, legal_ids.shape[1], -1)
+            logits = self.action_scorer(torch.cat([repeated_state, legal_emb, feat_emb], dim=-1)).squeeze(-1)
         logits = logits.masked_fill(~valid, -1e8)
         probs = Categorical(logits=logits)
 
@@ -439,6 +477,45 @@ def _extract_vector_legal_tensors(infos, num_envs, max_legal_actions, action_dim
     )
 
 
+def _extract_vector_legal_feature_tensors(infos, num_envs, max_legal_actions, feature_dim, device):
+    if infos is None:
+        raise RuntimeError("Missing infos payload; cannot extract legal action feature tensors.")
+    if "legal_action_features_padded" not in infos:
+        raise RuntimeError("Infos missing legal_action_features_padded for legal_features actor.")
+
+    raw_features = np.asarray(infos["legal_action_features_padded"])
+    features_mask = infos.get("_legal_action_features_padded", None)
+    feat_out = np.zeros((num_envs, max_legal_actions, feature_dim), dtype=np.float32)
+
+    def _copy_row(i, src_feat):
+        feat_row = np.asarray(src_feat, dtype=np.float32)
+        if feat_row.ndim != 2:
+            raise RuntimeError(f"legal feature tensor must be rank-2 at env={i}; got shape={feat_row.shape}")
+        if feat_row.shape[0] != max_legal_actions or feat_row.shape[1] != feature_dim:
+            raise RuntimeError(
+                f"legal feature shape mismatch at env={i}: got={feat_row.shape}, expected=({max_legal_actions}, {feature_dim})"
+            )
+        if not np.all(np.isfinite(feat_row)):
+            raise RuntimeError(f"Non-finite values in legal_action_features_padded at env={i}.")
+        feat_out[i] = feat_row
+
+    if raw_features.ndim == 3 and raw_features.shape[0] == num_envs:
+        for i in range(num_envs):
+            _copy_row(i, raw_features[i])
+    else:
+        if features_mask is None:
+            raise RuntimeError(f"Cannot align legal feature tensors: features_shape={raw_features.shape}")
+        mask_arr = np.asarray(features_mask, dtype=bool).reshape(-1)
+        if mask_arr.shape[0] != num_envs:
+            raise RuntimeError("Invalid _legal_action_features_padded validity mask in vector infos.")
+        for i in range(num_envs):
+            if mask_arr[i]:
+                _copy_row(i, raw_features[i])
+            else:
+                raise RuntimeError(f"Missing legal feature tensor row for env={i} in legal_features actor mode.")
+    return torch.tensor(feat_out, dtype=torch.float32, device=device)
+
+
 def _extract_vector_field(infos, key, num_envs, default_value=None):
     """Extract a per-env field from Gymnasium vector infos with optional validity mask.
 
@@ -619,10 +696,12 @@ def _validate_action_interface(env_id: str, states: int, seed: int):
 if __name__ == "__main__":
     args = tyro.cli(Args)
     args.actor_mode = str(args.actor_mode).strip().lower()
-    if args.actor_mode not in ("legal_only", "dense_debug"):
-        raise RuntimeError(f"Unsupported --actor-mode {args.actor_mode}. Expected legal_only or dense_debug.")
+    if args.actor_mode not in ("legal_only", "legal_features", "dense_debug"):
+        raise RuntimeError(f"Unsupported --actor-mode {args.actor_mode}. Expected legal_only, legal_features, or dense_debug.")
     if int(args.max_legal_actions) <= 0:
         raise RuntimeError("--max-legal-actions must be > 0.")
+    if int(args.legal_action_feature_dim) <= 0:
+        raise RuntimeError("--legal-action-feature-dim must be > 0.")
     os.environ["POLYVISION_MAX_LEGAL_ACTIONS"] = str(int(args.max_legal_actions))
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
@@ -687,7 +766,12 @@ if __name__ == "__main__":
     )
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
-    agent = Agent(envs, actor_mode=args.actor_mode, max_legal_actions=args.max_legal_actions).to(device)
+    agent = Agent(
+        envs,
+        actor_mode=args.actor_mode,
+        max_legal_actions=args.max_legal_actions,
+        legal_action_feature_dim=args.legal_action_feature_dim,
+    ).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -708,6 +792,13 @@ if __name__ == "__main__":
         dtype=torch.bool,
         device=device,
     )
+    legal_action_features_buf = None
+    if args.actor_mode == "legal_features":
+        legal_action_features_buf = torch.zeros(
+            (args.num_steps, args.num_envs, args.max_legal_actions, args.legal_action_feature_dim),
+            dtype=torch.float32,
+            device=device,
+        )
     action_masks = None
     if args.actor_mode == "dense_debug":
         action_masks = torch.zeros(
@@ -725,6 +816,7 @@ if __name__ == "__main__":
     next_action_mask = None
     next_legal_global_ids = None
     next_legal_action_valid_mask = None
+    next_legal_action_features = None
     if args.actor_mode == "dense_debug":
         next_action_mask = _extract_vector_action_mask(
             reset_infos,
@@ -744,6 +836,14 @@ if __name__ == "__main__":
             envs.single_action_space.n,
             device,
         )
+        if args.actor_mode == "legal_features":
+            next_legal_action_features = _extract_vector_legal_feature_tensors(
+                reset_infos,
+                args.num_envs,
+                int(args.max_legal_actions),
+                int(args.legal_action_feature_dim),
+                device,
+            )
     if args.actor_mode == "dense_debug":
         if agent.actor[-1].out_features != envs.single_action_space.n:
             raise RuntimeError(
@@ -751,12 +851,27 @@ if __name__ == "__main__":
             )
     else:
         if agent.action_embedding is None:
-            raise RuntimeError("legal_only mode requires action_embedding to be initialized.")
+            raise RuntimeError("legal action modes require action_embedding to be initialized.")
         if int(agent.action_embedding.num_embeddings) != int(envs.single_action_space.n):
             raise RuntimeError(
                 f"action_embedding.num_embeddings={agent.action_embedding.num_embeddings} "
                 f"does not match env.action_space.n={envs.single_action_space.n}"
             )
+        if args.actor_mode == "legal_features":
+            if agent.action_feature_encoder is None or agent.action_scorer is None:
+                raise RuntimeError("legal_features mode requires action_feature_encoder and action_scorer.")
+            if int(agent.legal_action_feature_dim) != int(args.legal_action_feature_dim):
+                raise RuntimeError(
+                    f"agent.legal_action_feature_dim={agent.legal_action_feature_dim} "
+                    f"does not match args.legal_action_feature_dim={args.legal_action_feature_dim}"
+                )
+            feature_dim_values = _extract_vector_field(reset_infos, "legal_action_feature_dim", args.num_envs, default_value=None)
+            reported_feature_dim = next((int(v) for v in feature_dim_values if v is not None), None)
+            if reported_feature_dim is not None and reported_feature_dim != int(args.legal_action_feature_dim):
+                raise RuntimeError(
+                    f"Reported legal_action_feature_dim={reported_feature_dim} "
+                    f"does not match --legal-action-feature-dim={int(args.legal_action_feature_dim)}"
+                )
     action_interface_meta = {
         "actor_mode": args.actor_mode,
         "catalog_version": None,
@@ -766,8 +881,19 @@ if __name__ == "__main__":
         "global_action_space_n": int(envs.single_action_space.n),
         "action_offset_table_hash": None,
         "max_legal_actions": int(args.max_legal_actions),
+        "legal_action_feature_dim": int(args.legal_action_feature_dim),
+        "legal_action_feature_version": None,
     }
-    for k in ["catalog_version", "canonicalizer_version", "map_width", "map_height", "global_action_space_n", "action_offset_table_hash", "max_legal_actions"]:
+    for k in [
+        "catalog_version",
+        "canonicalizer_version",
+        "map_width",
+        "map_height",
+        "global_action_space_n",
+        "action_offset_table_hash",
+        "max_legal_actions",
+        "legal_action_feature_version",
+    ]:
         vals = _extract_vector_field(reset_infos, k, args.num_envs, default_value=None)
         first = next((v for v in vals if v is not None), None)
         action_interface_meta[k] = first
@@ -815,6 +941,8 @@ if __name__ == "__main__":
             else:
                 legal_global_ids_buf[step] = next_legal_global_ids
                 legal_action_valid_mask_buf[step] = next_legal_action_valid_mask
+                if args.actor_mode == "legal_features":
+                    legal_action_features_buf[step] = next_legal_action_features
 
             # ALGO LOGIC: action logic
             with torch.no_grad():
@@ -828,6 +956,7 @@ if __name__ == "__main__":
                         next_obs,
                         legal_global_ids=next_legal_global_ids,
                         legal_action_valid_mask=next_legal_action_valid_mask,
+                        legal_action_features=next_legal_action_features if args.actor_mode == "legal_features" else None,
                     )
                     slot_valid = next_legal_action_valid_mask.gather(1, action_slot.unsqueeze(1)).squeeze(1)
                     if not bool(torch.all(slot_valid)):
@@ -861,6 +990,14 @@ if __name__ == "__main__":
                     envs.single_action_space.n,
                     device,
                 )
+                if args.actor_mode == "legal_features":
+                    next_legal_action_features = _extract_vector_legal_feature_tensors(
+                        infos,
+                        args.num_envs,
+                        int(args.max_legal_actions),
+                        int(args.legal_action_feature_dim),
+                        device,
+                    )
                 selected_global_values = _extract_vector_field(infos, "selected_global_id", args.num_envs, default_value=None)
                 for env_i, v in enumerate(selected_global_values):
                     if v is None:
@@ -1101,10 +1238,15 @@ if __name__ == "__main__":
         b_selected_slots = selected_slots.reshape(-1)
         b_legal_global_ids = legal_global_ids_buf.reshape((-1, int(args.max_legal_actions)))
         b_legal_action_valid_mask = legal_action_valid_mask_buf.reshape((-1, int(args.max_legal_actions)))
+        b_legal_action_features = None
+        if args.actor_mode == "legal_features":
+            b_legal_action_features = legal_action_features_buf.reshape(
+                (-1, int(args.max_legal_actions), int(args.legal_action_feature_dim))
+            )
         if args.actor_mode == "dense_debug":
             b_action_masks = action_masks.reshape((-1, envs.single_action_space.n))
 
-        if args.actor_mode == "legal_only":
+        if args.actor_mode in ("legal_only", "legal_features"):
             with torch.no_grad():
                 slot_valid = b_legal_action_valid_mask.gather(1, b_selected_slots.unsqueeze(1)).squeeze(1)
                 if not bool(torch.all(slot_valid)):
@@ -1116,6 +1258,7 @@ if __name__ == "__main__":
                     b_obs,
                     legal_global_ids=b_legal_global_ids,
                     legal_action_valid_mask=b_legal_action_valid_mask,
+                    legal_action_features=b_legal_action_features if args.actor_mode == "legal_features" else None,
                     selected_slot=b_selected_slots,
                 )
                 max_abs_diff = float(torch.max(torch.abs(recomputed_old_logprob - b_logprobs)).item())
@@ -1144,6 +1287,7 @@ if __name__ == "__main__":
                     mb_slots = b_selected_slots[mb_inds]
                     mb_legal_ids = b_legal_global_ids[mb_inds]
                     mb_legal_valid = b_legal_action_valid_mask[mb_inds]
+                    mb_legal_features = b_legal_action_features[mb_inds] if args.actor_mode == "legal_features" else None
                     slot_global_ids = mb_legal_ids.gather(1, mb_slots.unsqueeze(1)).squeeze(1)
                     if not bool(torch.equal(slot_global_ids.long(), b_actions.long().view(-1)[mb_inds])):
                         raise RuntimeError("Minibatch invariant failed: legal_global_ids_padded[selected_slot] != selected_global_id.")
@@ -1151,6 +1295,7 @@ if __name__ == "__main__":
                         b_obs[mb_inds],
                         legal_global_ids=mb_legal_ids,
                         legal_action_valid_mask=mb_legal_valid,
+                        legal_action_features=mb_legal_features,
                         selected_slot=mb_slots,
                     )
                 logratio = newlogprob - b_logprobs[mb_inds]

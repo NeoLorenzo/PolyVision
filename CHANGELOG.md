@@ -2,6 +2,98 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Data-018] - 2026-05-08
+
+### Scope
+- Add per-legal-action engineered feature tensors to the Tribes wrapper action interface.
+- Extend PPO with a new legal-slot policy mode that consumes those action features.
+- Add dedicated diagnostics tooling for feature-shape, wiring, influence, and action-quality checks.
+
+### Implemented
+- Updated legal-action interface metadata and feature extraction in `pol_env/Tribes/py/register_env.py`:
+  - added legal-feature schema constants:
+    - `LEGAL_ACTION_FEATURE_VERSION = "v1_1_move_focus"`,
+    - `REVEAL_CLIP = 12.0`,
+    - `ADJ_FOG_MAX = 8.0`,
+    - `LEGAL_ACTION_FEATURE_NAMES` (22-feature ordered tuple),
+    - `ACTION_FEATURE_DIM = len(LEGAL_ACTION_FEATURE_NAMES)`.
+  - reset and step `info` payloads now include:
+    - `legal_action_features_padded` (shape `[max_legal_actions, ACTION_FEATURE_DIM]`, `float32`),
+    - `legal_action_feature_dim`,
+    - `legal_action_feature_version`.
+  - added padded feature builder:
+    - `_build_legal_action_features_padded(...)`:
+      - aligns slot-wise with `legal_global_ids_padded` and `legal_action_valid_mask`,
+      - uses legal-ID to raw-action mapping,
+      - leaves invalid/padded slots as zero vectors.
+  - added per-action featurizer:
+    - `_compute_legal_action_feature_vector(action, obs)`:
+      - move features:
+        - move indicator,
+        - normalized newly revealed fog tiles,
+        - normalized adjacent fog count at destination,
+        - normalized adjacent fog delta (`dst - src`),
+        - zero-reveal move flag,
+        - target hits visible uncaptured village flag,
+        - has-visible-uncaptured-village flag,
+        - normalized distance delta to nearest visible uncaptured village,
+        - immediate backtrack flag,
+        - target-in-owned-city-bounds flag,
+        - normalized distance-from-capital delta,
+        - warrior-unit flag.
+      - non-move/action-class flags:
+        - `END_TURN`, `CAPTURE`, `SPAWN/TRAIN`, `RESEARCH_TECH`,
+        - `RESOURCE_GATHERING`, `LEVEL_UP`, `BUILD`,
+        - `CLEAR_FOREST`, `GROW_FOREST`, and `is_other`.
+  - added helper methods used by featurization:
+    - `_count_adjacent_fog_tiles(...)`,
+    - `_estimate_newly_revealed_tiles_if_move(...)` (includes ranger/mountain sight-range handling),
+    - `_get_capital_position(...)`,
+    - `_is_inside_owned_city_bounds(...)`.
+- Extended PPO actor pipeline with `legal_features` mode in `py_rl/cleanrl/cleanrl/ppo.py`:
+  - CLI/config updates:
+    - `--actor-mode` now supports `legal_only`, `legal_features`, `dense_debug`,
+    - added `--legal-action-feature-dim` (default `22`) and positive-value validation.
+  - `Agent` constructor now accepts `legal_action_feature_dim`.
+  - in `legal_features` mode, agent now initializes:
+    - `action_feature_encoder` MLP (`feature_dim -> 32 -> 32`),
+    - `action_scorer` MLP over concatenated `[state_embed, action_id_embed, action_feature_embed]`.
+  - `get_action_and_value(...)` now accepts `legal_action_features` and enforces:
+    - rank-3 tensor requirement,
+    - batch/slot dimension alignment with legal IDs,
+    - last-dimension match with configured feature width.
+  - added vector-info extraction utility:
+    - `_extract_vector_legal_feature_tensors(...)`:
+      - validates presence, shape, finiteness, and env-row availability,
+      - returns device tensor `[num_envs, max_legal_actions, feature_dim]`.
+  - rollout/training integration:
+    - added `legal_action_features_buf` storage for legal-feature mode,
+    - extracts feature tensors at reset and every step,
+    - passes feature tensors through action sampling, old-logprob recompute checks, and PPO minibatch updates,
+    - extends legal-action-mode invariant checks to cover `legal_features`.
+  - action-interface metadata sidecar now includes:
+    - `legal_action_feature_dim`,
+    - `legal_action_feature_version` (read from env reset infos).
+  - startup compatibility checks now validate:
+    - model/env feature-dimension agreement for legal-feature mode.
+- Added diagnostics utility `py_rl/cleanrl/cleanrl/legal_features_diagnostics.py`:
+  - imports PPO legal-slot extractors and `Agent`, then runs four diagnostics:
+    - `test_shape_alignment(...)`:
+      - validates feature tensor shape/dtype and slot-level recomputation parity,
+      - verifies invalid slots are zero,
+      - prints slot dump rows with slot/global-id/action summary/features.
+    - `test_actor_uses_features(...)`:
+      - verifies logits change when legal features are zeroed or perturbed.
+    - `test_selected_vs_average_move_features(...)`:
+      - rollout-based selected-vs-average move-quality statistics (reveal/adjoining-fog/village-distance/backtrack metrics).
+    - `test_feature_scale_distribution(...)`:
+      - samples states and prints feature min/max/mean and legal/move count distribution summaries.
+  - provides CLI flags for model path, seed, rollout steps, sampled states, and slot-dump verbosity.
+- Updated benchmark registry in `model_run_benchmark_log.md`:
+  - added `Tribes-v0__ppo__1__1778180156 -> Phase1-Data-018 (250K)`,
+  - added `Tribes-v0__ppo__1__1778183254 -> Phase1-Data-018 (6M)`.
+- Updated `CHANGELOG.md` with this detailed `[Phase1-Data-018]` entry to keep source-control documentation synchronized with the update.
+
 ## [Phase1-Learning-017] - 2026-05-07
 
 ### Scope

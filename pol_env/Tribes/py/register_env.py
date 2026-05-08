@@ -196,6 +196,34 @@ class TribesGymWrapper(gym.Env):
     CATALOG_VERSION = "flat-v1"
     CANONICALIZER_VERSION = "flat-v1-structured"
     MAX_LEGAL_ACTIONS_DEFAULT = 1024
+    LEGAL_ACTION_FEATURE_VERSION = "v1_1_move_focus"
+    REVEAL_CLIP = 12.0
+    ADJ_FOG_MAX = 8.0
+    LEGAL_ACTION_FEATURE_NAMES = (
+        "is_move",
+        "newly_revealed_tiles_if_move_norm",
+        "adjacent_fog_count_after_move_norm",
+        "adjacent_fog_delta_norm",
+        "is_zero_reveal_move",
+        "target_contains_visible_uncaptured_village",
+        "has_visible_uncaptured_village",
+        "distance_delta_to_nearest_visible_uncaptured_village_norm",
+        "is_immediate_backtrack",
+        "target_inside_owned_city_bounds",
+        "distance_from_capital_delta_norm",
+        "unit_type_warrior",
+        "is_end_turn",
+        "is_capture",
+        "is_train_or_spawn",
+        "is_research",
+        "is_resource_gathering",
+        "is_level_up",
+        "is_build",
+        "is_clear_forest",
+        "is_grow_forest",
+        "is_other",
+    )
+    ACTION_FEATURE_DIM = len(LEGAL_ACTION_FEATURE_NAMES)
 
     def __init__(self, level_file=None):
         self.tribes_env = make_default_env()
@@ -350,9 +378,19 @@ class TribesGymWrapper(gym.Env):
             "max_legal_actions": int(self._max_legal_actions),
         }
         legal_global_ids_padded, legal_action_valid_mask, legal_action_count = self._build_legal_slot_tensors(action_mask)
+        legal_action_features_padded = self._build_legal_action_features_padded(
+            legal_global_ids_padded,
+            legal_action_valid_mask,
+            legal_id_to_raw_index,
+            legal_actions,
+            obs,
+        )
         info["legal_global_ids_padded"] = legal_global_ids_padded
         info["legal_action_valid_mask"] = legal_action_valid_mask
         info["legal_action_count"] = int(legal_action_count)
+        info["legal_action_features_padded"] = legal_action_features_padded
+        info["legal_action_feature_dim"] = int(self.ACTION_FEATURE_DIM)
+        info["legal_action_feature_version"] = str(self.LEGAL_ACTION_FEATURE_VERSION)
         if self._is_debug_info_mode():
             info["action_mask"] = action_mask
         info.update(self._diag_for_info(diag))
@@ -654,9 +692,19 @@ class TribesGymWrapper(gym.Env):
         info["unit_count"] = int(self._get_owned_unit_count(obs))
         info["stars"] = int(self._get_tribe_stars(obs, tribe_id=0))
         post_legal_global_ids_padded, post_legal_action_valid_mask, post_legal_action_count = self._build_legal_slot_tensors(post_action_mask)
+        post_legal_action_features_padded = self._build_legal_action_features_padded(
+            post_legal_global_ids_padded,
+            post_legal_action_valid_mask,
+            post_legal_id_to_raw_index,
+            post_legal_actions,
+            obs,
+        )
         info["legal_global_ids_padded"] = post_legal_global_ids_padded
         info["legal_action_valid_mask"] = post_legal_action_valid_mask
         info["legal_action_count"] = int(post_legal_action_count)
+        info["legal_action_features_padded"] = post_legal_action_features_padded
+        info["legal_action_feature_dim"] = int(self.ACTION_FEATURE_DIM)
+        info["legal_action_feature_version"] = str(self.LEGAL_ACTION_FEATURE_VERSION)
         info.update(self._diag_for_info(post_diag))
 
         if self._is_debug_info_mode() and selected_action_type == "MOVE" and chosen_move_unit_id is not None and chosen_move_dest is not None:
@@ -769,6 +817,218 @@ class TribesGymWrapper(gym.Env):
             padded[:n] = legal_ids
             valid_mask[:n] = True
         return padded, valid_mask, n
+
+    def _build_legal_action_features_padded(self, legal_global_ids_padded, legal_action_valid_mask, legal_id_to_raw_index, legal_actions, obs):
+        features = np.zeros((int(self._max_legal_actions), int(self.ACTION_FEATURE_DIM)), dtype=np.float32)
+        if legal_global_ids_padded is None or legal_action_valid_mask is None:
+            return features
+        if not isinstance(legal_id_to_raw_index, dict) or not isinstance(legal_actions, list):
+            return features
+
+        ids = np.asarray(legal_global_ids_padded, dtype=np.int64).reshape(-1)
+        valid = np.asarray(legal_action_valid_mask, dtype=bool).reshape(-1)
+        max_slots = min(ids.shape[0], valid.shape[0], int(self._max_legal_actions))
+        for slot in range(max_slots):
+            if not bool(valid[slot]):
+                continue
+            gid = int(ids[slot])
+            raw_idx = legal_id_to_raw_index.get(gid, None)
+            if raw_idx is None:
+                continue
+            if int(raw_idx) < 0 or int(raw_idx) >= len(legal_actions):
+                continue
+            action = legal_actions[int(raw_idx)]
+            features[slot, :] = self._compute_legal_action_feature_vector(action, obs)
+        return features
+
+    def _compute_legal_action_feature_vector(self, action, obs):
+        feat = np.zeros((int(self.ACTION_FEATURE_DIM),), dtype=np.float32)
+        a_type = str(action.get("type", "UNKNOWN")).upper()
+        is_move = a_type == "MOVE"
+        feat[0] = 1.0 if is_move else 0.0
+
+        if is_move:
+            unit_id, src_x, src_y, dst_x, dst_y = self._extract_move_components(action, obs)
+            if dst_x is not None and dst_y is not None:
+                revealed = int(self._estimate_newly_revealed_tiles_if_move(obs, unit_id, int(dst_x), int(dst_y)))
+                feat[1] = float(min(float(self.REVEAL_CLIP), max(0.0, float(revealed))) / max(1.0, float(self.REVEAL_CLIP)))
+
+                adj_after = int(self._count_adjacent_fog_tiles(obs, int(dst_x), int(dst_y)))
+                feat[2] = float(min(float(self.ADJ_FOG_MAX), max(0.0, float(adj_after))) / max(1.0, float(self.ADJ_FOG_MAX)))
+
+                adj_before = 0
+                if src_x is not None and src_y is not None:
+                    adj_before = int(self._count_adjacent_fog_tiles(obs, int(src_x), int(src_y)))
+                adj_delta = float(adj_after - adj_before)
+                feat[3] = float(np.clip(adj_delta / max(1.0, float(self.ADJ_FOG_MAX)), -1.0, 1.0))
+                feat[4] = 1.0 if revealed == 0 else 0.0
+
+                visible_villages = self._get_visible_uncaptured_village_positions(obs)
+                has_visible_village = len(visible_villages) > 0
+                feat[6] = 1.0 if has_visible_village else 0.0
+                if has_visible_village:
+                    target_xy = (int(dst_x), int(dst_y))
+                    if target_xy in visible_villages or (target_xy[1], target_xy[0]) in visible_villages:
+                        feat[5] = 1.0
+                    if src_x is not None and src_y is not None:
+                        dist_before = self._min_manhattan_distance((int(src_x), int(src_y)), visible_villages)
+                        dist_after = self._min_manhattan_distance((int(dst_x), int(dst_y)), visible_villages)
+                        if dist_before is not None and dist_after is not None:
+                            dims = self._board_dimensions_from_obs(obs)
+                            dist_norm = float(max(dims)) if dims is not None else 1.0
+                            if dist_norm <= 0:
+                                dist_norm = 1.0
+                            feat[7] = float(np.clip((float(dist_before) - float(dist_after)) / dist_norm, -1.0, 1.0))
+
+                if unit_id is not None:
+                    prev_tile = self._unit_previous_tiles.get(int(unit_id), None)
+                    if prev_tile is not None and (int(dst_x), int(dst_y)) == (int(prev_tile[0]), int(prev_tile[1])):
+                        feat[8] = 1.0
+                    unit = (obs.get("unit", {}) or {}).get(str(int(unit_id)), {})
+                    try:
+                        feat[11] = 1.0 if int(unit.get("type", -1)) == 0 else 0.0
+                    except Exception:
+                        feat[11] = 0.0
+
+                feat[9] = 1.0 if self._is_inside_owned_city_bounds(obs, int(dst_x), int(dst_y)) else 0.0
+
+                capital_pos = self._get_capital_position(obs, tribe_id=0)
+                if capital_pos is not None and src_x is not None and src_y is not None:
+                    before = abs(int(src_x) - int(capital_pos[0])) + abs(int(src_y) - int(capital_pos[1]))
+                    after = abs(int(dst_x) - int(capital_pos[0])) + abs(int(dst_y) - int(capital_pos[1]))
+                    dims = self._board_dimensions_from_obs(obs)
+                    dist_norm = float(max(dims)) if dims is not None else 1.0
+                    if dist_norm <= 0:
+                        dist_norm = 1.0
+                    feat[10] = float(np.clip((float(after) - float(before)) / dist_norm, -1.0, 1.0))
+
+        feat[12] = 1.0 if a_type == "END_TURN" else 0.0
+        feat[13] = 1.0 if a_type == "CAPTURE" else 0.0
+        feat[14] = 1.0 if a_type in ("SPAWN", "TRAIN") else 0.0
+        feat[15] = 1.0 if a_type == "RESEARCH_TECH" else 0.0
+        feat[16] = 1.0 if a_type == "RESOURCE_GATHERING" else 0.0
+        feat[17] = 1.0 if a_type == "LEVEL_UP" else 0.0
+        feat[18] = 1.0 if a_type == "BUILD" else 0.0
+        feat[19] = 1.0 if a_type == "CLEAR_FOREST" else 0.0
+        feat[20] = 1.0 if a_type == "GROW_FOREST" else 0.0
+        known = is_move or bool(feat[12] or feat[13] or feat[14] or feat[15] or feat[16] or feat[17] or feat[18] or feat[19] or feat[20])
+        feat[21] = 0.0 if known else 1.0
+        return feat
+
+    def _count_adjacent_fog_tiles(self, obs, center_x, center_y):
+        dims = self._board_dimensions_from_obs(obs)
+        if dims is None:
+            return 0
+        width, height = dims
+        board = obs.get("board", {})
+        terrain = board.get("terrain", []) if isinstance(board, dict) else []
+        if not isinstance(terrain, list) or not terrain:
+            return 0
+
+        cx = int(center_x)
+        cy = int(center_y)
+        cnt = 0
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                x = cx + int(dx)
+                y = cy + int(dy)
+                if x < 0 or y < 0 or x >= int(width) or y >= int(height):
+                    continue
+                try:
+                    if int(terrain[y][x]) == 7:
+                        cnt += 1
+                except Exception:
+                    continue
+        return int(cnt)
+
+    def _estimate_newly_revealed_tiles_if_move(self, obs, unit_id, dst_x, dst_y):
+        dims = self._board_dimensions_from_obs(obs)
+        if dims is None:
+            return 0
+        width, height = dims
+        board = obs.get("board", {})
+        terrain = board.get("terrain", []) if isinstance(board, dict) else []
+        if not isinstance(terrain, list) or not terrain:
+            return 0
+
+        cx = int(dst_x)
+        cy = int(dst_y)
+        if cx < 0 or cy < 0 or cx >= int(width) or cy >= int(height):
+            return 0
+
+        clear_range = 1
+        unit_type = None
+        if unit_id is not None:
+            unit = (obs.get("unit", {}) or {}).get(str(int(unit_id)), {})
+            try:
+                unit_type = int(unit.get("type", -1))
+            except Exception:
+                unit_type = None
+        if unit_type == 10:
+            clear_range += 1
+        else:
+            try:
+                if int(terrain[cy][cx]) == 3:
+                    clear_range += 1
+            except Exception:
+                pass
+
+        revealed = 0
+        for x in range(cx - clear_range, cx + clear_range + 1):
+            if x < 0 or x >= int(width):
+                continue
+            for y in range(cy - clear_range, cy + clear_range + 1):
+                if y < 0 or y >= int(height):
+                    continue
+                try:
+                    if int(terrain[y][x]) == 7:
+                        revealed += 1
+                except Exception:
+                    continue
+        return int(revealed)
+
+    def _get_capital_position(self, obs, tribe_id=0):
+        tribes = obs.get("tribes", {})
+        if not isinstance(tribes, dict):
+            return None
+        tribe = tribes.get(str(int(tribe_id)), {})
+        if not isinstance(tribe, dict):
+            return None
+        capital_id = tribe.get("capitalID", None)
+        if capital_id is None:
+            return None
+        city = (obs.get("city", {}) or {}).get(str(int(capital_id)), {})
+        if not isinstance(city, dict):
+            return None
+        try:
+            return int(city.get("x", -1)), int(city.get("y", -1))
+        except Exception:
+            return None
+
+    def _is_inside_owned_city_bounds(self, obs, x, y):
+        city_map = obs.get("city", {})
+        if not isinstance(city_map, dict):
+            return False
+        tx = int(x)
+        ty = int(y)
+        for city in city_map.values():
+            if not isinstance(city, dict):
+                continue
+            try:
+                if int(city.get("tribeID", -1)) != 0:
+                    continue
+                cx = int(city.get("x", -1))
+                cy = int(city.get("y", -1))
+                bound = int(city.get("bound", -1))
+            except Exception:
+                continue
+            if cx < 0 or cy < 0 or bound < 0:
+                continue
+            if max(abs(tx - cx), abs(ty - cy)) <= bound:
+                return True
+        return False
 
     def _sanitize_info_value(self, value):
         # Keep common scalar types as-is.

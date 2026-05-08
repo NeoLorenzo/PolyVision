@@ -23,3 +23,5 @@
 | `Tribes-v0__ppo__1__1778147403` | `Phase1-Data-015 (1M)` |
 | `Tribes-v0__ppo__1__1778158665` | `Phase1-Learning-016 (4M)` |
 | `Tribes-v0__ppo__1__1778175810` | `Phase1-Learning-017 (1M)` |
+| `Tribes-v0__ppo__1__1778180156` | `Phase1-Data-018 (250K)` |
+| `Tribes-v0__ppo__1__1778183254` | `Phase1-Data-018 (6M)` |
