@@ -77,6 +77,15 @@ class TribesGymEnv:
     def list_actions(self) -> List[dict]:
         return [json.loads(s) for s in list(self._env.listActionsJson())]
 
+    def get_observation(self, full_visibility: bool = False) -> Dict[str, Any]:
+        """Fetch a fresh observation from Java.
+
+        full_visibility=True is diagnostic-only and bypasses fog-of-war.
+        """
+        if full_visibility:
+            return json.loads(self._env.observationJsonFull())
+        return json.loads(self._env.observationJson())
+
     def render(self, mode: str = "ansi") -> Optional[Union[str, "Image.Image"]]:
         """Render the current state.
 

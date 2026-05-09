@@ -258,14 +258,10 @@ public class PythonEnv {
         gs.advance(acts.get(idx), true);
     }
 
-    /**
-     * Returns an observation JSON similar to GameSaver output but in-memory.
-     */
-    public String observationJson() {
-        // Build observations from the active player's partial-observable copy
-        // so Python receives fog-of-war constrained state.
-        int povPlayer = gs.getActiveTribeID();
-        GameState pov = gs.copy(povPlayer);
+    private String observationJsonFromState(GameState state) {
+        if (state == null) {
+            return "{}";
+        }
 
         JSONObject game = new JSONObject();
 
@@ -278,7 +274,7 @@ public class PythonEnv {
         JSONArray building2D = new JSONArray();
         JSONArray network2D = new JSONArray();
 
-        Board b = pov.getBoard();
+        Board b = state.getBoard();
         for (int i = 0; i < b.getSize(); i++) {
             JSONArray terrain = new JSONArray();
             JSONArray resource = new JSONArray();
@@ -361,7 +357,7 @@ public class PythonEnv {
 
         // Tribes INFO (subset)
         JSONObject tribesINFO = new JSONObject();
-        Tribe[] tribes = pov.getTribes();
+        Tribe[] tribes = state.getTribes();
         for (Tribe t : tribes) {
             JSONObject tribeInfo = new JSONObject();
             tribeInfo.put("citiesID", t.getCitiesID());
@@ -388,12 +384,30 @@ public class PythonEnv {
         game.put("unit", unit);
         game.put("city", city);
         game.put("tribes", tribesINFO);
-        game.put("tick", pov.getTick());
-        game.put("gameIsOver", pov.isGameOver());
-        game.put("activeTribeID", pov.getActiveTribeID());
-        game.put("gameMode", pov.getGameMode().getKey());
+        game.put("tick", state.getTick());
+        game.put("gameIsOver", state.isGameOver());
+        game.put("activeTribeID", state.getActiveTribeID());
+        game.put("gameMode", state.getGameMode().getKey());
 
         return game.toString();
+    }
+
+    /**
+     * Returns an observation JSON similar to GameSaver output but in-memory.
+     * This variant applies active-player fog-of-war.
+     */
+    public String observationJson() {
+        int povPlayer = gs.getActiveTribeID();
+        GameState pov = gs.copy(povPlayer);
+        return observationJsonFromState(pov);
+    }
+
+    /**
+     * Diagnostic-only full-visibility observation built from runtime state.
+     * This bypasses POV fog and should not be used for training.
+     */
+    public String observationJsonFull() {
+        return observationJsonFromState(gs);
     }
 
     /**

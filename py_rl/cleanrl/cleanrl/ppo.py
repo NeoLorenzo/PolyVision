@@ -1,6 +1,7 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppopy
 import os
 import json
+import hashlib
 import random
 import time
 from dataclasses import dataclass
@@ -101,12 +102,18 @@ class Args:
     """maximum randomized startup delay (seconds) before each env launches its JVM"""
     enable_step_diagnostics: bool = False
     """if toggled, compute and log extra per-step wrapper diagnostics (slower)"""
+    step_diagnostics_log_every: int = 3
+    """log high-frequency step diagnostics every N environment steps (1 = every step)"""
     validate_action_interface: bool = True
     """if toggled, run strict pre-training action-interface validation and fail on any issue"""
     validation_states: int = 10000
     """number of decision states to validate before training starts"""
     validation_seed: int = 12345
     """seed for pre-training action-interface validation"""
+    validation_cache_enabled: bool = True
+    """reuse a cached successful action-interface validation when interface code/config is unchanged"""
+    force_revalidate_action_interface: bool = False
+    """force running action-interface validation even if a matching cached result exists"""
     max_illegal_sample_rate: float = 0.0001
     """abort training if illegal_sample_rate exceeds this threshold (0.0001 = 0.01%)"""
     max_fallback_end_turn_rate: float = 0.0001
@@ -548,7 +555,102 @@ def _extract_vector_field(infos, key, num_envs, default_value=None):
     return out
 
 
-def _validate_action_interface(env_id: str, states: int, seed: int):
+def _hash_file_sha256(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(1024 * 1024)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _build_action_validator_fingerprint(
+    env_id: str,
+    states: int,
+    seed: int,
+    actor_mode: str,
+    max_legal_actions: int,
+    legal_action_feature_dim: int,
+):
+    tracked_files = []
+    tracked_files.append(os.path.abspath(__file__))
+    tracked_files.append(os.path.join(_repo_root, "pol_env", "Tribes", "py", "register_env.py"))
+    tracked_files.append(os.path.join(_repo_root, "pol_env", "Tribes", "src", "core", "game", "PythonEnv.java"))
+
+    java_actions_root = os.path.join(_repo_root, "pol_env", "Tribes", "src", "core", "actions")
+    if os.path.isdir(java_actions_root):
+        for root, _dirs, files in os.walk(java_actions_root):
+            for fn in files:
+                if fn.lower().endswith(".java"):
+                    tracked_files.append(os.path.join(root, fn))
+    tracked_files = sorted(os.path.abspath(p) for p in tracked_files if os.path.isfile(p))
+
+    file_hashes = {}
+    for p in tracked_files:
+        rel = os.path.relpath(p, _repo_root)
+        try:
+            file_hashes[rel] = _hash_file_sha256(p)
+        except Exception as e:
+            file_hashes[rel] = f"ERROR:{e}"
+
+    payload = {
+        "validator_version": "action_validator_cache_v1",
+        "env_id": str(env_id),
+        "states": int(states),
+        "seed": int(seed),
+        "actor_mode": str(actor_mode),
+        "max_legal_actions": int(max_legal_actions),
+        "legal_action_feature_dim": int(legal_action_feature_dim),
+        "file_hashes": file_hashes,
+    }
+    payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    fingerprint = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+    return fingerprint, payload
+
+
+def _validate_action_interface(
+    env_id: str,
+    states: int,
+    seed: int,
+    actor_mode: str,
+    max_legal_actions: int,
+    legal_action_feature_dim: int,
+    cache_enabled: bool = True,
+    force_revalidate: bool = False,
+):
+    fingerprint, fingerprint_payload = _build_action_validator_fingerprint(
+        env_id=env_id,
+        states=states,
+        seed=seed,
+        actor_mode=actor_mode,
+        max_legal_actions=max_legal_actions,
+        legal_action_feature_dim=legal_action_feature_dim,
+    )
+    cache_dir = os.path.join(_repo_root, ".cache", "action_validator")
+    cache_path = os.path.join(cache_dir, f"{fingerprint}.json")
+    if bool(cache_enabled) and not bool(force_revalidate) and os.path.isfile(cache_path):
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                cached = json.load(f)
+            if bool(cached.get("passed", False)):
+                print(
+                    f"[ACTION_VALIDATOR] Cache hit: reusing successful strict validation "
+                    f"over {int(cached.get('checked_states', 0))} decision states."
+                )
+                print(
+                    "[ACTION_VALIDATOR] Cached situation coverage seen:"
+                    f" spawn_warrior={bool(cached.get('saw_spawn_warrior', False))},"
+                    f" resource_animal={bool(cached.get('saw_resource_animal', False))},"
+                    f" capture_village={bool(cached.get('saw_capture_village', False))},"
+                    f" research_forestry={bool(cached.get('saw_research_forestry', False))},"
+                    f" clear_forest={bool(cached.get('saw_clear_forest', False))}"
+                )
+                return
+        except Exception:
+            pass
+
     env = gym.make(env_id)
     try:
         obs, info = env.reset(seed=seed)
@@ -689,6 +791,25 @@ def _validate_action_interface(env_id: str, states: int, seed: int):
             f" research_forestry={saw_research_forestry},"
             f" clear_forest={saw_clear_forest}"
         )
+        if bool(cache_enabled):
+            try:
+                os.makedirs(cache_dir, exist_ok=True)
+                cache_record = {
+                    "passed": True,
+                    "checked_states": int(checked),
+                    "saw_spawn_warrior": bool(saw_spawn_warrior),
+                    "saw_resource_animal": bool(saw_resource_animal),
+                    "saw_capture_village": bool(saw_capture_village),
+                    "saw_research_forestry": bool(saw_research_forestry),
+                    "saw_clear_forest": bool(saw_clear_forest),
+                    "created_at_unix": float(time.time()),
+                    "fingerprint": fingerprint,
+                    "fingerprint_payload": fingerprint_payload,
+                }
+                with open(cache_path, "w", encoding="utf-8") as f:
+                    json.dump(cache_record, f, indent=2, sort_keys=True)
+            except Exception as e:
+                print(f"[ACTION_VALIDATOR] WARNING: failed to write cache file {cache_path}: {e}")
     finally:
         env.close()
 
@@ -702,6 +823,8 @@ if __name__ == "__main__":
         raise RuntimeError("--max-legal-actions must be > 0.")
     if int(args.legal_action_feature_dim) <= 0:
         raise RuntimeError("--legal-action-feature-dim must be > 0.")
+    if int(args.step_diagnostics_log_every) <= 0:
+        raise RuntimeError("--step-diagnostics-log-every must be > 0.")
     os.environ["POLYVISION_MAX_LEGAL_ACTIONS"] = str(int(args.max_legal_actions))
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
@@ -747,7 +870,16 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     if args.validate_action_interface:
-        _validate_action_interface(args.env_id, args.validation_states, args.validation_seed)
+        _validate_action_interface(
+            args.env_id,
+            args.validation_states,
+            args.validation_seed,
+            args.actor_mode,
+            int(args.max_legal_actions),
+            int(args.legal_action_feature_dim),
+            cache_enabled=bool(args.validation_cache_enabled),
+            force_revalidate=bool(args.force_revalidate_action_interface),
+        )
 
     # env setup
     envs = gym.vector.AsyncVectorEnv(
@@ -1032,6 +1164,90 @@ if __name__ == "__main__":
                     f"at global_step={global_step}"
                 )
 
+            # Always-on episode-end research telemetry (even when step diagnostics are disabled).
+            if not args.enable_step_diagnostics:
+                forestry_t10_values = []
+                organization_t10_values = []
+                techs_t10_values = []
+                forestry_turn_values = []
+                organization_turn_values = []
+                done_episode_count = 0
+                for env_idx in range(args.num_envs):
+                    if not (truncations[env_idx] or terminations[env_idx]):
+                        continue
+                    done_episode_count += 1
+
+                    def _extract_done_metric(metric_key):
+                        if metric_key not in infos:
+                            return None
+                        raw = infos[metric_key]
+                        mask = infos.get(f"_{metric_key}", None)
+                        if mask is None:
+                            if len(raw) > env_idx:
+                                return raw[env_idx]
+                        else:
+                            if len(mask) > env_idx and mask[env_idx] and len(raw) > env_idx:
+                                return raw[env_idx]
+                        return None
+
+                    forestry_researched_value = _extract_done_metric("forestry_researched")
+                    organization_researched_value = _extract_done_metric("organization_researched")
+                    techs_researched_value = _extract_done_metric("techs_researched")
+                    forestry_turn_value = _extract_done_metric("turn_forestry_researched")
+                    organization_turn_value = _extract_done_metric("turn_organization_researched")
+
+                    if "final_info" in infos and len(infos["final_info"]) > env_idx:
+                        finfo = infos["final_info"][env_idx]
+                        if finfo is not None:
+                            if forestry_researched_value is None and "forestry_researched" in finfo:
+                                forestry_researched_value = finfo["forestry_researched"]
+                            if organization_researched_value is None and "organization_researched" in finfo:
+                                organization_researched_value = finfo["organization_researched"]
+                            if techs_researched_value is None and "techs_researched" in finfo:
+                                techs_researched_value = finfo["techs_researched"]
+                            if forestry_turn_value is None and "turn_forestry_researched" in finfo:
+                                forestry_turn_value = finfo["turn_forestry_researched"]
+                            if organization_turn_value is None and "turn_organization_researched" in finfo:
+                                organization_turn_value = finfo["turn_organization_researched"]
+
+                    if forestry_researched_value is not None:
+                        forestry_t10_values.append(float(forestry_researched_value))
+                    if organization_researched_value is not None:
+                        organization_t10_values.append(float(organization_researched_value))
+                    if techs_researched_value is not None:
+                        techs_t10_values.append(float(techs_researched_value))
+                    if forestry_turn_value is not None and float(forestry_turn_value) >= 0:
+                        forestry_turn_values.append(float(forestry_turn_value))
+                    if organization_turn_value is not None and float(organization_turn_value) >= 0:
+                        organization_turn_values.append(float(organization_turn_value))
+
+                if done_episode_count > 0:
+                    log_scalar(
+                        "research/episode_end_techs_researched_t10",
+                        float(np.mean(techs_t10_values)) if techs_t10_values else 0.0,
+                        global_step,
+                    )
+                    log_scalar(
+                        "research/episode_end_forestry_researched_t10_rate",
+                        float(np.mean(forestry_t10_values)) if forestry_t10_values else 0.0,
+                        global_step,
+                    )
+                    log_scalar(
+                        "research/episode_end_organization_researched_t10_rate",
+                        float(np.mean(organization_t10_values)) if organization_t10_values else 0.0,
+                        global_step,
+                    )
+                    log_scalar(
+                        "research/avg_turn_forestry_researched",
+                        float(np.mean(forestry_turn_values)) if forestry_turn_values else 0.0,
+                        global_step,
+                    )
+                    log_scalar(
+                        "research/avg_turn_organization_researched",
+                        float(np.mean(organization_turn_values)) if organization_turn_values else 0.0,
+                        global_step,
+                    )
+
             if args.enable_step_diagnostics:
                 # ---- Custom diagnostics from wrapper infos ----
                 valid_actions_values = _extract_vector_field(infos, "valid_actions", args.num_envs, default_value=None)
@@ -1070,21 +1286,33 @@ if __name__ == "__main__":
                             ("selected_raw_java_index", "charts/selected_raw_java_index"),
                         ]
                     )
-
-                for key, chart_name in diagnostic_series:
-                    vals = _extract_vector_field(infos, key, args.num_envs, default_value=None)
-                    clean = [float(v) for v in vals if v is not None]
-                    if len(clean) > 0:
-                        log_scalar(chart_name, float(np.mean(clean)), global_step)
+                env_step_index = global_step // args.num_envs
+                should_log_step_diag_scalars = (env_step_index % int(args.step_diagnostics_log_every)) == 0
+                if should_log_step_diag_scalars:
+                    for key, chart_name in diagnostic_series:
+                        vals = _extract_vector_field(infos, key, args.num_envs, default_value=None)
+                        clean = [float(v) for v in vals if v is not None]
+                        if len(clean) > 0:
+                            log_scalar(chart_name, float(np.mean(clean)), global_step)
 
                 # Custom Phase-1 telemetry:
                 # Log SPT for envs that just ended (typically via truncation at turn horizon).
+                techs_t10_values = []
                 forestry_t10_values = []
                 organization_t10_values = []
+                forestry_turn_values = []
+                organization_turn_values = []
                 first_visible_turn_values = []
                 second_city_turn_values = []
+                animals_harvested_t10_values = []
+                fruit_harvested_t10_values = []
+                lumber_huts_built_t10_values = []
+                sawmills_built_t10_values = []
+                forests_cleared_t10_values = []
+                done_episode_count = 0
                 for env_idx in range(args.num_envs):
                     if truncations[env_idx] or terminations[env_idx]:
+                        done_episode_count += 1
                         spt_value = None
                         city_count_value = None
                         fog_cleared_total_value = None
@@ -1094,6 +1322,13 @@ if __name__ == "__main__":
                         organization_researched_value = None
                         first_visible_turn_value = None
                         second_city_turn_value = None
+                        forestry_turn_value = None
+                        organization_turn_value = None
+                        animals_harvested_t10_value = None
+                        fruit_harvested_t10_value = None
+                        lumber_huts_built_t10_value = None
+                        sawmills_built_t10_value = None
+                        forests_cleared_t10_value = None
 
                         def _extract_done_metric(metric_key):
                             if metric_key not in infos:
@@ -1118,6 +1353,13 @@ if __name__ == "__main__":
                         organization_researched_value = _extract_done_metric("organization_researched")
                         first_visible_turn_value = _extract_done_metric("turn_first_uncaptured_village_visible")
                         second_city_turn_value = _extract_done_metric("turn_second_city_captured")
+                        forestry_turn_value = _extract_done_metric("turn_forestry_researched")
+                        organization_turn_value = _extract_done_metric("turn_organization_researched")
+                        animals_harvested_t10_value = _extract_done_metric("animals_harvested_t10")
+                        fruit_harvested_t10_value = _extract_done_metric("fruit_harvested_t10")
+                        lumber_huts_built_t10_value = _extract_done_metric("lumber_huts_built_t10")
+                        sawmills_built_t10_value = _extract_done_metric("sawmills_built_t10")
+                        forests_cleared_t10_value = _extract_done_metric("forests_cleared_t10")
 
                         # Case 2: final_info often carries final per-env info dicts.
                         if "final_info" in infos and len(infos["final_info"]) > env_idx:
@@ -1141,6 +1383,20 @@ if __name__ == "__main__":
                                     first_visible_turn_value = finfo["turn_first_uncaptured_village_visible"]
                                 if second_city_turn_value is None and "turn_second_city_captured" in finfo:
                                     second_city_turn_value = finfo["turn_second_city_captured"]
+                                if forestry_turn_value is None and "turn_forestry_researched" in finfo:
+                                    forestry_turn_value = finfo["turn_forestry_researched"]
+                                if organization_turn_value is None and "turn_organization_researched" in finfo:
+                                    organization_turn_value = finfo["turn_organization_researched"]
+                                if animals_harvested_t10_value is None and "animals_harvested_t10" in finfo:
+                                    animals_harvested_t10_value = finfo["animals_harvested_t10"]
+                                if fruit_harvested_t10_value is None and "fruit_harvested_t10" in finfo:
+                                    fruit_harvested_t10_value = finfo["fruit_harvested_t10"]
+                                if lumber_huts_built_t10_value is None and "lumber_huts_built_t10" in finfo:
+                                    lumber_huts_built_t10_value = finfo["lumber_huts_built_t10"]
+                                if sawmills_built_t10_value is None and "sawmills_built_t10" in finfo:
+                                    sawmills_built_t10_value = finfo["sawmills_built_t10"]
+                                if forests_cleared_t10_value is None and "forests_cleared_t10" in finfo:
+                                    forests_cleared_t10_value = finfo["forests_cleared_t10"]
 
                         if spt_value is not None:
                             log_scalar("charts/custom_spt_return", float(spt_value), global_step)
@@ -1152,7 +1408,7 @@ if __name__ == "__main__":
                         if avg_city_level_value is not None:
                             log_scalar("charts/episode_end_avg_city_level_t10", float(avg_city_level_value), global_step)
                         if techs_researched_value is not None:
-                            log_scalar("research/episode_end_techs_researched_t10", float(techs_researched_value), global_step)
+                            techs_t10_values.append(float(techs_researched_value))
                         if forestry_researched_value is not None:
                             forestry_t10_values.append(float(forestry_researched_value))
                         if organization_researched_value is not None:
@@ -1161,16 +1417,44 @@ if __name__ == "__main__":
                             first_visible_turn_values.append(float(first_visible_turn_value))
                         if second_city_turn_value is not None and float(second_city_turn_value) >= 0:
                             second_city_turn_values.append(float(second_city_turn_value))
-                if forestry_t10_values:
+                        if forestry_turn_value is not None and float(forestry_turn_value) >= 0:
+                            forestry_turn_values.append(float(forestry_turn_value))
+                        if organization_turn_value is not None and float(organization_turn_value) >= 0:
+                            organization_turn_values.append(float(organization_turn_value))
+                        if animals_harvested_t10_value is not None:
+                            animals_harvested_t10_values.append(float(animals_harvested_t10_value))
+                        if fruit_harvested_t10_value is not None:
+                            fruit_harvested_t10_values.append(float(fruit_harvested_t10_value))
+                        if lumber_huts_built_t10_value is not None:
+                            lumber_huts_built_t10_values.append(float(lumber_huts_built_t10_value))
+                        if sawmills_built_t10_value is not None:
+                            sawmills_built_t10_values.append(float(sawmills_built_t10_value))
+                        if forests_cleared_t10_value is not None:
+                            forests_cleared_t10_values.append(float(forests_cleared_t10_value))
+                if done_episode_count > 0:
                     log_scalar(
-                        "research/episode_end_forestry_researched_t10_rate",
-                        float(np.mean(forestry_t10_values)),
+                        "research/episode_end_techs_researched_t10",
+                        float(np.mean(techs_t10_values)) if techs_t10_values else 0.0,
                         global_step,
                     )
-                if organization_t10_values:
+                    log_scalar(
+                        "research/episode_end_forestry_researched_t10_rate",
+                        float(np.mean(forestry_t10_values)) if forestry_t10_values else 0.0,
+                        global_step,
+                    )
                     log_scalar(
                         "research/episode_end_organization_researched_t10_rate",
-                        float(np.mean(organization_t10_values)),
+                        float(np.mean(organization_t10_values)) if organization_t10_values else 0.0,
+                        global_step,
+                    )
+                    log_scalar(
+                        "research/avg_turn_forestry_researched",
+                        float(np.mean(forestry_turn_values)) if forestry_turn_values else 0.0,
+                        global_step,
+                    )
+                    log_scalar(
+                        "research/avg_turn_organization_researched",
+                        float(np.mean(organization_turn_values)) if organization_turn_values else 0.0,
                         global_step,
                     )
                 if first_visible_turn_values:
@@ -1183,6 +1467,36 @@ if __name__ == "__main__":
                     log_scalar(
                         "charts/avg_turn_second_city_captured",
                         float(np.mean(second_city_turn_values)),
+                        global_step,
+                    )
+                if animals_harvested_t10_values:
+                    log_scalar(
+                        "economy/episode_end_animals_harvested_t10",
+                        float(np.mean(animals_harvested_t10_values)),
+                        global_step,
+                    )
+                if fruit_harvested_t10_values:
+                    log_scalar(
+                        "economy/episode_end_fruit_harvested_t10",
+                        float(np.mean(fruit_harvested_t10_values)),
+                        global_step,
+                    )
+                if lumber_huts_built_t10_values:
+                    log_scalar(
+                        "economy/episode_end_lumber_huts_built_t10",
+                        float(np.mean(lumber_huts_built_t10_values)),
+                        global_step,
+                    )
+                if sawmills_built_t10_values:
+                    log_scalar(
+                        "economy/episode_end_sawmills_built_t10",
+                        float(np.mean(sawmills_built_t10_values)),
+                        global_step,
+                    )
+                if forests_cleared_t10_values:
+                    log_scalar(
+                        "economy/episode_end_forests_cleared_t10",
+                        float(np.mean(forests_cleared_t10_values)),
                         global_step,
                     )
 

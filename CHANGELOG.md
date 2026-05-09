@@ -2,6 +2,144 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Data-019] - 2026-05-09
+
+### Scope
+- Audit and harden coordinate-frame handling between Python wrappers and Java runtime observations.
+- Add full-visibility observation plumbing for diagnostics and action-legality forensics.
+- Expand Phase-1 telemetry and trainer logging around research/economy timing.
+- Add focused audit/evaluation scripts plus validator cache artifacts for reproducible investigation.
+
+### Implemented
+- Updated observation bridge in `pol_env/Tribes/py/gym_env.py`:
+  - added `get_observation(full_visibility: bool = False)`:
+    - default path returns fog-of-war constrained `observationJson()`,
+    - diagnostic path returns full-visibility `observationJsonFull()`.
+- Refactored Java observation serialization in `pol_env/Tribes/src/core/game/PythonEnv.java`:
+  - extracted shared serializer `observationJsonFromState(GameState state)`,
+  - preserved existing fogged path via `observationJson()` using `gs.copy(activeTribeID)`,
+  - added diagnostic full-state path `observationJsonFull()` using live `gs`,
+  - clarified comments that full visibility is diagnostic-only and not training-safe.
+- Extended and corrected wrapper diagnostics/telemetry in `pol_env/Tribes/py/register_env.py`:
+  - set village-hold shaping terms to zero for diagnostics-only runs:
+    - `HOLD_NEUTRAL_VILLAGE_END_TURN_REWARD = 0.0`,
+    - `MOVE_OFF_NEUTRAL_VILLAGE_WHEN_CAPTURE_ILLEGAL_PENALTY = 0.0`.
+  - added turn/economy counters (reset on episode init/reset):
+    - `_turn_forestry_researched`, `_turn_organization_researched`,
+    - `_researched_techs_t10`,
+    - `_animals_harvested_t10`, `_fruit_harvested_t10`,
+    - `_lumber_huts_built_t10`, `_sawmills_built_t10`,
+    - `_forests_cleared_t10`.
+  - added `_update_economy_counters_from_action(...)` and wired it into step action execution:
+    - records research timing by action stream,
+    - counts resource gathering/build/clear-forest events through T10.
+  - added parsing helpers for action-repr fallback:
+    - `_parse_tech_type_from_action_repr(...)`,
+    - `_parse_building_type_from_action_repr(...)`.
+  - expanded `info` payload on reset/step with new economy counters:
+    - `animals_harvested_t10`,
+    - `fruit_harvested_t10`,
+    - `lumber_huts_built_t10`,
+    - `sawmills_built_t10`,
+    - `forests_cleared_t10`.
+  - shifted research telemetry source from obs tech arrays to tracked executed actions:
+    - `techs_researched = len(_researched_techs_t10)`,
+    - `forestry_researched = "FORESTRY" in _researched_techs_t10`,
+    - `organization_researched = "ORGANIZATION" in _researched_techs_t10`,
+    - added `turn_forestry_researched`, `turn_organization_researched`.
+  - added neutral-village hold diagnostics in debug info:
+    - `reward_hold_neutral_village_end_turn`,
+    - `reward_move_off_neutral_village_when_capture_illegal`,
+    - `unit_on_neutral_village_capture_illegal`,
+    - `unit_on_neutral_village_capture_illegal_count`,
+    - `end_turn_while_unit_on_neutral_village`,
+    - `moved_off_neutral_village_before_capture`.
+  - normalized village-target coordinate logic to Java/runtime `(x,y)` only:
+    - removed dual `(x,y)/(y,x)` matching from village move/capture checks,
+    - removed swapped-distance fallback in `_min_manhattan_distance(...)`.
+  - added explicit board-coordinate helper layer:
+    - `_board_get_by_java_coord(...)`, `_board_get_int_by_java_coord(...)`,
+    - `_board_get_by_py_coord(...)`,
+    - `java_to_py_coord(...)`, `py_to_java_coord(...)`.
+  - updated `_board_dimensions_from_obs(...)` semantics and docs:
+    - treats board arrays as `board[x][y]`,
+    - returns `(width_x, height_y)` in Java/runtime frame.
+  - moved fog/reveal helpers to Java-coordinate indexing:
+    - `_count_adjacent_fog_tiles(...)`,
+    - `_estimate_newly_revealed_tiles_if_move(...)`,
+    - `_tile_has_adjacent_fog(...)`.
+  - hardened visible-uncaptured-village detection:
+    - `_get_visible_uncaptured_village_positions(...)` now excludes city-actor occupied coords,
+    - added `_validate_visible_uncaptured_villages(...)`,
+    - added `_city_actor_at_java_coord(...)`,
+    - added `_unit_has_any_legal_move_or_capture(...)`,
+    - optional strict assertion gate via `POLYVISION_STRICT_COORD_ASSERT`.
+  - added capture/hold helper methods:
+    - `_legal_capture_unit_ids(...)`,
+    - `_owned_units_on_visible_uncaptured_village_without_capture(...)`.
+- Extended trainer diagnostics and validation caching in `py_rl/cleanrl/cleanrl/ppo.py`:
+  - added args:
+    - `step_diagnostics_log_every`,
+    - `validation_cache_enabled`,
+    - `force_revalidate_action_interface`.
+  - added validator fingerprint/cache pipeline:
+    - `_hash_file_sha256(...)`,
+    - `_build_action_validator_fingerprint(...)`,
+    - extended `_validate_action_interface(...)` to:
+      - include actor/config dimensions in cache key,
+      - hash `ppo.py`, `register_env.py`, `PythonEnv.java`, and all Java action files,
+      - read successful cache hits from `.cache/action_validator/<fingerprint>.json`,
+      - write pass records with coverage flags and fingerprint payload.
+  - added runtime guard: `step_diagnostics_log_every > 0`.
+  - added always-on episode-end research logging even when step diagnostics are disabled:
+    - `research/episode_end_techs_researched_t10`,
+    - `research/episode_end_forestry_researched_t10_rate`,
+    - `research/episode_end_organization_researched_t10_rate`,
+    - `research/avg_turn_forestry_researched`,
+    - `research/avg_turn_organization_researched`.
+  - throttled high-frequency diagnostic scalar logging by `step_diagnostics_log_every`.
+  - expanded step-diagnostics episode-end aggregations with new economy metrics:
+    - `economy/episode_end_animals_harvested_t10`,
+    - `economy/episode_end_fruit_harvested_t10`,
+    - `economy/episode_end_lumber_huts_built_t10`,
+    - `economy/episode_end_sawmills_built_t10`,
+    - `economy/episode_end_forests_cleared_t10`.
+- Added targeted audit script `py_rl/cleanrl/cleanrl/audit_capture_legality_pipeline.py`:
+  - replays wrapper filter stages to locate where `CAPTURE` disappears,
+  - inspects Java runtime internals via reflection (`gs`, unit/tile fields),
+  - prints six-part forensic case traces,
+  - aggregates causal buckets/rates and emits verdict bucket (`A`-`E`).
+- Added targeted audit script `py_rl/cleanrl/cleanrl/audit_distance_zero_no_capture.py`:
+  - audits "distance-zero to visible village but no capture" cases,
+  - tracks same-unit next-turn outcomes and capture availability transitions,
+  - attributes rates to swapped-coordinate false positives, active-tribe timing, and freshness/tile conditions.
+- Added targeted audit script `py_rl/cleanrl/cleanrl/audit_target_contains_visible_village.py`:
+  - audits `target_contains_visible_uncaptured_village` feature truth cases,
+  - logs direct/swapped/non-candidate target matches,
+  - prints per-case mismatch diagnostics and summary cause histogram.
+- Added targeted audit script `py_rl/cleanrl/cleanrl/audit_visible_village_targets.py`:
+  - audits candidate village classification against enemy cities/units/capital occupancy,
+  - tracks targetable-vs-capturable mismatch rates,
+  - reports distance-zero no-capture and feature-target drift statistics.
+- Added diagnostic evaluator `py_rl/cleanrl/cleanrl/evaluate_no_fog_runtime_village_greedy.py`:
+  - implements a no-fog runtime-visible greedy selector with capture/move/economy priorities,
+  - includes wait-event before/after traces for "hold on neutral village" scenarios,
+  - emits extended T10 SPT/city/fog/research/hold behavior summary metrics.
+- Added baseline evaluator `py_rl/cleanrl/cleanrl/evaluate_visible_greedy_movement.py`:
+  - implements legal-slot feature-scored visible-info greedy policy,
+  - reports T10 performance and selected-move feature statistics.
+- Added privileged oracle evaluator `py_rl/cleanrl/cleanrl/privileged_nearest_village_oracle.py`:
+  - parses hidden villages from level CSVs,
+  - runs oracle move selection against hidden targets,
+  - performs coordinate-transform evidence validation (`identity` vs `swapped`),
+  - prints before/after metric comparisons and optional failed-episode traces.
+- Added validator cache artifacts under `.cache/action_validator`:
+  - `468820aab7df46cf8e7c7ce0fc42c3ed7ec3261a4f8c92b20b716914ee71c4d5.json`,
+  - `e148dd1a241b0dba32dff8cbbb8f7fb967db9aeb68241c23b2f9f20c9b19de70.json`,
+  - `e2b23c19e26c5172b849f12ef5a3c158c150136897c73ca32c8635e8d0bf0151.json`.
+  - each cache record stores validator fingerprint payload, coverage flags, checked-state count, and pass status.
+- Updated `CHANGELOG.md` with this detailed `[Phase1-Data-019]` entry to keep source-control documentation synchronized with the update.
+
 ## [Phase1-Data-018] - 2026-05-08
 
 ### Scope
