@@ -2,6 +2,132 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Learning-020] - 2026-05-09
+
+### Scope
+- Add tactical-mistake telemetry and optional terminal SPT bonus shaping for Phase-1 learning runs.
+- Expand PPO logging to track tactical error rates and terminal-SST decomposition signals.
+- Add tooling to compare an Organization-only oracle against the latest PPO checkpoint and validate terminal SPT bonus behavior.
+- Record generated benchmark/evaluation artifacts for reproducibility.
+
+### Implemented
+- Updated reward shaping and telemetry in `pol_env/Tribes/py/register_env.py`:
+  - added terminal reward configuration defaults:
+    - `TERMINAL_SPT_REWARD_ENABLED_DEFAULT = False`,
+    - `TERMINAL_SPT_BASE_WEIGHT_DEFAULT = 1.0`,
+    - `TERMINAL_SPT_OVER_10_WEIGHT_DEFAULT = 2.0`,
+    - `TERMINAL_SPT_OVER_15_WEIGHT_DEFAULT = 3.0`.
+  - added new tactical move shaping constants:
+    - `MOVE_ONTO_VISIBLE_NEUTRAL_VILLAGE_REWARD = 5.0`,
+    - `MOVE_MISS_VISIBLE_NEUTRAL_VILLAGE_PENALTY = 2.0`.
+  - added terminal reward runtime state and env-var parsing:
+    - `_terminal_spt_reward_enabled`,
+    - `_terminal_spt_base_weight`,
+    - `_terminal_spt_over_10_weight`,
+    - `_terminal_spt_over_15_weight`,
+    - `_terminal_spt_bonus_applied_this_episode`.
+  - added generic env parsing helpers:
+    - `_parse_float_env(...)`,
+    - `_parse_bool_env(...)`.
+  - introduced optional terminal SPT bonus at T10 truncation:
+    - applies once per episode when `POLYVISION_TERMINAL_SPT_REWARD_ENABLED` is enabled,
+    - computes components:
+      - `terminal_spt_base_component = base_weight * final_spt`,
+      - `terminal_spt_over_10_component = over10_weight * max(final_spt - 10, 0)`,
+      - `terminal_spt_over_15_component = over15_weight * max(final_spt - 15, 0)`,
+    - adds `terminal_spt_bonus` to final reward.
+  - added tactical-window bookkeeping before action application:
+    - tactical window condition: combat-disabled, turn <= `MAX_TURNS`, city_count < 4,
+    - detects legal opportunities:
+      - capture available,
+      - level-up available,
+      - resource gather that completes city upgrade available,
+      - move onto visible neutral village available,
+      - any useful move available (village-targeting, fog-revealing, or village-distance reducing).
+  - added tactical mistake numerator/denominator counters emitted each step:
+    - `tm_missed_move_onto_visible_village_num`,
+    - `tm_move_onto_visible_village_available_den`,
+    - `tm_ignored_capture_num`,
+    - `tm_capture_available_den`,
+    - `tm_end_turn_with_level_up_num`,
+    - `tm_level_up_available_den`,
+    - `tm_missed_city_upgrade_completion_num`,
+    - `tm_completion_gather_available_den`,
+    - `tm_move_off_neutral_village_before_capture_num`,
+    - `tm_unit_on_neutral_village_capture_illegal_den`,
+    - `tm_end_turn_with_useful_move_num`,
+    - `tm_useful_move_available_den`.
+  - added explicit tactical move reward/penalty branch:
+    - reward when selected move enters visible neutral village during tactical window,
+    - penalty when selected move misses an available move-onto-visible-village option.
+  - added step info fields for terminal bonus decomposition:
+    - `terminal_spt_reward_enabled`,
+    - `terminal_spt_bonus`,
+    - `terminal_final_spt`,
+    - `terminal_spt_base_component`,
+    - `terminal_spt_over_10_component`,
+    - `terminal_spt_over_15_component`.
+  - added debug reward field:
+    - `reward_move_onto_visible_neutral_village_tactical`.
+  - added helper methods for tactical opportunity detection:
+    - `_resource_gather_action_completes_city_upgrade(...)`,
+    - `_move_action_reveals_any_fog(...)`.
+- Expanded PPO metric logging in `py_rl/cleanrl/cleanrl/ppo.py`:
+  - added per-iteration accumulators for all tactical mistake numerator/denominator counters.
+  - added always-on tactical counter ingestion each env step via `_extract_vector_field(...)`.
+  - extended episode-end telemetry collection with terminal bonus fields:
+    - collects `terminal_spt_bonus` from done/final info,
+    - tracks derived `final_spt_over_10` and `final_spt_over_15`.
+  - added scalar logs:
+    - `reward/terminal_spt_bonus`,
+    - `charts/final_spt_t10`,
+    - `charts/final_spt_over_10`,
+    - `charts/final_spt_over_15`.
+  - added tactical-mistake rate logs at iteration end:
+    - `tactical_mistakes/missed_move_onto_visible_village_rate`,
+    - `tactical_mistakes/ignored_capture_rate`,
+    - `tactical_mistakes/end_turn_with_level_up_available_rate`,
+    - `tactical_mistakes/missed_city_upgrade_completion_rate`,
+    - `tactical_mistakes/move_off_neutral_village_before_capture_rate`,
+    - `tactical_mistakes/end_turn_with_useful_move_available_rate`.
+- Added evaluation harness `tools/eval_org_only_oracle_vs_ppo.py`:
+  - loads latest or explicit `.cleanrl_model` and action-interface metadata,
+  - infers actor mode from sidecar/state-dict fallback,
+  - evaluates paired episodes for:
+    - `ppo_latest`,
+    - `oracle_org_only` (rule policy prioritizing Organization research, captures, village-progress moves, and constrained economy actions),
+  - emits per-episode rows with map/seed/turn and economy/research metrics,
+  - writes comparison outputs:
+    - `per_episode_results.csv`,
+    - `summary.json`,
+    - `report.md`,
+  - prints PPO-vs-oracle comparison table in terminal.
+- Added smoke test `tools/smoke_test_terminal_spt_reward.py`:
+  - runs matched seeded episodes with terminal bonus disabled vs enabled,
+  - validates:
+    - non-terminal reward parity,
+    - exactly one enabled bonus event on terminal step,
+    - disabled run has zero terminal bonus,
+    - observed bonus equals configured closed-form expectation,
+    - terminal reward delta equals terminal bonus,
+    - component sum (`base + over10 + over15`) matches observed bonus.
+- Added validator cache artifact:
+  - `.cache/action_validator/1a4fad466b164a5386eb6dbd670f3659312bd23b53832ab05209a94416fb18a9.json`
+  - captures strict action-interface validation pass over `10000` states with updated file fingerprint payload.
+- Added oracle-vs-ppo evaluation outputs under `outputs/org_only_oracle_vs_ppo`:
+  - run `run_20260509_101915`:
+    - `summary.json` + `report.md` + `per_episode_results.csv` (`17` lines: header + `16` rows for `8` paired episodes),
+    - reported verdict: tie on mean final SPT (`9.000` vs `9.000`).
+  - run `run_20260509_104703`:
+    - `summary.json` + `report.md` + `per_episode_results.csv` (`1001` lines: header + `1000` rows for `500` paired episodes),
+    - reported verdict: PPO beats oracle on mean final SPT (`10.518` vs `8.790`),
+    - includes comparative city-count/research/harvest/fog metrics.
+- Updated benchmark registry in `model_run_benchmark_log.md`:
+  - added `Tribes-v0__ppo__1__1778260387 -> Phase1-Data-019 (600K)`,
+  - added `Tribes-v0__ppo__1__1778266653 -> Phase1-Data-019 (5M)`,
+  - added `Tribes-v0__ppo__1__1778324123 -> Phase1-Learning-020 (1.5M)`.
+- Updated `CHANGELOG.md` with this detailed `[Phase1-Learning-020]` entry to keep source-control documentation synchronized with the update.
+
 ## [Phase1-Data-019] - 2026-05-09
 
 ### Scope

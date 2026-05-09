@@ -1056,6 +1056,18 @@ if __name__ == "__main__":
         iter_action_count = 0
         iter_delta_spt_sum = 0.0
         iter_delta_spt_count = 0
+        tm_missed_move_onto_visible_village_num = 0.0
+        tm_move_onto_visible_village_available_den = 0.0
+        tm_ignored_capture_num = 0.0
+        tm_capture_available_den = 0.0
+        tm_end_turn_with_level_up_num = 0.0
+        tm_level_up_available_den = 0.0
+        tm_missed_city_upgrade_completion_num = 0.0
+        tm_completion_gather_available_den = 0.0
+        tm_move_off_neutral_village_before_capture_num = 0.0
+        tm_unit_on_neutral_village_capture_illegal_den = 0.0
+        tm_end_turn_with_useful_move_num = 0.0
+        tm_useful_move_available_den = 0.0
 
         # Annealing the rate if instructed to do so.
         if args.anneal_lr:
@@ -1163,6 +1175,44 @@ if __name__ == "__main__":
                     f"fallback_end_turn_rate={max_fallback_rate:.6f} exceeded threshold={args.max_fallback_end_turn_rate:.6f} "
                     f"at global_step={global_step}"
                 )
+
+            # Tactical mistake counters (always-on). These are 0/1 per env step.
+            tm_missed_move_onto_visible_village_num += sum(
+                float(v) for v in _extract_vector_field(infos, "tm_missed_move_onto_visible_village_num", args.num_envs, default_value=0) if v is not None
+            )
+            tm_move_onto_visible_village_available_den += sum(
+                float(v) for v in _extract_vector_field(infos, "tm_move_onto_visible_village_available_den", args.num_envs, default_value=0) if v is not None
+            )
+            tm_ignored_capture_num += sum(
+                float(v) for v in _extract_vector_field(infos, "tm_ignored_capture_num", args.num_envs, default_value=0) if v is not None
+            )
+            tm_capture_available_den += sum(
+                float(v) for v in _extract_vector_field(infos, "tm_capture_available_den", args.num_envs, default_value=0) if v is not None
+            )
+            tm_end_turn_with_level_up_num += sum(
+                float(v) for v in _extract_vector_field(infos, "tm_end_turn_with_level_up_num", args.num_envs, default_value=0) if v is not None
+            )
+            tm_level_up_available_den += sum(
+                float(v) for v in _extract_vector_field(infos, "tm_level_up_available_den", args.num_envs, default_value=0) if v is not None
+            )
+            tm_missed_city_upgrade_completion_num += sum(
+                float(v) for v in _extract_vector_field(infos, "tm_missed_city_upgrade_completion_num", args.num_envs, default_value=0) if v is not None
+            )
+            tm_completion_gather_available_den += sum(
+                float(v) for v in _extract_vector_field(infos, "tm_completion_gather_available_den", args.num_envs, default_value=0) if v is not None
+            )
+            tm_move_off_neutral_village_before_capture_num += sum(
+                float(v) for v in _extract_vector_field(infos, "tm_move_off_neutral_village_before_capture_num", args.num_envs, default_value=0) if v is not None
+            )
+            tm_unit_on_neutral_village_capture_illegal_den += sum(
+                float(v) for v in _extract_vector_field(infos, "tm_unit_on_neutral_village_capture_illegal_den", args.num_envs, default_value=0) if v is not None
+            )
+            tm_end_turn_with_useful_move_num += sum(
+                float(v) for v in _extract_vector_field(infos, "tm_end_turn_with_useful_move_num", args.num_envs, default_value=0) if v is not None
+            )
+            tm_useful_move_available_den += sum(
+                float(v) for v in _extract_vector_field(infos, "tm_useful_move_available_den", args.num_envs, default_value=0) if v is not None
+            )
 
             # Always-on episode-end research telemetry (even when step diagnostics are disabled).
             if not args.enable_step_diagnostics:
@@ -1309,6 +1359,9 @@ if __name__ == "__main__":
                 lumber_huts_built_t10_values = []
                 sawmills_built_t10_values = []
                 forests_cleared_t10_values = []
+                terminal_spt_bonus_values = []
+                final_spt_over_10_values = []
+                final_spt_over_15_values = []
                 done_episode_count = 0
                 for env_idx in range(args.num_envs):
                     if truncations[env_idx] or terminations[env_idx]:
@@ -1329,6 +1382,7 @@ if __name__ == "__main__":
                         lumber_huts_built_t10_value = None
                         sawmills_built_t10_value = None
                         forests_cleared_t10_value = None
+                        terminal_spt_bonus_value = None
 
                         def _extract_done_metric(metric_key):
                             if metric_key not in infos:
@@ -1360,6 +1414,7 @@ if __name__ == "__main__":
                         lumber_huts_built_t10_value = _extract_done_metric("lumber_huts_built_t10")
                         sawmills_built_t10_value = _extract_done_metric("sawmills_built_t10")
                         forests_cleared_t10_value = _extract_done_metric("forests_cleared_t10")
+                        terminal_spt_bonus_value = _extract_done_metric("terminal_spt_bonus")
 
                         # Case 2: final_info often carries final per-env info dicts.
                         if "final_info" in infos and len(infos["final_info"]) > env_idx:
@@ -1397,10 +1452,15 @@ if __name__ == "__main__":
                                     sawmills_built_t10_value = finfo["sawmills_built_t10"]
                                 if forests_cleared_t10_value is None and "forests_cleared_t10" in finfo:
                                     forests_cleared_t10_value = finfo["forests_cleared_t10"]
+                                if terminal_spt_bonus_value is None and "terminal_spt_bonus" in finfo:
+                                    terminal_spt_bonus_value = finfo["terminal_spt_bonus"]
 
                         if spt_value is not None:
                             log_scalar("charts/custom_spt_return", float(spt_value), global_step)
                             log_scalar("charts/episode_end_spt", float(spt_value), global_step)
+                            log_scalar("charts/final_spt_t10", float(spt_value), global_step)
+                            final_spt_over_10_values.append(max(0.0, float(spt_value) - 10.0))
+                            final_spt_over_15_values.append(max(0.0, float(spt_value) - 15.0))
                         if city_count_value is not None:
                             log_scalar("charts/episode_end_village_count_t10", float(city_count_value), global_step)
                         if fog_cleared_total_value is not None:
@@ -1431,6 +1491,8 @@ if __name__ == "__main__":
                             sawmills_built_t10_values.append(float(sawmills_built_t10_value))
                         if forests_cleared_t10_value is not None:
                             forests_cleared_t10_values.append(float(forests_cleared_t10_value))
+                        if terminal_spt_bonus_value is not None:
+                            terminal_spt_bonus_values.append(float(terminal_spt_bonus_value))
                 if done_episode_count > 0:
                     log_scalar(
                         "research/episode_end_techs_researched_t10",
@@ -1445,6 +1507,21 @@ if __name__ == "__main__":
                     log_scalar(
                         "research/episode_end_organization_researched_t10_rate",
                         float(np.mean(organization_t10_values)) if organization_t10_values else 0.0,
+                        global_step,
+                    )
+                    log_scalar(
+                        "reward/terminal_spt_bonus",
+                        float(np.mean(terminal_spt_bonus_values)) if terminal_spt_bonus_values else 0.0,
+                        global_step,
+                    )
+                    log_scalar(
+                        "charts/final_spt_over_10",
+                        float(np.mean(final_spt_over_10_values)) if final_spt_over_10_values else 0.0,
+                        global_step,
+                    )
+                    log_scalar(
+                        "charts/final_spt_over_15",
+                        float(np.mean(final_spt_over_15_values)) if final_spt_over_15_values else 0.0,
                         global_step,
                     )
                     log_scalar(
@@ -1687,6 +1764,48 @@ if __name__ == "__main__":
                 iter_delta_spt_sum / iter_delta_spt_count,
                 global_step,
             )
+        log_scalar(
+            "tactical_mistakes/missed_move_onto_visible_village_rate",
+            (tm_missed_move_onto_visible_village_num / tm_move_onto_visible_village_available_den)
+            if tm_move_onto_visible_village_available_den > 0
+            else 0.0,
+            global_step,
+        )
+        log_scalar(
+            "tactical_mistakes/ignored_capture_rate",
+            (tm_ignored_capture_num / tm_capture_available_den)
+            if tm_capture_available_den > 0
+            else 0.0,
+            global_step,
+        )
+        log_scalar(
+            "tactical_mistakes/end_turn_with_level_up_available_rate",
+            (tm_end_turn_with_level_up_num / tm_level_up_available_den)
+            if tm_level_up_available_den > 0
+            else 0.0,
+            global_step,
+        )
+        log_scalar(
+            "tactical_mistakes/missed_city_upgrade_completion_rate",
+            (tm_missed_city_upgrade_completion_num / tm_completion_gather_available_den)
+            if tm_completion_gather_available_den > 0
+            else 0.0,
+            global_step,
+        )
+        log_scalar(
+            "tactical_mistakes/move_off_neutral_village_before_capture_rate",
+            (tm_move_off_neutral_village_before_capture_num / tm_unit_on_neutral_village_capture_illegal_den)
+            if tm_unit_on_neutral_village_capture_illegal_den > 0
+            else 0.0,
+            global_step,
+        )
+        log_scalar(
+            "tactical_mistakes/end_turn_with_useful_move_available_rate",
+            (tm_end_turn_with_useful_move_num / tm_useful_move_available_den)
+            if tm_useful_move_available_den > 0
+            else 0.0,
+            global_step,
+        )
         print("SPS:", int(global_step / (time.time() - start_time)))
         log_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 

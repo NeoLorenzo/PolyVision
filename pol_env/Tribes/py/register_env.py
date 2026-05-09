@@ -167,11 +167,17 @@ class TribesGymWrapper(gym.Env):
     PHASE1_LEVEL_FILE = "levels/phase1_12x12_2bardur.csv"
     DEFAULT_LEVEL_POOL_GLOB = "levels/phase1_pool/*.csv"
     MAX_TURNS = 10
+    TERMINAL_SPT_REWARD_ENABLED_DEFAULT = False
+    TERMINAL_SPT_BASE_WEIGHT_DEFAULT = 1.0
+    TERMINAL_SPT_OVER_10_WEIGHT_DEFAULT = 2.0
+    TERMINAL_SPT_OVER_15_WEIGHT_DEFAULT = 3.0
 
     # Phase1 village/city shaping.
     REVEAL_UNCAPTURED_VILLAGE_REWARD = 1.0
     MOVE_CLOSER_TO_VISIBLE_VILLAGE_REWARD = 0.5
     MOVE_ONTO_VILLAGE_REWARD = 1.0
+    MOVE_ONTO_VISIBLE_NEUTRAL_VILLAGE_REWARD = 5.0
+    MOVE_MISS_VISIBLE_NEUTRAL_VILLAGE_PENALTY = 2.0
     CAPTURE_CITY_BONUS_MIN = 3.0
     CAPTURE_CITY_BONUS_MAX = 6.0
     SPT_INCREASE_REWARD_MULTIPLIER = 5.0
@@ -269,6 +275,23 @@ class TribesGymWrapper(gym.Env):
         self._lumber_huts_built_t10 = 0
         self._sawmills_built_t10 = 0
         self._forests_cleared_t10 = 0
+        self._terminal_spt_bonus_applied_this_episode = False
+        self._terminal_spt_reward_enabled = self._parse_bool_env(
+            "POLYVISION_TERMINAL_SPT_REWARD_ENABLED",
+            default=self.TERMINAL_SPT_REWARD_ENABLED_DEFAULT,
+        )
+        self._terminal_spt_base_weight = self._parse_float_env(
+            "POLYVISION_TERMINAL_SPT_BASE_WEIGHT",
+            default=self.TERMINAL_SPT_BASE_WEIGHT_DEFAULT,
+        )
+        self._terminal_spt_over_10_weight = self._parse_float_env(
+            "POLYVISION_TERMINAL_SPT_OVER_10_WEIGHT",
+            default=self.TERMINAL_SPT_OVER_10_WEIGHT_DEFAULT,
+        )
+        self._terminal_spt_over_15_weight = self._parse_float_env(
+            "POLYVISION_TERMINAL_SPT_OVER_15_WEIGHT",
+            default=self.TERMINAL_SPT_OVER_15_WEIGHT_DEFAULT,
+        )
         self._catalog = None
         self._catalog_fingerprint = ""
         self._tech_name_to_obs_idx = {}
@@ -368,6 +391,7 @@ class TribesGymWrapper(gym.Env):
         self._lumber_huts_built_t10 = 0
         self._sawmills_built_t10 = 0
         self._forests_cleared_t10 = 0
+        self._terminal_spt_bonus_applied_this_episode = False
         
         # Log action space info for debugging
         legal_actions = self.tribes_env.list_actions()
@@ -522,6 +546,81 @@ class TribesGymWrapper(gym.Env):
             selected_global_id = int(self._catalog.id_end_turn()) if self._catalog is not None else selected_global_id
 
         selected_action = legal_actions[selected_raw_action]
+        pre_city_count = int(self._get_city_count(start_obs))
+        combat_disabled = "ATTACK" not in self.ALLOWED_ACTION_TYPES
+        tactical_window_active = (
+            bool(combat_disabled)
+            and int(self._turn_count) <= int(self.MAX_TURNS)
+            and int(pre_city_count) < 4
+        )
+        visible_villages_before = self._get_visible_uncaptured_village_positions(start_obs)
+        legal_capture_exists = any(str(a.get("type", "")).upper() == "CAPTURE" for a in legal_actions)
+        legal_level_up_exists = any(str(a.get("type", "")).upper() == "LEVEL_UP" for a in legal_actions)
+        completion_gather_actions = [
+            a for a in legal_actions
+            if str(a.get("type", "")).upper() == "RESOURCE_GATHERING"
+            and self._resource_gather_action_completes_city_upgrade(a, start_obs)
+        ]
+        completion_gather_available = len(completion_gather_actions) > 0
+
+        legal_move_onto_visible_village_exists = False
+        legal_useful_move_exists = False
+        for la in legal_actions:
+            if str(la.get("type", "")).upper() != "MOVE":
+                continue
+            move_to_visible_village = self._is_move_to_visible_uncaptured_village(la, start_obs)
+            if move_to_visible_village:
+                legal_move_onto_visible_village_exists = True
+            move_reveals_fog = self._move_action_reveals_any_fog(la, start_obs)
+            move_reduces_village_distance = False
+            if visible_villages_before:
+                move_uid, _sx, _sy, _dx, _dy = self._extract_move_components(la, start_obs)
+                if move_uid is not None:
+                    move_reduces_village_distance = self._is_move_reducing_distance_to_targets(
+                        la,
+                        start_obs,
+                        int(move_uid),
+                        visible_villages_before,
+                    )
+            if move_to_visible_village or move_reveals_fog or move_reduces_village_distance:
+                legal_useful_move_exists = True
+
+        selected_move_onto_visible_village = (
+            selected_action_type == "MOVE"
+            and self._is_move_to_visible_uncaptured_village(selected_action, start_obs)
+        )
+        selected_completes_city_upgrade = (
+            selected_action_type == "RESOURCE_GATHERING"
+            and self._resource_gather_action_completes_city_upgrade(selected_action, start_obs)
+        )
+
+        tactical_missed_move_onto_visible_village_num = int(
+            tactical_window_active
+            and legal_move_onto_visible_village_exists
+            and selected_action_type == "MOVE"
+            and not selected_move_onto_visible_village
+        )
+        tactical_missed_move_onto_visible_village_den = int(
+            tactical_window_active and legal_move_onto_visible_village_exists
+        )
+        tactical_ignored_capture_num = int(legal_capture_exists and selected_action_type != "CAPTURE")
+        tactical_ignored_capture_den = int(legal_capture_exists)
+        tactical_end_turn_with_level_up_num = int(legal_level_up_exists and selected_action_type == "END_TURN")
+        tactical_end_turn_with_level_up_den = int(legal_level_up_exists)
+        tactical_missed_city_upgrade_completion_num = int(
+            completion_gather_available
+            and selected_action_type == "RESOURCE_GATHERING"
+            and not selected_completes_city_upgrade
+        )
+        tactical_missed_city_upgrade_completion_den = int(completion_gather_available)
+        tactical_end_turn_with_useful_move_num = int(
+            tactical_window_active
+            and legal_useful_move_exists
+            and selected_action_type == "END_TURN"
+        )
+        tactical_end_turn_with_useful_move_den = int(
+            tactical_window_active and legal_useful_move_exists
+        )
         self._update_economy_counters_from_action(selected_action_type, selected_action)
 
         if selected_action_type == "END_TURN":
@@ -579,6 +678,7 @@ class TribesGymWrapper(gym.Env):
         village_breadcrumb_reward = 0.0
         fog_clearance_reward = 0.0
         useless_move_fog_miss_penalty = 0.0
+        move_onto_visible_neutral_village_tactical_reward = 0.0
         fog_tiles_cleared = 0
         newly_revealed_tiles = 0
         unit_had_any_legal_fog_revealing_move = False
@@ -597,9 +697,11 @@ class TribesGymWrapper(gym.Env):
 
         visible_uncaptured_village = self._has_visible_uncaptured_village(obs)
         unit_on_visible_uncaptured_village = self._has_unit_on_visible_uncaptured_village(obs)
-        combat_disabled = "ATTACK" not in self.ALLOWED_ACTION_TYPES
 
-        pre_city_count = int(self._get_city_count(start_obs))
+        units_on_neutral_village_capture_illegal_all = self._owned_units_on_visible_uncaptured_village_without_capture(
+            start_obs,
+            legal_actions,
+        )
         units_on_neutral_village_capture_illegal = set()
         hold_neutral_village_end_turn_reward = 0.0
         move_off_neutral_village_capture_illegal_penalty = 0.0
@@ -667,6 +769,25 @@ class TribesGymWrapper(gym.Env):
                 self.MOVE_OFF_NEUTRAL_VILLAGE_WHEN_CAPTURE_ILLEGAL_PENALTY
             )
 
+        if tactical_window_active and legal_move_onto_visible_village_exists:
+            if selected_move_onto_visible_village:
+                move_onto_visible_neutral_village_tactical_reward = float(
+                    self.MOVE_ONTO_VISIBLE_NEUTRAL_VILLAGE_REWARD
+                )
+            elif selected_action_type == "MOVE":
+                move_onto_visible_neutral_village_tactical_reward = -float(
+                    self.MOVE_MISS_VISIBLE_NEUTRAL_VILLAGE_PENALTY
+                )
+
+        tactical_move_off_neutral_village_before_capture_num = int(
+            selected_action_type == "MOVE"
+            and chosen_move_unit_id is not None
+            and int(chosen_move_unit_id) in units_on_neutral_village_capture_illegal_all
+        )
+        tactical_move_off_neutral_village_before_capture_den = int(
+            len(units_on_neutral_village_capture_illegal_all) > 0
+        )
+
         reward_adjustment += reveal_uncaptured_village_reward
         reward_adjustment += move_closer_to_visible_village_reward
         reward_adjustment += move_onto_village_reward
@@ -675,12 +796,39 @@ class TribesGymWrapper(gym.Env):
         reward_adjustment += move_off_neutral_village_capture_illegal_penalty
         reward_adjustment += fog_clearance_reward
         reward_adjustment += useless_move_fog_miss_penalty
+        reward_adjustment += move_onto_visible_neutral_village_tactical_reward
 
         # Phase 1 override: ignore Java terminal state and control horizon purely in Python.
         terminated = False
-        truncated = self._turn_count >= self.MAX_TURNS
+        internal_t10_truncation = bool(self._turn_count >= self.MAX_TURNS)
+        truncated = bool(internal_t10_truncation)
 
-        reward = float(delta_spt_reward) + reward_adjustment
+        terminal_spt_bonus = 0.0
+        terminal_spt_base_component = 0.0
+        terminal_spt_over_10_component = 0.0
+        terminal_spt_over_15_component = 0.0
+        terminal_final_spt = None
+        if (
+            bool(self._terminal_spt_reward_enabled)
+            and bool(internal_t10_truncation)
+            and not bool(self._terminal_spt_bonus_applied_this_episode)
+        ):
+            terminal_final_spt = float(current_bardur_spt)
+            terminal_spt_base_component = float(self._terminal_spt_base_weight) * float(terminal_final_spt)
+            terminal_spt_over_10_component = (
+                float(self._terminal_spt_over_10_weight) * max(0.0, float(terminal_final_spt) - 10.0)
+            )
+            terminal_spt_over_15_component = (
+                float(self._terminal_spt_over_15_weight) * max(0.0, float(terminal_final_spt) - 15.0)
+            )
+            terminal_spt_bonus = (
+                float(terminal_spt_base_component)
+                + float(terminal_spt_over_10_component)
+                + float(terminal_spt_over_15_component)
+            )
+            self._terminal_spt_bonus_applied_this_episode = True
+
+        reward = float(delta_spt_reward) + reward_adjustment + float(terminal_spt_bonus)
 
         # Build the next-state legal mask and mapping diagnostics (for policy step t+1).
         post_legal_actions = self.tribes_env.list_actions()
@@ -749,6 +897,12 @@ class TribesGymWrapper(gym.Env):
         info["fog_tiles_cleared_total"] = int(self._episode_fog_tiles_cleared)
         info["delta_spt"] = float(base_delta_spt)
         info["delta_spt_reward"] = float(delta_spt_reward)
+        info["terminal_spt_reward_enabled"] = bool(self._terminal_spt_reward_enabled)
+        info["terminal_spt_bonus"] = float(terminal_spt_bonus)
+        info["terminal_final_spt"] = float(terminal_final_spt) if terminal_final_spt is not None else None
+        info["terminal_spt_base_component"] = float(terminal_spt_base_component)
+        info["terminal_spt_over_10_component"] = float(terminal_spt_over_10_component)
+        info["terminal_spt_over_15_component"] = float(terminal_spt_over_15_component)
         info["spt"] = float(current_bardur_spt)
         info["reward"] = float(reward)
         info["turn"] = int(self._turn_count)
@@ -773,6 +927,18 @@ class TribesGymWrapper(gym.Env):
         info["lumber_huts_built_t10"] = int(self._lumber_huts_built_t10)
         info["sawmills_built_t10"] = int(self._sawmills_built_t10)
         info["forests_cleared_t10"] = int(self._forests_cleared_t10)
+        info["tm_missed_move_onto_visible_village_num"] = int(tactical_missed_move_onto_visible_village_num)
+        info["tm_move_onto_visible_village_available_den"] = int(tactical_missed_move_onto_visible_village_den)
+        info["tm_ignored_capture_num"] = int(tactical_ignored_capture_num)
+        info["tm_capture_available_den"] = int(tactical_ignored_capture_den)
+        info["tm_end_turn_with_level_up_num"] = int(tactical_end_turn_with_level_up_num)
+        info["tm_level_up_available_den"] = int(tactical_end_turn_with_level_up_den)
+        info["tm_missed_city_upgrade_completion_num"] = int(tactical_missed_city_upgrade_completion_num)
+        info["tm_completion_gather_available_den"] = int(tactical_missed_city_upgrade_completion_den)
+        info["tm_move_off_neutral_village_before_capture_num"] = int(tactical_move_off_neutral_village_before_capture_num)
+        info["tm_unit_on_neutral_village_capture_illegal_den"] = int(tactical_move_off_neutral_village_before_capture_den)
+        info["tm_end_turn_with_useful_move_num"] = int(tactical_end_turn_with_useful_move_num)
+        info["tm_useful_move_available_den"] = int(tactical_end_turn_with_useful_move_den)
         info.update(self._diag_for_info(post_diag))
 
         if self._is_debug_info_mode() and selected_action_type == "MOVE" and chosen_move_unit_id is not None and chosen_move_dest is not None:
@@ -819,6 +985,9 @@ class TribesGymWrapper(gym.Env):
                 move_off_neutral_village_capture_illegal_penalty
             )
             info["reward_useless_move_fog_miss_penalty"] = float(useless_move_fog_miss_penalty)
+            info["reward_move_onto_visible_neutral_village_tactical"] = float(
+                move_onto_visible_neutral_village_tactical_reward
+            )
             info["newly_revealed_uncaptured_villages"] = int(len(newly_revealed_villages))
             info["visible_uncaptured_villages_before_move"] = int(visible_uncaptured_villages_before)
             info["newly_revealed_tiles"] = int(newly_revealed_tiles)
@@ -1191,6 +1360,26 @@ class TribesGymWrapper(gym.Env):
             return int(str(raw).strip())
         except Exception:
             return int(default)
+
+    def _parse_float_env(self, key, default):
+        raw = os.environ.get(key, None)
+        if raw is None:
+            return float(default)
+        try:
+            return float(str(raw).strip())
+        except Exception:
+            return float(default)
+
+    def _parse_bool_env(self, key, default):
+        raw = os.environ.get(key, None)
+        if raw is None:
+            return bool(default)
+        s = str(raw).strip().lower()
+        if s in ("1", "true", "yes", "on"):
+            return True
+        if s in ("0", "false", "no", "off"):
+            return False
+        return bool(default)
 
     def _load_action_vocab(self):
         types_path = os.path.join(self._tribes_root_dir(), "src", "core", "Types.java")
@@ -2278,6 +2467,45 @@ class TribesGymWrapper(gym.Env):
 
         min_cost = min(dp[missing_pop:]) if missing_pop <= max_pop_gain else inf
         return min_cost <= stars + 1e-9
+
+    def _resource_gather_action_completes_city_upgrade(self, action, obs):
+        if str(action.get("type", "")).upper() != "RESOURCE_GATHERING":
+            return False
+        repr_s = str(action.get("repr", ""))
+        city_id = self._parse_city_id_from_action_repr(repr_s)
+        if city_id is None:
+            return False
+        city_info = (obs.get("city", {}) or {}).get(str(city_id), None)
+        if not isinstance(city_info, dict):
+            return False
+        try:
+            if int(city_info.get("tribeID", -1)) != 0:
+                return False
+            pop = int(city_info.get("population", 0))
+            pop_need = int(city_info.get("population_need", 0))
+        except Exception:
+            return False
+        missing_pop = max(0, int(pop_need) - int(pop))
+        if missing_pop <= 0:
+            return True
+        r_type = self._parse_resource_type_from_action_repr(repr_s)
+        meta = self._resource_cost_and_population_bonus(r_type) if r_type is not None else None
+        if meta is None:
+            return False
+        _cost, bonus = meta
+        return int(bonus) >= int(missing_pop)
+
+    def _move_action_reveals_any_fog(self, action, obs):
+        if str(action.get("type", "")).upper() != "MOVE":
+            return False
+        unit_id, _sx, _sy, dst_x, dst_y = self._extract_move_components(action, obs)
+        if unit_id is None or dst_x is None or dst_y is None:
+            return False
+        try:
+            revealed = int(self._estimate_newly_revealed_tiles_if_move(obs, int(unit_id), int(dst_x), int(dst_y)))
+        except Exception:
+            return False
+        return int(revealed) >= 1
 
     def _parse_move_unit_and_dest_from_action_repr(self, action_repr):
         if not isinstance(action_repr, str):

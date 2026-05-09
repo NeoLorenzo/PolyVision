@@ -1,0 +1,57 @@
+{
+  "config": {
+    "actor_mode": "legal_features",
+    "actor_mode_requested": "legal_features",
+    "env_id": "Tribes-v0",
+    "env_overrides": {
+      "POLYVISION_INFO_MODE": "fast",
+      "POLYVISION_LEVEL_POOL_GLOB": "levels/phase1_pool/*.csv",
+      "POLYVISION_LEVEL_SELECTION_MODE": "round_robin",
+      "POLYVISION_STRICT_COORD_ASSERT": "0"
+    },
+    "episodes": 8,
+    "legal_action_feature_dim": 22,
+    "max_legal_actions": 1024,
+    "max_legal_actions_requested": 1024,
+    "model_mtime": "2026-05-09T08:22:15.575188",
+    "model_path": "C:\\PolyVision\\runs\\Tribes-v0__ppo__1__1778266653\\ppo.cleanrl_model",
+    "ppo_stochastic": false,
+    "seed": 42
+  },
+  "summary": {
+    "by_policy": {
+      "oracle_org_only": {
+        "episodes": 8,
+        "forestry_research_rate": 0.0,
+        "max_final_spt": 13.0,
+        "mean_animals_harvested": 1.125,
+        "mean_city_count": 2.75,
+        "mean_final_spt": 9.0,
+        "mean_fog_tiles_cleared": 40.25,
+        "mean_fruit_harvested": 2.125,
+        "mean_turn_second_city_captured": 5.142857142857143,
+        "median_final_spt": 10.0,
+        "organization_research_rate": 0.625,
+        "p25_final_spt": 7.75,
+        "p75_final_spt": 10.0,
+        "p90_final_spt": 10.899999999999999
+      },
+      "ppo_latest": {
+        "episodes": 8,
+        "forestry_research_rate": 0.0,
+        "max_final_spt": 13.0,
+        "mean_animals_harvested": 2.125,
+        "mean_city_count": 3.0,
+        "mean_final_spt": 9.0,
+        "mean_fog_tiles_cleared": 50.875,
+        "mean_fruit_harvested": 0.875,
+        "mean_turn_second_city_captured": 5.25,
+        "median_final_spt": 9.0,
+        "organization_research_rate": 0.0,
+        "p25_final_spt": 7.75,
+        "p75_final_spt": 10.0,
+        "p90_final_spt": 10.899999999999999
+      }
+    }
+  }
+}
