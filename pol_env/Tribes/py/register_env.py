@@ -171,6 +171,7 @@ class TribesGymWrapper(gym.Env):
     TERMINAL_SPT_BASE_WEIGHT_DEFAULT = 1.0
     TERMINAL_SPT_OVER_10_WEIGHT_DEFAULT = 2.0
     TERMINAL_SPT_OVER_15_WEIGHT_DEFAULT = 3.0
+    RESOURCE_GATHER_UPGRADE_FILTER_ENABLED_DEFAULT = False
 
     # Phase1 village/city shaping.
     REVEAL_UNCAPTURED_VILLAGE_REWARD = 1.0
@@ -291,6 +292,10 @@ class TribesGymWrapper(gym.Env):
         self._terminal_spt_over_15_weight = self._parse_float_env(
             "POLYVISION_TERMINAL_SPT_OVER_15_WEIGHT",
             default=self.TERMINAL_SPT_OVER_15_WEIGHT_DEFAULT,
+        )
+        self._resource_gather_upgrade_filter_enabled = self._parse_bool_env(
+            "POLYVISION_RESOURCE_GATHER_UPGRADE_FILTER_ENABLED",
+            default=self.RESOURCE_GATHER_UPGRADE_FILTER_ENABLED_DEFAULT,
         )
         self._catalog = None
         self._catalog_fingerprint = ""
@@ -800,7 +805,9 @@ class TribesGymWrapper(gym.Env):
 
         # Phase 1 override: ignore Java terminal state and control horizon purely in Python.
         terminated = False
-        internal_t10_truncation = bool(self._turn_count >= self.MAX_TURNS)
+        # Turn index starts at 2 after the hardcoded Bardur opening in reset().
+        # Truncate only after finishing Bardur Turn 10 (i.e., when count advances to 11).
+        internal_t10_truncation = bool(self._turn_count > self.MAX_TURNS)
         truncated = bool(internal_t10_truncation)
 
         terminal_spt_bonus = 0.0
@@ -903,6 +910,7 @@ class TribesGymWrapper(gym.Env):
         info["terminal_spt_base_component"] = float(terminal_spt_base_component)
         info["terminal_spt_over_10_component"] = float(terminal_spt_over_10_component)
         info["terminal_spt_over_15_component"] = float(terminal_spt_over_15_component)
+        info["resource_gather_upgrade_filter_enabled"] = bool(self._resource_gather_upgrade_filter_enabled)
         info["spt"] = float(current_bardur_spt)
         info["reward"] = float(reward)
         info["turn"] = int(self._turn_count)
@@ -1497,9 +1505,12 @@ class TribesGymWrapper(gym.Env):
                 continue
             if a_type == "MOVE" and not self._is_move_destination_within_board(a, obs):
                 continue
-            if a_type == "RESOURCE_GATHERING":
-                if not self._is_resource_gather_legal_for_upgrade(a, legal_actions, obs):
-                    continue
+            if (
+                a_type == "RESOURCE_GATHERING"
+                and bool(self._resource_gather_upgrade_filter_enabled)
+                and not self._is_resource_gather_legal_for_upgrade(a, legal_actions, obs)
+            ):
+                continue
             allowed_indices.append(idx)
 
         # Hard guardrail: if <2 cities, prioritize village-capture lines.

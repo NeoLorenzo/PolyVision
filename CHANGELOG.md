@@ -2,6 +2,64 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Data-021] - 2026-05-12
+
+### Scope
+- Refine Phase-1 wrapper control over resource-gather legality filtering and truncation timing.
+- Add human-in-the-loop wrapper play tooling for legal-action inspection and manual stepping.
+- Record new validator cache snapshots and human play session output artifacts.
+
+### Implemented
+- Updated wrapper configuration and step semantics in `pol_env/Tribes/py/register_env.py`:
+  - added `RESOURCE_GATHER_UPGRADE_FILTER_ENABLED_DEFAULT = False`.
+  - added runtime env switch:
+    - `POLYVISION_RESOURCE_GATHER_UPGRADE_FILTER_ENABLED` parsed into `_resource_gather_upgrade_filter_enabled`.
+  - made resource-gather legality gating conditional:
+    - `RESOURCE_GATHERING` actions are filtered by `_is_resource_gather_legal_for_upgrade(...)` only when the new runtime toggle is enabled.
+    - when toggle is disabled, resource-gather actions are no longer auto-pruned by upgrade-feasibility logic.
+  - adjusted Python-side T10 truncation boundary:
+    - changed internal truncation check from `turn_count >= MAX_TURNS` to `turn_count > MAX_TURNS`,
+    - documented turn-index behavior after the scripted Bardur opening (reset starts at Turn 2),
+    - effect: truncation now occurs after completing Bardur Turn 10.
+  - exposed runtime filter flag in episode info:
+    - added `resource_gather_upgrade_filter_enabled` to `info` payload.
+- Added human wrapper runner utility `tools/play_human_t10_wrapper.py`:
+  - provides interactive legal-action driving over `TribesGymWrapper` using global action IDs.
+  - prints per-step state summary:
+    - turn, SPT, stars, city count, unit count, map/seed when available.
+  - supports paged legal-action browsing with compact action summaries and detail inspection.
+  - supports action selection via:
+    - list index,
+    - global action ID (`g <gid>`),
+    - random pick (`r` / `--auto-random`).
+  - includes optional map/visual output:
+    - ANSI map display in terminal (`--show-ansi-map`),
+    - Java renderer window updates (`--render-java`).
+  - includes optional run log persistence (`--save-json`) to `outputs/human_wrapper_runs`.
+  - captures step history and final info snapshot in saved session payload.
+- Added validator cache artifacts under `.cache/action_validator`:
+  - `b30499c4eb7fb352fc36be312ec5342700f0416eed1b0a560d4339522eca71ef.json`,
+  - `09b0d252751b4d5cf286ba890b1750afbd63e96fb4c94e34b42e83421801e884.json`.
+  - both records:
+    - indicate `passed: true`,
+    - include full fingerprint payloads for `actor_mode=legal_features`, `states=10000`, `max_legal_actions=1024`, `legal_action_feature_dim=22`,
+    - capture updated `register_env.py` hash states and Java action-tree hashes for validator cache reuse.
+- Added human wrapper run outputs in `outputs/human_wrapper_runs`:
+  - `human_run_20260509_200129.json`:
+    - short/early session with `history_count=0` (no executed wrapper steps),
+    - includes config/final-info scaffold for run traceability.
+  - `human_run_20260509_201725.json`:
+    - interactive session with `history_count=33` executed steps,
+    - final snapshot includes:
+      - `turn_count=10`,
+      - `spt=10.0`,
+      - `city_count=3`,
+      - `stars=5`.
+  - both files include run timestamps, config block, final info payload, and per-step history list (when actions were executed).
+- Updated benchmark registry in `model_run_benchmark_log.md`:
+  - added `Tribes-v0__ppo__1__1778358997 -> Phase1-Data-021 (2M)`.
+- Updated `CHANGELOG.md` with this detailed `[Phase1-Data-021]` entry to keep source-control documentation synchronized with the update.
+
 ## [Phase1-Learning-020] - 2026-05-09
 
 ### Scope

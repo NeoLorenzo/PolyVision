@@ -1,0 +1,48 @@
+{
+  "started_at_utc": "2026-05-09T20:01:20.676239Z",
+  "ended_at_utc": "2026-05-09T20:01:29.148417Z",
+  "config": {
+    "seed": 42,
+    "level_pool_glob": "levels/phase1_pool/*.csv",
+    "level_selection_mode": "round_robin",
+    "info_mode": "fast",
+    "strict_coord_assert": "0",
+    "max_legal_actions": 1024
+  },
+  "final_info": {
+    "valid_actions": 18,
+    "raw_valid_actions": 24,
+    "turn_count": 2,
+    "info_mode": "fast",
+    "catalog_version": "flat-v1",
+    "canonicalizer_version": "flat-v1-structured",
+    "map_width": 12,
+    "map_height": 12,
+    "global_action_space_n": 89305,
+    "action_offset_table_hash": "6e0203396bd97a2def84d6802988f1322cd3c8ede908aaa594631e56667edaa0",
+    "max_legal_actions": 1024,
+    "legal_global_ids_padded": "[   0 5788 5789 ...    0    0    0]",
+    "legal_action_valid_mask": "[ True  True  True ... False False False]",
+    "legal_action_count": 18,
+    "legal_action_features_padded": "[[0. 0. 0. ... 0. 0. 0.]\n [1. 0. 0. ... 0. 0. 0.]\n [1. 0. 0. ... 0. 0. 0.]\n ...\n [0. 0. 0. ... 0. 0. 0.]\n [0. 0. 0. ... 0. 0. 0.]\n [0. 0. 0. ... 0. 0. 0.]]",
+    "legal_action_feature_dim": 22,
+    "legal_action_feature_version": "v1_1_move_focus",
+    "animals_harvested_t10": 0,
+    "fruit_harvested_t10": 0,
+    "lumber_huts_built_t10": 0,
+    "sawmills_built_t10": 0,
+    "forests_cleared_t10": 0,
+    "legal_actions_total": 18,
+    "canonicalized_legal_actions": 18,
+    "uncanonicalized_legal_actions": 0,
+    "duplicate_global_id_collisions": 0,
+    "mask_ones": 18,
+    "unique_legal_global_ids": 18,
+    "legal_action_count_by_type": {
+      "RESEARCH_TECH": 4,
+      "END_TURN": 1,
+      "MOVE": 13
+    }
+  },
+  "history": []
+}
