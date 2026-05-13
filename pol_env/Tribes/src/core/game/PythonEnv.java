@@ -40,6 +40,7 @@ public class PythonEnv {
     private Random rnd;
     private GUI gui;
     private Game viewerGame;
+    private boolean soloNoOpponentMode = false;
 
     /**
      * Initialize from a CSV level file path (relative to CWD or absolute), seed, and game mode.
@@ -70,6 +71,19 @@ public class PythonEnv {
         return gs.getTick();
     }
 
+    /**
+     * Enables/disables single-tribe continuation mode.
+     * When enabled and a map has exactly one tribe, END_TURN will keep the game
+     * advancing instead of stopping at immediate SCORE-mode game-over.
+     */
+    public void setSoloNoOpponentMode(boolean enabled) {
+        this.soloNoOpponentMode = enabled;
+    }
+
+    public boolean getSoloNoOpponentMode() {
+        return soloNoOpponentMode;
+    }
+
     public boolean isDone() {
         return gs.isGameOver();
     }
@@ -92,16 +106,34 @@ public class PythonEnv {
         ArrayList<Action> acts = gs.getAllAvailableActions();
         ArrayList<String> out = new ArrayList<>(acts.size());
         for (int i = 0; i < acts.size(); i++) {
-            Action a = acts.get(i);
-            JSONObject jo = new JSONObject();
-            jo.put("idx", i);
-            jo.put("type", a.getActionType().toString());
-            jo.put("repr", a.toString());
-            jo.put("schema_version", 1);
-            addStructuredActionFields(jo, a);
+            JSONObject jo = buildActionJsonObject(acts.get(i), i);
             out.add(jo.toString());
         }
         return out;
+    }
+
+    /**
+     * Returns all available actions encoded as one JSON array string.
+     * Each array element is the same action-object payload used by listActionsJson(),
+     * preserving the exact order.
+     */
+    public String listActionsJsonBatch() {
+        ArrayList<Action> acts = gs.getAllAvailableActions();
+        JSONArray arr = new JSONArray();
+        for (int i = 0; i < acts.size(); i++) {
+            arr.put(buildActionJsonObject(acts.get(i), i));
+        }
+        return arr.toString();
+    }
+
+    private JSONObject buildActionJsonObject(Action a, int idx) {
+        JSONObject jo = new JSONObject();
+        jo.put("idx", idx);
+        jo.put("type", a.getActionType().toString());
+        jo.put("repr", a.toString());
+        jo.put("schema_version", 1);
+        addStructuredActionFields(jo, a);
+        return jo;
     }
 
     private void addStructuredActionFields(JSONObject jo, Action a) {
@@ -255,7 +287,22 @@ public class PythonEnv {
     public void stepByIndex(int idx) {
         ArrayList<Action> acts = gs.getAllAvailableActions();
         if (idx < 0 || idx >= acts.size()) throw new IllegalArgumentException("Invalid action index: " + idx);
-        gs.advance(acts.get(idx), true);
+        Action selected = acts.get(idx);
+        gs.advance(selected, true);
+
+        // In pure single-tribe maps, SCORE mode ends immediately after END_TURN.
+        // For wrapper-driven T10 training, keep turns progressing when explicitly requested.
+        boolean singleTribe = gs.getTribes() != null && gs.getTribes().length == 1;
+        boolean selectedEndTurn = selected != null && selected.getActionType() == Types.ACTION.END_TURN;
+        if (soloNoOpponentMode && singleTribe && selectedEndTurn) {
+            gs.setGameIsOver(false);
+            gs.invalidateComputedActions();
+            Tribe active = gs.getActiveTribe();
+            if (active != null) {
+                gs.initTurn(active);
+                gs.computePlayerActions(active);
+            }
+        }
     }
 
     private String observationJsonFromState(GameState state) {

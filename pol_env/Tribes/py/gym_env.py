@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from py4j.java_gateway import GatewayParameters, JavaGateway, launch_gateway
@@ -25,8 +26,35 @@ class TribesGymEnv:
         self._gateway = JavaGateway(gateway_parameters=GatewayParameters(port=port, auto_convert=True))
         self._jvm = self._gateway.jvm
         self._env = self._jvm.core.game.PythonEnv()
+        self._solo_no_opponent_mode = str(
+            os.environ.get("POLYVISION_SOLO_NO_OPPONENT_MODE", "0")
+        ).strip().lower() in ("1", "true", "yes", "on")
+        try:
+            self._env.setSoloNoOpponentMode(bool(self._solo_no_opponent_mode))
+        except Exception:
+            # Backward-compatible fallback if Java bridge is older.
+            pass
+        self._profile_sps_enabled = str(
+            os.environ.get("POLYVISION_PROFILE_SPS", "0")
+        ).strip().lower() in ("1", "true", "yes", "on")
+        self._batch_legal_action_fetch_enabled = str(
+            os.environ.get("POLYVISION_BATCH_LEGAL_ACTION_FETCH", "0")
+        ).strip().lower() in ("1", "true", "yes", "on")
+        self._batch_legal_fetch_equiv_check_enabled = str(
+            os.environ.get("POLYVISION_BATCH_LEGAL_FETCH_EQUIV_CHECK", "0")
+        ).strip().lower() in ("1", "true", "yes", "on")
+        try:
+            self._batch_legal_fetch_equiv_check_every_n = max(
+                1,
+                int(str(os.environ.get("POLYVISION_BATCH_LEGAL_FETCH_EQUIV_CHECK_EVERY_N_STEPS", "50")).strip()),
+            )
+        except Exception:
+            self._batch_legal_fetch_equiv_check_every_n = 50
+        self._list_actions_call_count = 0
         self._last_obs = None
         self._last_spt = 0.0
+        self._last_step_profile = {}
+        self._last_list_actions_profile = {}
 
     def reset(self, level_file: str, seed: int = 42, mode: str = "SCORE") -> Dict[str, Any]:
         game_mode = getattr(self._jvm.core.Types.GAME_MODE, mode)
@@ -40,27 +68,66 @@ class TribesGymEnv:
         return int(self._env.actionCount())
 
     def step(self, action_index: int) -> Tuple[Dict[str, Any], float, bool, Dict[str, Any]]:
+        profile = {}
         prev_spt = self._last_spt
-        self._env.stepByIndex(int(action_index))
-        obs = json.loads(self._env.observationJson())
-        done = bool(self._env.isDone())
+        t_conv0 = time.perf_counter() if self._profile_sps_enabled else None
+        java_action_index = int(action_index)
+        if self._profile_sps_enabled:
+            profile["java_action_serialize_s"] = float(time.perf_counter() - t_conv0)
 
+        t_step0 = time.perf_counter() if self._profile_sps_enabled else None
+        self._env.stepByIndex(java_action_index)
+        if self._profile_sps_enabled:
+            profile["java_step_call_s"] = float(time.perf_counter() - t_step0)
+
+        t_obs_fetch0 = time.perf_counter() if self._profile_sps_enabled else None
+        obs_json = self._env.observationJson()
+        if self._profile_sps_enabled:
+            profile["java_observation_fetch_s"] = float(time.perf_counter() - t_obs_fetch0)
+
+        t_obs_parse0 = time.perf_counter() if self._profile_sps_enabled else None
+        obs = json.loads(obs_json)
+        if self._profile_sps_enabled:
+            profile["java_response_parse_s"] = float(time.perf_counter() - t_obs_parse0)
+
+        t_done0 = time.perf_counter() if self._profile_sps_enabled else None
+        done = bool(self._env.isDone())
+        if self._profile_sps_enabled:
+            profile["java_done_fetch_s"] = float(time.perf_counter() - t_done0)
+
+        t_spt0 = time.perf_counter() if self._profile_sps_enabled else None
         current_spt = self._compute_spt_from_obs(obs, tribe_id=0)
+        if self._profile_sps_enabled:
+            profile["java_spt_compute_s"] = float(time.perf_counter() - t_spt0)
         reward = float(current_spt - prev_spt)
         self._last_spt = current_spt
 
+        t_scores0 = time.perf_counter() if self._profile_sps_enabled else None
         scores = list(self._env.getScores())
+        if self._profile_sps_enabled:
+            profile["java_scores_fetch_s"] = float(time.perf_counter() - t_scores0)
         tribe0_score = scores[0] if scores else 0
 
+        t_tick0 = time.perf_counter() if self._profile_sps_enabled else None
+        tick = int(self._env.getTick())
+        if self._profile_sps_enabled:
+            profile["java_tick_fetch_s"] = float(time.perf_counter() - t_tick0)
+
+        t_active0 = time.perf_counter() if self._profile_sps_enabled else None
+        active_tribe_id = int(self._env.getActiveTribeID())
+        if self._profile_sps_enabled:
+            profile["java_active_tribe_fetch_s"] = float(time.perf_counter() - t_active0)
+
         info = {
-            "tick": int(self._env.getTick()),
-            "activeTribeID": int(self._env.getActiveTribeID()),
+            "tick": tick,
+            "activeTribeID": active_tribe_id,
             "scores": list(scores),
             "score": tribe0_score,
             "spt": current_spt,
             "delta_spt": float(current_spt - prev_spt),
         }
         self._last_obs = obs
+        self._last_step_profile = profile
         return obs, reward, done, info
 
     def _compute_spt_from_obs(self, obs: Dict[str, Any], tribe_id: int = 0) -> float:
@@ -75,7 +142,90 @@ class TribesGymEnv:
         return spt
 
     def list_actions(self) -> List[dict]:
-        return [json.loads(s) for s in list(self._env.listActionsJson())]
+        self._list_actions_call_count += 1
+        use_batch = bool(self._batch_legal_action_fetch_enabled)
+        profile = {}
+        if use_batch:
+            parsed = self._list_actions_batch(profile if self._profile_sps_enabled else None)
+        else:
+            parsed = self._list_actions_legacy(profile if self._profile_sps_enabled else None)
+
+        if (
+            self._batch_legal_fetch_equiv_check_enabled
+            and (self._list_actions_call_count % int(self._batch_legal_fetch_equiv_check_every_n) == 0)
+        ):
+            legacy_actions = self._list_actions_legacy(None)
+            batch_actions = self._list_actions_batch(None)
+            if legacy_actions != batch_actions:
+                raise RuntimeError(
+                    "BATCH_LEGAL_FETCH_EQUIV: raw action mismatch "
+                    f"legacy_count={len(legacy_actions)} batch_count={len(batch_actions)}"
+                )
+
+        if self._profile_sps_enabled:
+            self._last_list_actions_profile = profile
+        return parsed
+
+    def _list_actions_legacy(self, profile: Optional[Dict[str, Any]]) -> List[dict]:
+        if not self._profile_sps_enabled and profile is None:
+            return [json.loads(s) for s in list(self._env.listActionsJson())]
+
+        p = profile if isinstance(profile, dict) else {}
+        t_java0 = time.perf_counter() if self._profile_sps_enabled or profile is not None else None
+        java_actions = self._env.listActionsJson()
+        if t_java0 is not None:
+            p["java_compute_bridge_s"] = float(time.perf_counter() - t_java0)
+
+        t_list0 = time.perf_counter() if self._profile_sps_enabled or profile is not None else None
+        action_strings = list(java_actions)
+        if t_list0 is not None:
+            p["python_list_materialize_s"] = float(time.perf_counter() - t_list0)
+
+        t_parse0 = time.perf_counter() if self._profile_sps_enabled or profile is not None else None
+        parsed = []
+        total_chars = 0
+        for s in action_strings:
+            if isinstance(s, str):
+                total_chars += len(s)
+            parsed.append(json.loads(s))
+        if t_parse0 is not None:
+            p["python_json_parse_s"] = float(time.perf_counter() - t_parse0)
+        p["raw_action_count"] = int(len(action_strings))
+        p["raw_action_total_chars"] = int(total_chars)
+        if "java_compute_bridge_s" in p and "python_list_materialize_s" in p and "python_json_parse_s" in p:
+            p["list_actions_total_s"] = float(
+                p["java_compute_bridge_s"] + p["python_list_materialize_s"] + p["python_json_parse_s"]
+            )
+        return parsed
+
+    def _list_actions_batch(self, profile: Optional[Dict[str, Any]]) -> List[dict]:
+        p = profile if isinstance(profile, dict) else {}
+        t_java0 = time.perf_counter() if self._profile_sps_enabled or profile is not None else None
+        batch_payload = self._env.listActionsJsonBatch()
+        if t_java0 is not None:
+            p["java_compute_bridge_s"] = float(time.perf_counter() - t_java0)
+
+        # In batch mode there is no per-element bridge iteration/materialization.
+        p["python_list_materialize_s"] = 0.0
+        if isinstance(batch_payload, str):
+            p["raw_action_total_chars"] = int(len(batch_payload))
+        else:
+            p["raw_action_total_chars"] = 0
+
+        t_parse0 = time.perf_counter() if self._profile_sps_enabled or profile is not None else None
+        parsed = json.loads(batch_payload) if isinstance(batch_payload, str) and batch_payload else []
+        if t_parse0 is not None:
+            p["python_json_parse_s"] = float(time.perf_counter() - t_parse0)
+        p["raw_action_count"] = int(len(parsed)) if isinstance(parsed, list) else 0
+        if "java_compute_bridge_s" in p and "python_json_parse_s" in p:
+            p["list_actions_total_s"] = float(
+                p["java_compute_bridge_s"] + p["python_list_materialize_s"] + p["python_json_parse_s"]
+            )
+        if not isinstance(parsed, list):
+            raise RuntimeError(
+                f"BATCH_LEGAL_FETCH: expected JSON array from listActionsJsonBatch(), got {type(parsed)}"
+            )
+        return parsed
 
     def get_observation(self, full_visibility: bool = False) -> Dict[str, Any]:
         """Fetch a fresh observation from Java.

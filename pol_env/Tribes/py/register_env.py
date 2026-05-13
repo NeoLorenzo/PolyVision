@@ -6,6 +6,7 @@ import numpy as np
 import os
 import pickle
 import re
+import time
 from gymnasium.envs.registration import register
 from .gym_env import TribesGymEnv, make_default_env
 
@@ -306,8 +307,39 @@ class TribesGymWrapper(gym.Env):
         self._total_action_decisions = 0
         self._validation_mode = os.environ.get("POLYVISION_ACTION_VALIDATION_MODE", "0").lower() in ("1", "true", "yes", "on")
         self._info_mode = str(os.environ.get("POLYVISION_INFO_MODE", "fast")).strip().lower()
-        if self._info_mode not in ("fast", "debug"):
+        if self._info_mode not in ("fast", "debug", "train"):
             self._info_mode = "fast"
+        self._profile_sps_enabled = self._parse_bool_env("POLYVISION_PROFILE_SPS", default=False)
+        self._profile_every_n_steps = max(1, self._parse_int_env("POLYVISION_PROFILE_EVERY_N_STEPS", default=1000))
+        self._last_step_feature_profile = {}
+        self._profile_feature_build_active = False
+        self._profile_feature_build_repr_parse_s = 0.0
+        self._feature_equiv_check_enabled = self._parse_bool_env("POLYVISION_FEATURE_EQUIV_CHECK", default=False)
+        self._legal_summary_equiv_check_enabled = self._parse_bool_env(
+            "POLYVISION_LEGAL_SUMMARY_EQUIV_CHECK",
+            default=False,
+        )
+        self._legal_summary_equiv_check_every_n = max(
+            1,
+            self._parse_int_env("POLYVISION_LEGAL_SUMMARY_EQUIV_CHECK_EVERY_N_STEPS", default=50),
+        )
+        self._filter_equiv_check_enabled = self._parse_bool_env(
+            "POLYVISION_FILTER_EQUIV_CHECK",
+            default=False,
+        )
+        self._filter_equiv_check_every_n = max(
+            1,
+            self._parse_int_env("POLYVISION_FILTER_EQUIV_CHECK_EVERY_N_STEPS", default=50),
+        )
+        self._batch_legal_fetch_equiv_check_enabled = self._parse_bool_env(
+            "POLYVISION_BATCH_LEGAL_FETCH_EQUIV_CHECK",
+            default=False,
+        )
+        self._batch_legal_fetch_equiv_check_every_n = max(
+            1,
+            self._parse_int_env("POLYVISION_BATCH_LEGAL_FETCH_EQUIV_CHECK_EVERY_N_STEPS", default=50),
+        )
+        self._feature_action_meta_cache = {}
         self._max_legal_actions = max(
             1,
             self._parse_int_env("POLYVISION_MAX_LEGAL_ACTIONS", default=self.MAX_LEGAL_ACTIONS_DEFAULT),
@@ -369,16 +401,31 @@ class TribesGymWrapper(gym.Env):
             )
     
     def reset(self, seed=None, options=None):
+        t_reset_start = time.perf_counter() if self._profile_sps_enabled else None
+        t_reset_java = 0.0
+        t_reset_opening = 0.0
+        t_reset_legal_generation = 0.0
+        t_reset_slot_mask_build = 0.0
+        t_reset_feature_build = 0.0
+        t_reset_info_build = 0.0
+        t_reset_obs_flatten = 0.0
+        t_reset_sanitize = 0.0
         episode_seed = self._resolve_episode_seed(seed=seed)
         level_file, level_index = self._select_level_for_reset(episode_seed)
         self._current_level_file = level_file
         self._current_level_index = int(level_index)
         self._last_reset_seed = int(episode_seed)
+        t_java0 = time.perf_counter() if self._profile_sps_enabled else None
         obs = self.tribes_env.reset(self._current_level_file, self._last_reset_seed)
+        if self._profile_sps_enabled:
+            t_reset_java += time.perf_counter() - t_java0
         self._episode_index += 1
         self._turn_count = 0
         self._unit_previous_tiles = {}
+        t_opening0 = time.perf_counter() if self._profile_sps_enabled else None
         obs = self._apply_bardur_opening(obs)
+        if self._profile_sps_enabled:
+            t_reset_opening += time.perf_counter() - t_opening0
         self._starting_city_count = self._get_city_count(obs)
         self._last_city_count = self._starting_city_count
         self._moved_on_t0 = False
@@ -399,8 +446,11 @@ class TribesGymWrapper(gym.Env):
         self._terminal_spt_bonus_applied_this_episode = False
         
         # Log action space info for debugging
+        t_legal0 = time.perf_counter() if self._profile_sps_enabled else None
         legal_actions = self.tribes_env.list_actions()
         action_mask, legal_id_to_raw_index, diag = self._build_action_mask_and_mapping(legal_actions, obs=obs)
+        if self._profile_sps_enabled:
+            t_reset_legal_generation += time.perf_counter() - t_legal0
         self._current_legal_actions = legal_actions
         self._current_action_mask = action_mask
         self._current_legal_id_to_raw_index = legal_id_to_raw_index
@@ -413,6 +463,7 @@ class TribesGymWrapper(gym.Env):
             )
         
         # convert your dict obs to numpy array here
+        t_info0 = time.perf_counter() if self._profile_sps_enabled else None
         info = {
             "valid_actions": int(np.sum(action_mask)),
             "raw_valid_actions": int(self._current_raw_valid_actions),
@@ -426,7 +477,11 @@ class TribesGymWrapper(gym.Env):
             "action_offset_table_hash": self._catalog_fingerprint,
             "max_legal_actions": int(self._max_legal_actions),
         }
+        t_slot0 = time.perf_counter() if self._profile_sps_enabled else None
         legal_global_ids_padded, legal_action_valid_mask, legal_action_count = self._build_legal_slot_tensors(action_mask)
+        if self._profile_sps_enabled:
+            t_reset_slot_mask_build += time.perf_counter() - t_slot0
+        t_feat0 = time.perf_counter() if self._profile_sps_enabled else None
         legal_action_features_padded = self._build_legal_action_features_padded(
             legal_global_ids_padded,
             legal_action_valid_mask,
@@ -438,6 +493,8 @@ class TribesGymWrapper(gym.Env):
         info["legal_action_valid_mask"] = legal_action_valid_mask
         info["legal_action_count"] = int(legal_action_count)
         info["legal_action_features_padded"] = legal_action_features_padded
+        if self._profile_sps_enabled:
+            t_reset_feature_build += time.perf_counter() - t_feat0
         info["legal_action_feature_dim"] = int(self.ACTION_FEATURE_DIM)
         info["legal_action_feature_version"] = str(self.LEGAL_ACTION_FEATURE_VERSION)
         info["animals_harvested_t10"] = int(self._animals_harvested_t10)
@@ -456,13 +513,99 @@ class TribesGymWrapper(gym.Env):
             info["episode_seed"] = int(self._last_reset_seed)
             info["level_selection_mode"] = self._level_selection_mode
             info["initial_visible_tiles"] = int(self._initial_visible_tiles)
-        return self._dict_to_array(obs), self._sanitize_info_for_multiprocessing(info)
+        if self._profile_sps_enabled:
+            t_reset_info_build += time.perf_counter() - t_info0
+            info["profile_env_reset_java_reset_s"] = float(t_reset_java)
+            info["profile_env_reset_opening_script_s"] = float(t_reset_opening)
+            info["profile_env_reset_legal_generation_s"] = float(t_reset_legal_generation)
+            info["profile_env_reset_slot_mask_build_s"] = float(t_reset_slot_mask_build)
+            info["profile_env_reset_feature_build_s"] = float(t_reset_feature_build)
+            info["profile_env_reset_info_build_s"] = float(t_reset_info_build)
+            info["profile_env_reset_total_s"] = float(time.perf_counter() - t_reset_start)
+        t_obs0 = time.perf_counter() if self._profile_sps_enabled else None
+        obs_arr = self._dict_to_array(obs)
+        if self._profile_sps_enabled:
+            t_reset_obs_flatten += time.perf_counter() - t_obs0
+            info["profile_env_reset_obs_flatten_s"] = float(t_reset_obs_flatten)
+        t_sanitize0 = time.perf_counter() if self._profile_sps_enabled else None
+        safe_info = self._sanitize_info_for_multiprocessing(info)
+        if self._profile_sps_enabled:
+            t_reset_sanitize += time.perf_counter() - t_sanitize0
+            safe_info["profile_env_reset_sanitize_info_s"] = float(t_reset_sanitize)
+        return obs_arr, safe_info
     
     def render(self, **kwargs):
         data = np.array(self.tribes_env.render("rgb_image"))
         return data
 
     def step(self, action):
+        t_step_start = time.perf_counter() if self._profile_sps_enabled else None
+        t_step_pre_fast_forward = 0.0
+        t_step_pre_legal_generation = 0.0
+        t_step_action_decode = 0.0
+        t_step_java_apply = 0.0
+        t_step_post_fast_forward = 0.0
+        t_step_reward_calc = 0.0
+        t_step_post_legal_generation = 0.0
+        t_step_slot_mask_build = 0.0
+        t_step_feature_build = 0.0
+        t_step_info_build = 0.0
+        t_step_diag_build = 0.0
+        t_step_obs_flatten = 0.0
+        t_step_sanitize = 0.0
+        t_java_apply_action_serialize = 0.0
+        t_java_apply_step_call = 0.0
+        t_java_apply_response_parse = 0.0
+        t_java_apply_obs_fetch = 0.0
+        t_java_apply_done_fetch = 0.0
+        t_java_apply_scores_fetch = 0.0
+        t_java_apply_tick_fetch = 0.0
+        t_java_apply_active_fetch = 0.0
+        t_java_apply_spt_compute = 0.0
+        t_java_apply_active_check_pre = 0.0
+        t_java_apply_active_check_post = 0.0
+        t_java_apply_solo_ff_pre = 0.0
+        t_java_apply_solo_ff_post = 0.0
+        t_reward_spt_delta = 0.0
+        t_reward_city_capture_delta = 0.0
+        t_reward_fog_reward = 0.0
+        t_reward_village_reveal = 0.0
+        t_reward_move_village_shaping = 0.0
+        t_reward_tactical_diag = 0.0
+        t_reward_resource_upgrade_checks = 0.0
+        t_reward_legal_action_scans = 0.0
+        t_reward_board_scans = 0.0
+        t_reward_java_calls = 0.0
+        t_post_legal_java_fetch = 0.0
+        t_post_legal_filter = 0.0
+        t_post_legal_canonicalization = 0.0
+        t_post_legal_collision_check = 0.0
+        t_post_legal_legal_id_build = 0.0
+        t_post_legal_mask_build = 0.0
+        t_post_legal_diag_build = 0.0
+        t_post_legal_filter_allowed_type = 0.0
+        t_post_legal_filter_oob_move = 0.0
+        t_post_legal_filter_resource_upgrade = 0.0
+        t_post_legal_filter_city_count_tactical = 0.0
+        t_post_legal_filter_capture_priority = 0.0
+        t_post_legal_filter_move_visible_village = 0.0
+        t_post_legal_filter_closest_reduce_distance = 0.0
+        t_post_legal_filter_early_backtrack = 0.0
+        t_post_legal_filter_board_city_village_scans = 0.0
+        post_legal_raw_actions_count = 0
+        post_legal_allowed_after_base_count = 0
+        post_legal_allowed_after_tactical_count = 0
+        post_legal_allowed_final_count = 0
+        t_post_legal_java_compute_bridge = 0.0
+        t_post_legal_java_list_materialize = 0.0
+        t_post_legal_java_json_parse = 0.0
+        post_legal_java_raw_chars = 0
+        t_post_legal_info_attach = 0.0
+        t_post_legal_terminal_path = 0.0
+        batch_equiv_ref_actions = None
+        batch_equiv_ref_action_mask = None
+        batch_equiv_ref_legal_id_to_raw_index = None
+        batch_equiv_ref_diag = None
         start_obs = getattr(self.tribes_env, "_last_obs", None)
         if not isinstance(start_obs, dict):
             start_obs = {}
@@ -470,8 +613,18 @@ class TribesGymWrapper(gym.Env):
         chosen_move_dest = None
 
         forced_pre_end_turns = 0
-        if self._get_active_tribe_id(start_obs) != 0:
+        t_pre_ff0 = time.perf_counter() if self._profile_sps_enabled else None
+        t_active_pre0 = time.perf_counter() if self._profile_sps_enabled else None
+        start_active_tribe_id = self._get_active_tribe_id(start_obs)
+        if self._profile_sps_enabled:
+            t_java_apply_active_check_pre += time.perf_counter() - t_active_pre0
+        t_ff_pre0 = time.perf_counter() if self._profile_sps_enabled else None
+        if start_active_tribe_id != 0:
             start_obs, forced_pre_end_turns, _ = self._force_non_bardur_turns_to_end(start_obs)
+        if self._profile_sps_enabled:
+            t_java_apply_solo_ff_pre += time.perf_counter() - t_ff_pre0
+        if self._profile_sps_enabled:
+            t_step_pre_fast_forward += time.perf_counter() - t_pre_ff0
 
         legal_actions = self._current_legal_actions if self._current_legal_actions is not None else []
         raw_count = int(self._current_raw_valid_actions)
@@ -481,9 +634,12 @@ class TribesGymWrapper(gym.Env):
 
         if raw_count == 0 or not legal_actions or action_mask is None or not legal_id_to_raw_index:
             # Recover from any stale cache by rebuilding once.
+            t_pre_legal0 = time.perf_counter() if self._profile_sps_enabled else None
             legal_actions = self.tribes_env.list_actions()
             raw_count = len(legal_actions)
             action_mask, legal_id_to_raw_index, diag = self._build_action_mask_and_mapping(legal_actions, obs=start_obs)
+            if self._profile_sps_enabled:
+                t_step_pre_legal_generation += time.perf_counter() - t_pre_legal0
             self._current_legal_actions = legal_actions
             self._current_action_mask = action_mask
             self._current_legal_id_to_raw_index = legal_id_to_raw_index
@@ -494,6 +650,7 @@ class TribesGymWrapper(gym.Env):
             raise RuntimeError("No legal actions available from Java environment.")
 
         sampled_action = int(action)
+        t_decode0 = time.perf_counter() if self._profile_sps_enabled else None
         selected_global_id = sampled_action
         illegal_sampled_global_id = False
         fallback_to_end_turn = False
@@ -510,6 +667,8 @@ class TribesGymWrapper(gym.Env):
 
         selected_action_type = legal_actions[selected_raw_action].get("type", "UNKNOWN")
         self._total_action_decisions += 1
+        if self._profile_sps_enabled:
+            t_step_action_decode += time.perf_counter() - t_decode0
 
         prev_bardur_spt = self._compute_bardur_spt(start_obs)
 
@@ -551,6 +710,7 @@ class TribesGymWrapper(gym.Env):
             selected_global_id = int(self._catalog.id_end_turn()) if self._catalog is not None else selected_global_id
 
         selected_action = legal_actions[selected_raw_action]
+        t_reward_resource0 = time.perf_counter() if self._profile_sps_enabled else None
         pre_city_count = int(self._get_city_count(start_obs))
         combat_disabled = "ATTACK" not in self.ALLOWED_ACTION_TYPES
         tactical_window_active = (
@@ -558,46 +718,60 @@ class TribesGymWrapper(gym.Env):
             and int(self._turn_count) <= int(self.MAX_TURNS)
             and int(pre_city_count) < 4
         )
-        visible_villages_before = self._get_visible_uncaptured_village_positions(start_obs)
-        legal_capture_exists = any(str(a.get("type", "")).upper() == "CAPTURE" for a in legal_actions)
-        legal_level_up_exists = any(str(a.get("type", "")).upper() == "LEVEL_UP" for a in legal_actions)
-        completion_gather_actions = [
-            a for a in legal_actions
-            if str(a.get("type", "")).upper() == "RESOURCE_GATHERING"
-            and self._resource_gather_action_completes_city_upgrade(a, start_obs)
-        ]
-        completion_gather_available = len(completion_gather_actions) > 0
+        if self._profile_sps_enabled:
+            t_reward_resource_upgrade_checks += time.perf_counter() - t_reward_resource0
 
-        legal_move_onto_visible_village_exists = False
-        legal_useful_move_exists = False
-        for la in legal_actions:
-            if str(la.get("type", "")).upper() != "MOVE":
-                continue
-            move_to_visible_village = self._is_move_to_visible_uncaptured_village(la, start_obs)
-            if move_to_visible_village:
-                legal_move_onto_visible_village_exists = True
-            move_reveals_fog = self._move_action_reveals_any_fog(la, start_obs)
-            move_reduces_village_distance = False
-            if visible_villages_before:
-                move_uid, _sx, _sy, _dx, _dy = self._extract_move_components(la, start_obs)
-                if move_uid is not None:
-                    move_reduces_village_distance = self._is_move_reducing_distance_to_targets(
-                        la,
-                        start_obs,
-                        int(move_uid),
-                        visible_villages_before,
-                    )
-            if move_to_visible_village or move_reveals_fog or move_reduces_village_distance:
-                legal_useful_move_exists = True
+        t_reward_legal0 = time.perf_counter() if self._profile_sps_enabled else None
+        visible_villages_before = self._get_visible_uncaptured_village_positions(start_obs)
+        legal_summary = self._build_step_legal_action_summary(
+            legal_actions,
+            start_obs,
+            visible_villages_before=visible_villages_before,
+        )
+        if (
+            self._legal_summary_equiv_check_enabled
+            and int(self._total_action_decisions) % int(self._legal_summary_equiv_check_every_n) == 0
+        ):
+            self._assert_legal_summary_equivalence(
+                legal_actions,
+                start_obs,
+                visible_villages_before,
+                legal_summary,
+            )
+        legal_capture_exists = bool(legal_summary.get("legal_capture_exists", False))
+        legal_level_up_exists = bool(legal_summary.get("legal_level_up_exists", False))
+        completion_gather_available = bool(legal_summary.get("completion_gather_available", False))
+        legal_move_onto_visible_village_exists = bool(
+            legal_summary.get("legal_move_onto_visible_village_exists", False)
+        )
+        legal_useful_move_exists = bool(legal_summary.get("legal_useful_move_exists", False))
+        if self._profile_sps_enabled:
+            t_reward_legal_action_scans += time.perf_counter() - t_reward_legal0
 
         selected_move_onto_visible_village = (
             selected_action_type == "MOVE"
-            and self._is_move_to_visible_uncaptured_village(selected_action, start_obs)
+            and int(selected_raw_action) in legal_summary.get("move_to_visible_village_raw_indices", set())
         )
         selected_completes_city_upgrade = (
             selected_action_type == "RESOURCE_GATHERING"
-            and self._resource_gather_action_completes_city_upgrade(selected_action, start_obs)
+            and int(selected_raw_action) in legal_summary.get("completion_gather_raw_indices", set())
         )
+        if (
+            self._legal_summary_equiv_check_enabled
+            and int(self._total_action_decisions) % int(self._legal_summary_equiv_check_every_n) == 0
+        ):
+            legacy_selected_move_onto_visible_village = (
+                selected_action_type == "MOVE"
+                and self._is_move_to_visible_uncaptured_village(selected_action, start_obs)
+            )
+            legacy_selected_completes_city_upgrade = (
+                selected_action_type == "RESOURCE_GATHERING"
+                and self._resource_gather_action_completes_city_upgrade(selected_action, start_obs)
+            )
+            if bool(selected_move_onto_visible_village) != bool(legacy_selected_move_onto_visible_village):
+                raise RuntimeError("LEGAL_SUMMARY_EQUIV: selected_move_onto_visible_village mismatch")
+            if bool(selected_completes_city_upgrade) != bool(legacy_selected_completes_city_upgrade):
+                raise RuntimeError("LEGAL_SUMMARY_EQUIV: selected_completes_city_upgrade mismatch")
 
         tactical_missed_move_onto_visible_village_num = int(
             tactical_window_active
@@ -644,17 +818,42 @@ class TribesGymWrapper(gym.Env):
                     f"global_id={selected_global_id}, raw_idx={selected_raw_action}, repr={selected_action.get('repr', '')}"
                 )
 
+        t_java0 = time.perf_counter() if self._profile_sps_enabled else None
         obs, _, done, info = self.tribes_env.step(selected_raw_action)
+        if self._profile_sps_enabled:
+            t_step_java_apply += time.perf_counter() - t_java0
+            java_prof = dict(getattr(self.tribes_env, "_last_step_profile", {}) or {})
+            t_java_apply_action_serialize += float(java_prof.get("java_action_serialize_s", 0.0))
+            t_java_apply_step_call += float(java_prof.get("java_step_call_s", 0.0))
+            t_java_apply_response_parse += float(java_prof.get("java_response_parse_s", 0.0))
+            t_java_apply_obs_fetch += float(java_prof.get("java_observation_fetch_s", 0.0))
+            t_java_apply_done_fetch += float(java_prof.get("java_done_fetch_s", 0.0))
+            t_java_apply_scores_fetch += float(java_prof.get("java_scores_fetch_s", 0.0))
+            t_java_apply_tick_fetch += float(java_prof.get("java_tick_fetch_s", 0.0))
+            t_java_apply_active_fetch += float(java_prof.get("java_active_tribe_fetch_s", 0.0))
+            t_java_apply_spt_compute += float(java_prof.get("java_spt_compute_s", 0.0))
         obs_after_selected = obs
         java_done = bool(done)
         self._assert_all_units_in_bounds(obs, context="post_selected_action")
 
         forced_post_end_turns = 0
-        if self._get_active_tribe_id(obs) != 0:
+        t_post_ff0 = time.perf_counter() if self._profile_sps_enabled else None
+        t_active_post0 = time.perf_counter() if self._profile_sps_enabled else None
+        post_active_tribe_id = self._get_active_tribe_id(obs)
+        if self._profile_sps_enabled:
+            t_java_apply_active_check_post += time.perf_counter() - t_active_post0
+        t_ff_post0 = time.perf_counter() if self._profile_sps_enabled else None
+        if post_active_tribe_id != 0:
             obs, forced_post_end_turns, forced_done = self._force_non_bardur_turns_to_end(obs)
             java_done = java_done or bool(forced_done)
             self._assert_all_units_in_bounds(obs, context="post_forced_end_turns")
+        if self._profile_sps_enabled:
+            t_java_apply_solo_ff_post += time.perf_counter() - t_ff_post0
+        if self._profile_sps_enabled:
+            t_step_post_fast_forward += time.perf_counter() - t_post_ff0
 
+        t_reward0 = time.perf_counter() if self._profile_sps_enabled else None
+        t_reward_spt0 = time.perf_counter() if self._profile_sps_enabled else None
         current_bardur_spt = self._compute_bardur_spt(obs)
         base_delta_spt = float(current_bardur_spt - prev_bardur_spt)
         delta_spt_reward = float(base_delta_spt)
@@ -663,8 +862,11 @@ class TribesGymWrapper(gym.Env):
         else:
             delta_spt_reward = float(base_delta_spt) * float(self.SPT_NONPOSITIVE_REWARD_MULTIPLIER)
         current_city_count = self._get_city_count(obs)
+        if self._profile_sps_enabled:
+            t_reward_spt_delta += time.perf_counter() - t_reward_spt0
         reward_adjustment = 0.0
 
+        t_reward_city0 = time.perf_counter() if self._profile_sps_enabled else None
         capture_city_bonus = 0.0
         if current_city_count > self._last_city_count:
             n_new_cities = current_city_count - self._last_city_count
@@ -676,6 +878,8 @@ class TribesGymWrapper(gym.Env):
         if self._turn_second_city_captured is None and int(current_city_count) >= 2:
             self._turn_second_city_captured = int(self._turn_count)
         reward_adjustment += capture_city_bonus
+        if self._profile_sps_enabled:
+            t_reward_city_capture_delta += time.perf_counter() - t_reward_city0
 
         reveal_uncaptured_village_reward = 0.0
         move_closer_to_visible_village_reward = 0.0
@@ -688,10 +892,19 @@ class TribesGymWrapper(gym.Env):
         newly_revealed_tiles = 0
         unit_had_any_legal_fog_revealing_move = False
 
+        t_reward_village0 = time.perf_counter() if self._profile_sps_enabled else None
         visible_villages_before = self._get_visible_uncaptured_village_positions(start_obs)
         visible_villages_after_selected = self._get_visible_uncaptured_village_positions(obs_after_selected)
         newly_revealed_villages = visible_villages_after_selected - visible_villages_before
         visible_uncaptured_villages_before = int(len(visible_villages_before))
+        uncaptured_villages_count = int(len(visible_villages_after_selected))
+        captured_villages_t10 = max(0, int(current_city_count) - int(self._starting_city_count))
+        capturable_villages_total = max(0, int(captured_villages_t10) + int(uncaptured_villages_count))
+        village_capture_pct_t10 = (
+            (100.0 * float(captured_villages_t10) / float(capturable_villages_total))
+            if int(capturable_villages_total) > 0
+            else 0.0
+        )
         if (
             self._turn_first_uncaptured_village_visible is None
             and len(visible_villages_after_selected) > 0
@@ -699,13 +912,17 @@ class TribesGymWrapper(gym.Env):
             self._turn_first_uncaptured_village_visible = int(self._turn_count)
         if len(newly_revealed_villages) > 0:
             reveal_uncaptured_village_reward = self.REVEAL_UNCAPTURED_VILLAGE_REWARD * float(len(newly_revealed_villages))
+        if self._profile_sps_enabled:
+            t_reward_village_reveal += time.perf_counter() - t_reward_village0
 
         visible_uncaptured_village = self._has_visible_uncaptured_village(obs)
         unit_on_visible_uncaptured_village = self._has_unit_on_visible_uncaptured_village(obs)
 
-        units_on_neutral_village_capture_illegal_all = self._owned_units_on_visible_uncaptured_village_without_capture(
+        t_reward_legal1 = time.perf_counter() if self._profile_sps_enabled else None
+        units_on_neutral_village_capture_illegal_all = self._owned_units_on_visible_uncaptured_village_without_capture_from_sets(
             start_obs,
-            legal_actions,
+            visible_villages_before,
+            legal_summary.get("capture_unit_ids", set()),
         )
         units_on_neutral_village_capture_illegal = set()
         hold_neutral_village_end_turn_reward = 0.0
@@ -715,12 +932,12 @@ class TribesGymWrapper(gym.Env):
             and int(self._turn_count) <= int(self.MAX_TURNS)
             and int(pre_city_count) < 2
         ):
-            units_on_neutral_village_capture_illegal = self._owned_units_on_visible_uncaptured_village_without_capture(
-                start_obs,
-                legal_actions,
-            )
+            units_on_neutral_village_capture_illegal = set(units_on_neutral_village_capture_illegal_all)
+        if self._profile_sps_enabled:
+            t_reward_legal_action_scans += time.perf_counter() - t_reward_legal1
 
         if selected_action_type == "MOVE":
+            t_reward_fog0 = time.perf_counter() if self._profile_sps_enabled else None
             vis_before = self._count_visible_tiles(start_obs)
             vis_after = self._count_visible_tiles(obs_after_selected)
             fog_tiles_cleared = max(0, vis_after - vis_before)
@@ -732,12 +949,24 @@ class TribesGymWrapper(gym.Env):
                 ) * self.FOG_CLEAR_REWARD_PER_TILE
                 self._episode_fog_tiles_cleared += int(fog_tiles_cleared)
             if chosen_move_unit_id is not None:
-                unit_had_any_legal_fog_revealing_move = self._unit_had_any_legal_fog_revealing_move(
-                    legal_actions,
-                    start_obs,
-                    chosen_move_unit_id,
+                unit_had_any_legal_fog_revealing_move = bool(
+                    int(chosen_move_unit_id) in legal_summary.get("unit_ids_with_adjacent_fog_move", set())
                 )
+                if (
+                    self._legal_summary_equiv_check_enabled
+                    and int(self._total_action_decisions) % int(self._legal_summary_equiv_check_every_n) == 0
+                ):
+                    legacy_unit_had_any_legal_fog_revealing_move = self._unit_had_any_legal_fog_revealing_move(
+                        legal_actions,
+                        start_obs,
+                        chosen_move_unit_id,
+                    )
+                    if bool(unit_had_any_legal_fog_revealing_move) != bool(legacy_unit_had_any_legal_fog_revealing_move):
+                        raise RuntimeError("LEGAL_SUMMARY_EQUIV: unit_had_any_legal_fog_revealing_move mismatch")
+            if self._profile_sps_enabled:
+                t_reward_fog_reward += time.perf_counter() - t_reward_fog0
 
+            t_reward_shape0 = time.perf_counter() if self._profile_sps_enabled else None
             moved_unit_before = self._get_unit_position(start_obs, chosen_move_unit_id) if chosen_move_unit_id is not None else None
             moved_unit_after = self._get_unit_position(obs_after_selected, chosen_move_unit_id) if chosen_move_unit_id is not None else None
             dist_before = self._min_manhattan_distance(moved_unit_before, visible_villages_before)
@@ -757,6 +986,8 @@ class TribesGymWrapper(gym.Env):
                 and bool(unit_had_any_legal_fog_revealing_move)
             ):
                 useless_move_fog_miss_penalty = -float(self.USELESS_MOVE_FOG_MISS_PENALTY)
+            if self._profile_sps_enabled:
+                t_reward_move_village_shaping += time.perf_counter() - t_reward_shape0
 
         if selected_action_type == "END_TURN":
             self._visible_village_streak_turns = 0
@@ -774,6 +1005,7 @@ class TribesGymWrapper(gym.Env):
                 self.MOVE_OFF_NEUTRAL_VILLAGE_WHEN_CAPTURE_ILLEGAL_PENALTY
             )
 
+        t_reward_tact0 = time.perf_counter() if self._profile_sps_enabled else None
         if tactical_window_active and legal_move_onto_visible_village_exists:
             if selected_move_onto_visible_village:
                 move_onto_visible_neutral_village_tactical_reward = float(
@@ -783,6 +1015,8 @@ class TribesGymWrapper(gym.Env):
                 move_onto_visible_neutral_village_tactical_reward = -float(
                     self.MOVE_MISS_VISIBLE_NEUTRAL_VILLAGE_PENALTY
                 )
+        if self._profile_sps_enabled:
+            t_reward_tactical_diag += time.perf_counter() - t_reward_tact0
 
         tactical_move_off_neutral_village_before_capture_num = int(
             selected_action_type == "MOVE"
@@ -836,17 +1070,98 @@ class TribesGymWrapper(gym.Env):
             self._terminal_spt_bonus_applied_this_episode = True
 
         reward = float(delta_spt_reward) + reward_adjustment + float(terminal_spt_bonus)
+        if self._profile_sps_enabled:
+            t_reward_board_scans += (t_reward_village_reveal + t_reward_fog_reward)
+            t_reward_java_calls += 0.0
+            t_step_reward_calc += time.perf_counter() - t_reward0
 
         # Build the next-state legal mask and mapping diagnostics (for policy step t+1).
+        t_post_legal0 = time.perf_counter() if self._profile_sps_enabled else None
+        t_post_fetch0 = time.perf_counter() if self._profile_sps_enabled else None
         post_legal_actions = self.tribes_env.list_actions()
+        if self._profile_sps_enabled:
+            t_post_legal_java_fetch += time.perf_counter() - t_post_fetch0
+            _la_prof = dict(getattr(self.tribes_env, "_last_list_actions_profile", {}) or {})
+            t_post_legal_java_compute_bridge += float(_la_prof.get("java_compute_bridge_s", 0.0))
+            t_post_legal_java_list_materialize += float(_la_prof.get("python_list_materialize_s", 0.0))
+            t_post_legal_java_json_parse += float(_la_prof.get("python_json_parse_s", 0.0))
+            post_legal_java_raw_chars += int(_la_prof.get("raw_action_total_chars", 0))
         post_raw_count = len(post_legal_actions)
-        post_action_mask, post_legal_id_to_raw_index, post_diag = self._build_action_mask_and_mapping(post_legal_actions, obs=obs)
+        post_legal_raw_actions_count = int(post_raw_count)
+        post_mask_profile = {} if self._profile_sps_enabled else None
+        post_action_mask, post_legal_id_to_raw_index, post_diag = self._build_action_mask_and_mapping(
+            post_legal_actions,
+            obs=obs,
+            profile=post_mask_profile,
+        )
+        if self._profile_sps_enabled and isinstance(post_mask_profile, dict):
+            t_post_legal_filter += float(post_mask_profile.get("filter_allowed_indices_s", 0.0))
+            t_post_legal_canonicalization += float(post_mask_profile.get("canonicalize_global_id_s", 0.0))
+            t_post_legal_collision_check += float(post_mask_profile.get("collision_check_s", 0.0))
+            t_post_legal_legal_id_build += float(post_mask_profile.get("legal_id_list_construct_s", 0.0))
+            t_post_legal_mask_build += float(post_mask_profile.get("mask_build_s", 0.0))
+            t_post_legal_diag_build += float(post_mask_profile.get("diag_build_s", 0.0))
+            t_post_legal_filter_allowed_type += float(post_mask_profile.get("filter_allowed_type_s", 0.0))
+            t_post_legal_filter_oob_move += float(post_mask_profile.get("filter_oob_move_s", 0.0))
+            t_post_legal_filter_resource_upgrade += float(post_mask_profile.get("filter_resource_upgrade_s", 0.0))
+            t_post_legal_filter_city_count_tactical += float(post_mask_profile.get("filter_city_count_tactical_s", 0.0))
+            t_post_legal_filter_capture_priority += float(post_mask_profile.get("filter_capture_priority_s", 0.0))
+            t_post_legal_filter_move_visible_village += float(post_mask_profile.get("filter_move_visible_village_s", 0.0))
+            t_post_legal_filter_closest_reduce_distance += float(post_mask_profile.get("filter_closest_reduce_distance_s", 0.0))
+            t_post_legal_filter_early_backtrack += float(post_mask_profile.get("filter_early_backtrack_s", 0.0))
+            t_post_legal_filter_board_city_village_scans += float(post_mask_profile.get("filter_board_city_village_scans_s", 0.0))
+            post_legal_allowed_after_base_count = int(post_mask_profile.get("allowed_after_base_count", 0))
+            post_legal_allowed_after_tactical_count = int(post_mask_profile.get("allowed_after_tactical_count", 0))
+            post_legal_allowed_final_count = int(post_mask_profile.get("allowed_final_count", 0))
+        run_batch_fetch_equiv_check = bool(
+            self._batch_legal_fetch_equiv_check_enabled
+            and int(self._total_action_decisions) % int(self._batch_legal_fetch_equiv_check_every_n) == 0
+        )
+        if run_batch_fetch_equiv_check:
+            legacy_fetch = getattr(self.tribes_env, "_list_actions_legacy", None)
+            batch_fetch = getattr(self.tribes_env, "_list_actions_batch", None)
+            use_batch = bool(getattr(self.tribes_env, "_batch_legal_action_fetch_enabled", False))
+            if callable(legacy_fetch) and callable(batch_fetch):
+                batch_equiv_ref_actions = legacy_fetch(None) if use_batch else batch_fetch(None)
+                if post_legal_actions != batch_equiv_ref_actions:
+                    raise RuntimeError(
+                        "BATCH_LEGAL_FETCH_EQUIV: raw post-step actions mismatch "
+                        f"current_count={len(post_legal_actions)} ref_count={len(batch_equiv_ref_actions)}"
+                    )
+                batch_equiv_ref_action_mask, batch_equiv_ref_legal_id_to_raw_index, batch_equiv_ref_diag = (
+                    self._build_action_mask_and_mapping(batch_equiv_ref_actions, obs=obs, profile=None)
+                )
+                if not np.array_equal(np.asarray(post_action_mask), np.asarray(batch_equiv_ref_action_mask)):
+                    raise RuntimeError("BATCH_LEGAL_FETCH_EQUIV: post action mask mismatch")
+                if dict(post_legal_id_to_raw_index) != dict(batch_equiv_ref_legal_id_to_raw_index):
+                    raise RuntimeError("BATCH_LEGAL_FETCH_EQUIV: legal_id_to_raw_index mismatch")
+                if list(post_legal_id_to_raw_index.keys()) != list(batch_equiv_ref_legal_id_to_raw_index.keys()):
+                    raise RuntimeError("BATCH_LEGAL_FETCH_EQUIV: ordered canonical IDs mismatch")
+                if dict(post_diag.get("legal_action_count_by_type", {})) != dict(
+                    batch_equiv_ref_diag.get("legal_action_count_by_type", {})
+                ):
+                    raise RuntimeError("BATCH_LEGAL_FETCH_EQUIV: legal_action_count_by_type mismatch")
+        if self._profile_sps_enabled:
+            t_step_post_legal_generation += time.perf_counter() - t_post_legal0
+            if bool(terminated) or bool(truncated):
+                t_post_legal_terminal_path += time.perf_counter() - t_post_legal0
         self._current_legal_actions = post_legal_actions
         self._current_action_mask = post_action_mask
         self._current_legal_id_to_raw_index = post_legal_id_to_raw_index
         self._current_diag = post_diag
         self._current_raw_valid_actions = int(post_raw_count)
 
+        t_info0 = time.perf_counter() if self._profile_sps_enabled else None
+        t_info_scalar = 0.0
+        t_info_diag = 0.0
+        t_info_legal_summary = 0.0
+        t_info_large_payload = 0.0
+        t_info_action_repr = 0.0
+        t_info_terminal_episode = 0.0
+        t_info_metric_packaging = 0.0
+        t_info_ws = 0.0
+        if self._profile_sps_enabled:
+            t_info_ws = time.perf_counter()
         info["valid_actions"] = int(np.sum(post_action_mask))
         info["raw_valid_actions"] = int(post_raw_count)
         info["info_mode"] = self._info_mode
@@ -854,6 +1169,9 @@ class TribesGymWrapper(gym.Env):
             info["action_mask"] = post_action_mask
         else:
             info["legal_global_ids"] = np.flatnonzero(post_action_mask).astype(np.int32).tolist()
+        if self._profile_sps_enabled:
+            t_info_legal_summary += time.perf_counter() - t_info_ws
+            t_info_ws = time.perf_counter()
         info["sampled_action"] = sampled_action
         info["selected_global_id"] = int(selected_global_id)
         info["selected_raw_action"] = selected_raw_action
@@ -876,6 +1194,9 @@ class TribesGymWrapper(gym.Env):
         info["turn_count"] = self._turn_count
         info["city_count"] = current_city_count
         info["avg_city_level"] = float(self._get_avg_city_level(obs, tribe_id=0))
+        if self._profile_sps_enabled:
+            t_info_scalar += time.perf_counter() - t_info_ws
+            t_info_ws = time.perf_counter()
         # Research telemetry is tracked from executed RESEARCH_TECH actions because
         # Java observation payload does not currently expose tribes[].technology.
         info["techs_researched"] = int(len(self._researched_techs_t10))
@@ -901,6 +1222,9 @@ class TribesGymWrapper(gym.Env):
             if self._turn_organization_researched is not None
             else -1
         )
+        if self._profile_sps_enabled:
+            t_info_terminal_episode += time.perf_counter() - t_info_ws
+            t_info_ws = time.perf_counter()
         info["fog_tiles_cleared_total"] = int(self._episode_fog_tiles_cleared)
         info["delta_spt"] = float(base_delta_spt)
         info["delta_spt_reward"] = float(delta_spt_reward)
@@ -911,12 +1235,21 @@ class TribesGymWrapper(gym.Env):
         info["terminal_spt_over_10_component"] = float(terminal_spt_over_10_component)
         info["terminal_spt_over_15_component"] = float(terminal_spt_over_15_component)
         info["resource_gather_upgrade_filter_enabled"] = bool(self._resource_gather_upgrade_filter_enabled)
+        if self._profile_sps_enabled:
+            t_info_terminal_episode += time.perf_counter() - t_info_ws
+            t_info_ws = time.perf_counter()
         info["spt"] = float(current_bardur_spt)
         info["reward"] = float(reward)
         info["turn"] = int(self._turn_count)
         info["unit_count"] = int(self._get_owned_unit_count(obs))
         info["stars"] = int(self._get_tribe_stars(obs, tribe_id=0))
+        if self._profile_sps_enabled:
+            t_info_metric_packaging += time.perf_counter() - t_info_ws
+        t_slot0 = time.perf_counter() if self._profile_sps_enabled else None
         post_legal_global_ids_padded, post_legal_action_valid_mask, post_legal_action_count = self._build_legal_slot_tensors(post_action_mask)
+        if self._profile_sps_enabled:
+            t_step_slot_mask_build += time.perf_counter() - t_slot0
+        t_feat0 = time.perf_counter() if self._profile_sps_enabled else None
         post_legal_action_features_padded = self._build_legal_action_features_padded(
             post_legal_global_ids_padded,
             post_legal_action_valid_mask,
@@ -924,10 +1257,46 @@ class TribesGymWrapper(gym.Env):
             post_legal_actions,
             obs,
         )
+        if (
+            run_batch_fetch_equiv_check
+            and batch_equiv_ref_actions is not None
+            and batch_equiv_ref_action_mask is not None
+            and batch_equiv_ref_legal_id_to_raw_index is not None
+        ):
+            ref_ids_padded, ref_valid_mask, ref_count = self._build_legal_slot_tensors(batch_equiv_ref_action_mask)
+            if not np.array_equal(np.asarray(post_legal_global_ids_padded), np.asarray(ref_ids_padded)):
+                raise RuntimeError("BATCH_LEGAL_FETCH_EQUIV: legal_global_ids_padded mismatch")
+            if not np.array_equal(np.asarray(post_legal_action_valid_mask), np.asarray(ref_valid_mask)):
+                raise RuntimeError("BATCH_LEGAL_FETCH_EQUIV: legal_action_valid_mask mismatch")
+            if int(post_legal_action_count) != int(ref_count):
+                raise RuntimeError("BATCH_LEGAL_FETCH_EQUIV: legal_action_count mismatch")
+            ref_features = self._build_legal_action_features_padded(
+                ref_ids_padded,
+                ref_valid_mask,
+                batch_equiv_ref_legal_id_to_raw_index,
+                batch_equiv_ref_actions,
+                obs,
+            )
+            if np.asarray(ref_features).shape != np.asarray(post_legal_action_features_padded).shape:
+                raise RuntimeError("BATCH_LEGAL_FETCH_EQUIV: legal feature shape mismatch")
+            if not np.allclose(
+                np.asarray(post_legal_action_features_padded, dtype=np.float32),
+                np.asarray(ref_features, dtype=np.float32),
+                rtol=1e-6,
+                atol=1e-6,
+            ):
+                raise RuntimeError("BATCH_LEGAL_FETCH_EQUIV: legal feature values mismatch")
+        t_large0 = time.perf_counter() if self._profile_sps_enabled else None
+        t_attach0 = time.perf_counter() if self._profile_sps_enabled else None
         info["legal_global_ids_padded"] = post_legal_global_ids_padded
         info["legal_action_valid_mask"] = post_legal_action_valid_mask
         info["legal_action_count"] = int(post_legal_action_count)
         info["legal_action_features_padded"] = post_legal_action_features_padded
+        if self._profile_sps_enabled:
+            t_post_legal_info_attach += time.perf_counter() - t_attach0
+            t_step_feature_build += time.perf_counter() - t_feat0
+            t_info_large_payload += time.perf_counter() - t_large0
+            t_info_ws = time.perf_counter()
         info["legal_action_feature_dim"] = int(self.ACTION_FEATURE_DIM)
         info["legal_action_feature_version"] = str(self.LEGAL_ACTION_FEATURE_VERSION)
         info["animals_harvested_t10"] = int(self._animals_harvested_t10)
@@ -935,6 +1304,12 @@ class TribesGymWrapper(gym.Env):
         info["lumber_huts_built_t10"] = int(self._lumber_huts_built_t10)
         info["sawmills_built_t10"] = int(self._sawmills_built_t10)
         info["forests_cleared_t10"] = int(self._forests_cleared_t10)
+        info["captured_villages_t10"] = int(captured_villages_t10)
+        info["capturable_villages_total"] = int(capturable_villages_total)
+        info["village_capture_pct_t10"] = float(village_capture_pct_t10)
+        if self._profile_sps_enabled:
+            t_info_terminal_episode += time.perf_counter() - t_info_ws
+            t_info_ws = time.perf_counter()
         info["tm_missed_move_onto_visible_village_num"] = int(tactical_missed_move_onto_visible_village_num)
         info["tm_move_onto_visible_village_available_den"] = int(tactical_missed_move_onto_visible_village_den)
         info["tm_ignored_capture_num"] = int(tactical_ignored_capture_num)
@@ -947,8 +1322,14 @@ class TribesGymWrapper(gym.Env):
         info["tm_unit_on_neutral_village_capture_illegal_den"] = int(tactical_move_off_neutral_village_before_capture_den)
         info["tm_end_turn_with_useful_move_num"] = int(tactical_end_turn_with_useful_move_num)
         info["tm_useful_move_available_den"] = int(tactical_end_turn_with_useful_move_den)
+        if self._profile_sps_enabled:
+            t_info_diag += time.perf_counter() - t_info_ws
+            t_info_ws = time.perf_counter()
         info.update(self._diag_for_info(post_diag))
+        if self._profile_sps_enabled:
+            t_info_legal_summary += time.perf_counter() - t_info_ws
 
+        t_diag0 = time.perf_counter() if self._profile_sps_enabled else None
         if self._is_debug_info_mode() and selected_action_type == "MOVE" and chosen_move_unit_id is not None and chosen_move_dest is not None:
             actual_pos = self._get_unit_position(obs, chosen_move_unit_id)
             dims = self._board_dimensions_from_obs(obs)
@@ -1026,23 +1407,132 @@ class TribesGymWrapper(gym.Env):
             info["episode_seed"] = int(self._last_reset_seed) if self._last_reset_seed is not None else None
             info["level_selection_mode"] = self._level_selection_mode
             info["activeTribeID"] = int(self._get_active_tribe_id(obs))
+        if self._profile_sps_enabled:
+            t_step_diag_build += time.perf_counter() - t_diag0
+            t_step_info_build += time.perf_counter() - t_info0
         self._last_city_count = current_city_count
         if selected_action_type == "MOVE" and self._turn_count == 0:
             self._moved_on_t0 = True
         if current_city_count >= 2:
             self._queued_village_capture_unit_ids = set()
 
-        info = self._sanitize_info_for_multiprocessing(info)
-        return self._dict_to_array(obs), reward, terminated, truncated, info
+        if self._profile_sps_enabled:
+            info["profile_env_step_pre_fast_forward_s"] = float(t_step_pre_fast_forward)
+            info["profile_env_step_pre_legal_generation_s"] = float(t_step_pre_legal_generation)
+            info["profile_env_step_action_decode_s"] = float(t_step_action_decode)
+            info["profile_env_step_java_apply_s"] = float(t_step_java_apply)
+            info["profile_env_step_post_fast_forward_s"] = float(t_step_post_fast_forward)
+            info["profile_env_step_reward_calc_s"] = float(t_step_reward_calc)
+            info["profile_env_step_post_legal_generation_s"] = float(t_step_post_legal_generation)
+            info["profile_env_step_slot_mask_build_s"] = float(t_step_slot_mask_build)
+            info["profile_env_step_feature_build_s"] = float(t_step_feature_build)
+            info["profile_env_step_info_build_s"] = float(t_step_info_build)
+            info["profile_env_step_diag_build_s"] = float(t_step_diag_build)
+            info["profile_env_step_info_build_scalar_s"] = float(t_info_scalar)
+            info["profile_env_step_info_build_diag_counter_s"] = float(t_info_diag)
+            info["profile_env_step_info_build_legal_summary_s"] = float(t_info_legal_summary)
+            info["profile_env_step_info_build_large_payload_s"] = float(t_info_large_payload)
+            info["profile_env_step_info_build_action_repr_s"] = float(t_info_action_repr)
+            info["profile_env_step_info_build_terminal_episode_s"] = float(t_info_terminal_episode)
+            info["profile_env_step_info_build_metric_packaging_s"] = float(t_info_metric_packaging)
+            _feat_prof = dict(self._last_step_feature_profile) if isinstance(self._last_step_feature_profile, dict) else {}
+            info["profile_env_step_feature_alloc_zero_fill_s"] = float(_feat_prof.get("feature_alloc_zero_fill_s", 0.0))
+            info["profile_env_step_feature_mask_construct_s"] = float(_feat_prof.get("feature_mask_construct_s", 0.0))
+            info["profile_env_step_feature_precompute_s"] = float(_feat_prof.get("feature_step_precompute_s", 0.0))
+            info["profile_env_step_feature_loop_iteration_s"] = float(_feat_prof.get("feature_loop_iteration_s", 0.0))
+            info["profile_env_step_feature_gid_decode_s"] = float(_feat_prof.get("feature_gid_decode_s", 0.0))
+            info["profile_env_step_feature_canonical_lookup_s"] = float(_feat_prof.get("feature_canonical_lookup_s", 0.0))
+            info["profile_env_step_feature_static_metadata_s"] = float(_feat_prof.get("feature_static_metadata_extract_s", 0.0))
+            info["profile_env_step_feature_dynamic_state_s"] = float(_feat_prof.get("feature_dynamic_state_extract_s", 0.0))
+            info["profile_env_step_feature_padding_write_s"] = float(_feat_prof.get("feature_padding_write_s", 0.0))
+            info["profile_env_step_feature_action_repr_s"] = float(_feat_prof.get("feature_repr_string_s", 0.0))
+            info["profile_env_step_feature_java_calls_s"] = float(_feat_prof.get("feature_java_calls_s", 0.0))
+            info["profile_env_step_reward_spt_delta_s"] = float(t_reward_spt_delta)
+            info["profile_env_step_reward_city_capture_delta_s"] = float(t_reward_city_capture_delta)
+            info["profile_env_step_reward_fog_calc_s"] = float(t_reward_fog_reward)
+            info["profile_env_step_reward_village_reveal_s"] = float(t_reward_village_reveal)
+            info["profile_env_step_reward_move_village_shaping_s"] = float(t_reward_move_village_shaping)
+            info["profile_env_step_reward_tactical_diag_s"] = float(t_reward_tactical_diag)
+            info["profile_env_step_reward_resource_upgrade_checks_s"] = float(t_reward_resource_upgrade_checks)
+            info["profile_env_step_reward_legal_action_scans_s"] = float(t_reward_legal_action_scans)
+            info["profile_env_step_reward_board_scans_s"] = float(t_reward_board_scans)
+            info["profile_env_step_reward_java_calls_s"] = float(t_reward_java_calls)
+            info["profile_env_step_post_legal_java_fetch_s"] = float(t_post_legal_java_fetch)
+            info["profile_env_step_post_legal_java_compute_bridge_s"] = float(t_post_legal_java_compute_bridge)
+            info["profile_env_step_post_legal_java_list_materialize_s"] = float(t_post_legal_java_list_materialize)
+            info["profile_env_step_post_legal_java_json_parse_s"] = float(t_post_legal_java_json_parse)
+            info["profile_env_step_post_legal_action_filter_s"] = float(t_post_legal_filter)
+            info["profile_env_step_post_legal_filter_allowed_type_s"] = float(t_post_legal_filter_allowed_type)
+            info["profile_env_step_post_legal_filter_oob_move_s"] = float(t_post_legal_filter_oob_move)
+            info["profile_env_step_post_legal_filter_resource_upgrade_s"] = float(t_post_legal_filter_resource_upgrade)
+            info["profile_env_step_post_legal_filter_city_count_tactical_s"] = float(t_post_legal_filter_city_count_tactical)
+            info["profile_env_step_post_legal_filter_capture_priority_s"] = float(t_post_legal_filter_capture_priority)
+            info["profile_env_step_post_legal_filter_move_visible_village_s"] = float(t_post_legal_filter_move_visible_village)
+            info["profile_env_step_post_legal_filter_closest_reduce_distance_s"] = float(t_post_legal_filter_closest_reduce_distance)
+            info["profile_env_step_post_legal_filter_early_backtrack_s"] = float(t_post_legal_filter_early_backtrack)
+            info["profile_env_step_post_legal_filter_board_city_village_scans_s"] = float(t_post_legal_filter_board_city_village_scans)
+            info["profile_env_step_post_legal_canonicalize_s"] = float(t_post_legal_canonicalization)
+            info["profile_env_step_post_legal_collision_checks_s"] = float(t_post_legal_collision_check)
+            info["profile_env_step_post_legal_id_list_build_s"] = float(t_post_legal_legal_id_build)
+            info["profile_env_step_post_legal_mask_build_s"] = float(t_post_legal_mask_build)
+            info["profile_env_step_post_legal_diag_build_s"] = float(t_post_legal_diag_build)
+            info["profile_env_step_post_legal_padding_mask_s"] = float(t_step_slot_mask_build)
+            info["profile_env_step_post_legal_feature_build_s"] = float(t_step_feature_build)
+            info["profile_env_step_post_legal_info_attach_s"] = float(t_post_legal_info_attach)
+            info["profile_env_step_post_legal_terminal_path_s"] = float(t_post_legal_terminal_path)
+            info["profile_env_step_post_legal_raw_actions_count"] = int(post_legal_raw_actions_count)
+            info["profile_env_step_post_legal_canonical_actions_count"] = int(len(post_legal_id_to_raw_index))
+            info["profile_env_step_post_legal_allowed_after_base_count"] = int(post_legal_allowed_after_base_count)
+            info["profile_env_step_post_legal_allowed_after_tactical_count"] = int(post_legal_allowed_after_tactical_count)
+            info["profile_env_step_post_legal_allowed_final_count"] = int(post_legal_allowed_final_count)
+            info["profile_env_step_post_legal_raw_action_total_chars"] = int(post_legal_java_raw_chars)
+            info["profile_env_step_java_apply_action_serialize_s"] = float(t_java_apply_action_serialize)
+            info["profile_env_step_java_apply_call_s"] = float(t_java_apply_step_call)
+            info["profile_env_step_java_apply_response_parse_s"] = float(t_java_apply_response_parse)
+            info["profile_env_step_java_apply_obs_fetch_s"] = float(t_java_apply_obs_fetch)
+            info["profile_env_step_java_apply_done_fetch_s"] = float(t_java_apply_done_fetch)
+            info["profile_env_step_java_apply_scores_fetch_s"] = float(t_java_apply_scores_fetch)
+            info["profile_env_step_java_apply_tick_fetch_s"] = float(t_java_apply_tick_fetch)
+            info["profile_env_step_java_apply_active_fetch_s"] = float(t_java_apply_active_fetch)
+            info["profile_env_step_java_apply_spt_compute_s"] = float(t_java_apply_spt_compute)
+            info["profile_env_step_java_apply_active_check_pre_s"] = float(t_java_apply_active_check_pre)
+            info["profile_env_step_java_apply_active_check_post_s"] = float(t_java_apply_active_check_post)
+            info["profile_env_step_java_apply_solo_fast_forward_pre_s"] = float(t_java_apply_solo_ff_pre)
+            info["profile_env_step_java_apply_solo_fast_forward_post_s"] = float(t_java_apply_solo_ff_post)
+        t_obs0 = time.perf_counter() if self._profile_sps_enabled else None
+        obs_arr = self._dict_to_array(obs)
+        if self._profile_sps_enabled:
+            t_step_obs_flatten += time.perf_counter() - t_obs0
+            info["profile_env_step_obs_flatten_s"] = float(t_step_obs_flatten)
+            info["profile_env_step_total_s"] = float(time.perf_counter() - t_step_start)
+        t_sanitize0 = time.perf_counter() if self._profile_sps_enabled else None
+        safe_info = self._sanitize_info_for_multiprocessing(info)
+        if self._profile_sps_enabled:
+            t_step_sanitize += time.perf_counter() - t_sanitize0
+            safe_info["profile_env_step_sanitize_info_s"] = float(t_step_sanitize)
+        return obs_arr, reward, terminated, truncated, safe_info
 
     def _is_debug_info_mode(self):
         return self._info_mode == "debug"
+
+    def _is_train_info_mode(self):
+        return self._info_mode == "train"
 
     def _diag_for_info(self, diag):
         if not isinstance(diag, dict):
             return {}
         if self._is_debug_info_mode():
             return dict(diag)
+        if self._is_train_info_mode():
+            keep = (
+                "legal_actions_total",
+                "canonicalized_legal_actions",
+                "uncanonicalized_legal_actions",
+                "duplicate_global_id_collisions",
+                "mask_ones",
+                "unique_legal_global_ids",
+            )
+            return {k: diag[k] for k in keep if k in diag}
         # Fast mode keeps only fields required by trainer safety gates and validators.
         keep = (
             "legal_actions_total",
@@ -1076,6 +1566,20 @@ class TribesGymWrapper(gym.Env):
             padded[:n] = legal_ids
             valid_mask[:n] = True
         return padded, valid_mask, n
+
+    def _build_legal_action_features_sparse(self, legal_global_ids, legal_id_to_raw_index, legal_actions, obs):
+        ids_arr = np.asarray(legal_global_ids, dtype=np.int64).reshape(-1)
+        out = np.zeros((int(ids_arr.shape[0]), int(self.ACTION_FEATURE_DIM)), dtype=np.float32)
+        if not isinstance(legal_id_to_raw_index, dict) or not isinstance(legal_actions, list):
+            return out
+        for i, gid in enumerate(ids_arr):
+            raw_idx = legal_id_to_raw_index.get(int(gid), None)
+            if raw_idx is None:
+                continue
+            if int(raw_idx) < 0 or int(raw_idx) >= len(legal_actions):
+                continue
+            out[i, :] = self._compute_legal_action_feature_vector(legal_actions[int(raw_idx)], obs)
+        return out
 
     def _update_economy_counters_from_action(self, action_type, action):
         if int(self._turn_count) > int(self.MAX_TURNS):
@@ -1122,7 +1626,7 @@ class TribesGymWrapper(gym.Env):
             return None
         return str(m.group(1)).upper()
 
-    def _build_legal_action_features_padded(self, legal_global_ids_padded, legal_action_valid_mask, legal_id_to_raw_index, legal_actions, obs):
+    def _build_legal_action_features_padded_reference(self, legal_global_ids_padded, legal_action_valid_mask, legal_id_to_raw_index, legal_actions, obs):
         features = np.zeros((int(self._max_legal_actions), int(self.ACTION_FEATURE_DIM)), dtype=np.float32)
         if legal_global_ids_padded is None or legal_action_valid_mask is None:
             return features
@@ -1142,10 +1646,426 @@ class TribesGymWrapper(gym.Env):
             if int(raw_idx) < 0 or int(raw_idx) >= len(legal_actions):
                 continue
             action = legal_actions[int(raw_idx)]
-            features[slot, :] = self._compute_legal_action_feature_vector(action, obs)
+            features[slot, :] = self._compute_legal_action_feature_vector_reference(action, obs)
         return features
 
-    def _compute_legal_action_feature_vector(self, action, obs):
+    def _build_feature_step_context(self, obs):
+        ctx = {
+            "dims": self._board_dimensions_from_obs(obs),
+            "terrain_arr": None,
+            "fog_mask": None,
+            "mountain_mask": None,
+            "adj_fog_counts": None,
+            "reveal_range1": None,
+            "reveal_range2": None,
+            "visible_villages": set(),
+            "visible_village_mask": None,
+            "has_visible_village": False,
+            "dist_to_visible_village": None,
+            "city_bounds_mask": None,
+            "capital_pos": self._get_capital_position(obs, tribe_id=0),
+            "dist_norm": 1.0,
+            "unit_info": {},
+        }
+        dims = ctx["dims"]
+        if dims is None:
+            return ctx
+        width, height = int(dims[0]), int(dims[1])
+        if width <= 0 or height <= 0:
+            return ctx
+
+        board = obs.get("board", {}) if isinstance(obs, dict) else {}
+        terrain_raw = board.get("terrain", []) if isinstance(board, dict) else []
+        try:
+            terrain_arr = np.asarray(terrain_raw, dtype=np.int16)
+        except Exception:
+            terrain_arr = np.full((width, height), -1, dtype=np.int16)
+        if terrain_arr.shape != (width, height):
+            fixed = np.full((width, height), -1, dtype=np.int16)
+            try:
+                wx = min(width, terrain_arr.shape[0])
+                hy = min(height, terrain_arr.shape[1]) if terrain_arr.ndim == 2 else 0
+                if hy > 0:
+                    fixed[:wx, :hy] = terrain_arr[:wx, :hy]
+            except Exception:
+                pass
+            terrain_arr = fixed
+        ctx["terrain_arr"] = terrain_arr
+        fog_mask = terrain_arr == 7
+        ctx["fog_mask"] = fog_mask
+        ctx["mountain_mask"] = terrain_arr == 3
+        ctx["dist_norm"] = float(max(width, height)) if max(width, height) > 0 else 1.0
+
+        adj = np.zeros((width, height), dtype=np.int16)
+        for x in range(width):
+            x0 = max(0, x - 1)
+            x1 = min(width, x + 2)
+            for y in range(height):
+                y0 = max(0, y - 1)
+                y1 = min(height, y + 2)
+                local = fog_mask[x0:x1, y0:y1]
+                adj[x, y] = int(np.count_nonzero(local)) - (1 if fog_mask[x, y] else 0)
+        ctx["adj_fog_counts"] = adj
+
+        reveal1 = np.zeros((width, height), dtype=np.int16)
+        reveal2 = np.zeros((width, height), dtype=np.int16)
+        for x in range(width):
+            x01 = max(0, x - 1)
+            x11 = min(width, x + 2)
+            x02 = max(0, x - 2)
+            x12 = min(width, x + 3)
+            for y in range(height):
+                y01 = max(0, y - 1)
+                y11 = min(height, y + 2)
+                y02 = max(0, y - 2)
+                y12 = min(height, y + 3)
+                reveal1[x, y] = int(np.count_nonzero(fog_mask[x01:x11, y01:y11]))
+                reveal2[x, y] = int(np.count_nonzero(fog_mask[x02:x12, y02:y12]))
+        ctx["reveal_range1"] = reveal1
+        ctx["reveal_range2"] = reveal2
+
+        visible_villages = self._get_visible_uncaptured_village_positions(obs)
+        ctx["visible_villages"] = visible_villages
+        ctx["has_visible_village"] = len(visible_villages) > 0
+        village_mask = np.zeros((width, height), dtype=np.bool_)
+        for vx, vy in visible_villages:
+            if 0 <= int(vx) < width and 0 <= int(vy) < height:
+                village_mask[int(vx), int(vy)] = True
+        ctx["visible_village_mask"] = village_mask
+
+        city_bounds = np.zeros((width, height), dtype=np.bool_)
+        city_map = obs.get("city", {}) if isinstance(obs, dict) else {}
+        if isinstance(city_map, dict):
+            for city in city_map.values():
+                if not isinstance(city, dict):
+                    continue
+                try:
+                    if int(city.get("tribeID", -1)) != 0:
+                        continue
+                    cx = int(city.get("x", -1))
+                    cy = int(city.get("y", -1))
+                    bound = int(city.get("bound", -1))
+                except Exception:
+                    continue
+                if cx < 0 or cy < 0 or bound < 0:
+                    continue
+                x0 = max(0, cx - bound)
+                x1 = min(width, cx + bound + 1)
+                y0 = max(0, cy - bound)
+                y1 = min(height, cy + bound + 1)
+                for x in range(x0, x1):
+                    for y in range(y0, y1):
+                        if max(abs(x - cx), abs(y - cy)) <= bound:
+                            city_bounds[x, y] = True
+        ctx["city_bounds_mask"] = city_bounds
+
+        if ctx["has_visible_village"]:
+            dist_map = np.full((width, height), -1, dtype=np.int16)
+            villages = list(visible_villages)
+            for x in range(width):
+                for y in range(height):
+                    best = None
+                    for vx, vy in villages:
+                        d = abs(int(x) - int(vx)) + abs(int(y) - int(vy))
+                        if best is None or d < best:
+                            best = d
+                    dist_map[x, y] = int(best) if best is not None else -1
+            ctx["dist_to_visible_village"] = dist_map
+
+        units = obs.get("unit", {}) if isinstance(obs, dict) else {}
+        if isinstance(units, dict):
+            unit_info = {}
+            for uid_s, unit in units.items():
+                if not isinstance(unit, dict):
+                    continue
+                try:
+                    uid = int(uid_s)
+                except Exception:
+                    continue
+                try:
+                    ux = int(unit.get("x", -1))
+                    uy = int(unit.get("y", -1))
+                except Exception:
+                    ux, uy = -1, -1
+                try:
+                    utype = int(unit.get("type", -1))
+                except Exception:
+                    utype = -1
+                unit_info[uid] = {
+                    "x": ux,
+                    "y": uy,
+                    "type": utype,
+                }
+            ctx["unit_info"] = unit_info
+        return ctx
+
+    def _get_cached_move_action_meta(self, gid, action):
+        gid_i = int(gid)
+        a_type = str(action.get("type", "UNKNOWN")).upper()
+        sig = (
+            a_type,
+            action.get("unit_id", None),
+            action.get("src_x", None),
+            action.get("src_y", None),
+            action.get("dst_x", None),
+            action.get("dst_y", None),
+            action.get("repr", ""),
+        )
+        entry = self._feature_action_meta_cache.get(gid_i, None)
+        if isinstance(entry, dict) and entry.get("sig", None) == sig:
+            return entry.get("meta", {})
+
+        unit_id = self._action_int(action, "unit_id", None)
+        src_x = self._action_int(action, "src_x", None)
+        src_y = self._action_int(action, "src_y", None)
+        dst_x = self._action_int(action, "dst_x", None)
+        dst_y = self._action_int(action, "dst_y", None)
+        if (dst_x is None or dst_y is None) or (unit_id is None):
+            t_repr_parse0 = time.perf_counter() if self._profile_feature_build_active else None
+            parsed_move = self._parse_move_unit_and_dest_from_action_repr(str(action.get("repr", "")))
+            if self._profile_feature_build_active:
+                self._profile_feature_build_repr_parse_s += time.perf_counter() - t_repr_parse0
+            if parsed_move is not None:
+                if unit_id is None:
+                    unit_id = int(parsed_move[0])
+                if dst_x is None:
+                    dst_x = int(parsed_move[1])
+                if dst_y is None:
+                    dst_y = int(parsed_move[2])
+        meta = {
+            "unit_id": unit_id,
+            "src_x": src_x,
+            "src_y": src_y,
+            "dst_x": dst_x,
+            "dst_y": dst_y,
+        }
+        self._feature_action_meta_cache[gid_i] = {"sig": sig, "meta": meta}
+        return meta
+
+    def _compute_legal_action_feature_vector_cached(self, action, obs, ctx, gid):
+        feat = np.zeros((int(self.ACTION_FEATURE_DIM),), dtype=np.float32)
+        a_type = str(action.get("type", "UNKNOWN")).upper()
+        is_move = a_type == "MOVE"
+        feat[0] = 1.0 if is_move else 0.0
+
+        if is_move:
+            meta = self._get_cached_move_action_meta(gid, action)
+            unit_id = meta.get("unit_id", None)
+            src_x = meta.get("src_x", None)
+            src_y = meta.get("src_y", None)
+            dst_x = meta.get("dst_x", None)
+            dst_y = meta.get("dst_y", None)
+
+            unit_info = ctx.get("unit_info", {})
+            uinfo = unit_info.get(int(unit_id), None) if unit_id is not None else None
+            if (src_x is None or src_y is None) and isinstance(uinfo, dict):
+                sx = int(uinfo.get("x", -1))
+                sy = int(uinfo.get("y", -1))
+                if sx >= 0 and sy >= 0:
+                    src_x, src_y = sx, sy
+
+            dims = ctx.get("dims", None)
+            if dst_x is not None and dst_y is not None and dims is not None:
+                width, height = int(dims[0]), int(dims[1])
+                dx = int(dst_x)
+                dy = int(dst_y)
+                in_bounds_dst = 0 <= dx < width and 0 <= dy < height
+                if in_bounds_dst:
+                    reveal1 = ctx.get("reveal_range1", None)
+                    reveal2 = ctx.get("reveal_range2", None)
+                    mountain_mask = ctx.get("mountain_mask", None)
+                    unit_type = int(uinfo.get("type", -1)) if isinstance(uinfo, dict) else -1
+                    if unit_type == 10:
+                        revealed = int(reveal2[dx, dy]) if reveal2 is not None else 0
+                    else:
+                        on_mountain = bool(mountain_mask[dx, dy]) if mountain_mask is not None else False
+                        revealed = int(reveal2[dx, dy]) if (on_mountain and reveal2 is not None) else int(reveal1[dx, dy] if reveal1 is not None else 0)
+                    feat[1] = float(min(float(self.REVEAL_CLIP), max(0.0, float(revealed))) / max(1.0, float(self.REVEAL_CLIP)))
+
+                    adj_fog = ctx.get("adj_fog_counts", None)
+                    adj_after = int(adj_fog[dx, dy]) if adj_fog is not None else 0
+                    feat[2] = float(min(float(self.ADJ_FOG_MAX), max(0.0, float(adj_after))) / max(1.0, float(self.ADJ_FOG_MAX)))
+
+                    adj_before = 0
+                    if src_x is not None and src_y is not None:
+                        sx = int(src_x)
+                        sy = int(src_y)
+                        if 0 <= sx < width and 0 <= sy < height and adj_fog is not None:
+                            adj_before = int(adj_fog[sx, sy])
+                    adj_delta = float(adj_after - adj_before)
+                    feat[3] = float(np.clip(adj_delta / max(1.0, float(self.ADJ_FOG_MAX)), -1.0, 1.0))
+                    feat[4] = 1.0 if revealed == 0 else 0.0
+
+                    has_visible_village = bool(ctx.get("has_visible_village", False))
+                    feat[6] = 1.0 if has_visible_village else 0.0
+                    if has_visible_village:
+                        village_mask = ctx.get("visible_village_mask", None)
+                        if village_mask is not None and village_mask[dx, dy]:
+                            feat[5] = 1.0
+                        dist_map = ctx.get("dist_to_visible_village", None)
+                        if src_x is not None and src_y is not None and dist_map is not None:
+                            sx = int(src_x)
+                            sy = int(src_y)
+                            if 0 <= sx < width and 0 <= sy < height:
+                                dist_before = int(dist_map[sx, sy])
+                                dist_after = int(dist_map[dx, dy])
+                                if dist_before >= 0 and dist_after >= 0:
+                                    dist_norm = float(ctx.get("dist_norm", 1.0))
+                                    if dist_norm <= 0:
+                                        dist_norm = 1.0
+                                    feat[7] = float(np.clip((float(dist_before) - float(dist_after)) / dist_norm, -1.0, 1.0))
+
+                    if unit_id is not None:
+                        prev_tile = self._unit_previous_tiles.get(int(unit_id), None)
+                        if prev_tile is not None and (dx, dy) == (int(prev_tile[0]), int(prev_tile[1])):
+                            feat[8] = 1.0
+                        if isinstance(uinfo, dict):
+                            feat[11] = 1.0 if int(uinfo.get("type", -1)) == 0 else 0.0
+
+                    city_bounds_mask = ctx.get("city_bounds_mask", None)
+                    if city_bounds_mask is not None and city_bounds_mask[dx, dy]:
+                        feat[9] = 1.0
+
+                    capital_pos = ctx.get("capital_pos", None)
+                    if capital_pos is not None and src_x is not None and src_y is not None:
+                        sx = int(src_x)
+                        sy = int(src_y)
+                        before = abs(sx - int(capital_pos[0])) + abs(sy - int(capital_pos[1]))
+                        after = abs(dx - int(capital_pos[0])) + abs(dy - int(capital_pos[1]))
+                        dist_norm = float(ctx.get("dist_norm", 1.0))
+                        if dist_norm <= 0:
+                            dist_norm = 1.0
+                        feat[10] = float(np.clip((float(after) - float(before)) / dist_norm, -1.0, 1.0))
+
+        feat[12] = 1.0 if a_type == "END_TURN" else 0.0
+        feat[13] = 1.0 if a_type == "CAPTURE" else 0.0
+        feat[14] = 1.0 if a_type in ("SPAWN", "TRAIN") else 0.0
+        feat[15] = 1.0 if a_type == "RESEARCH_TECH" else 0.0
+        feat[16] = 1.0 if a_type == "RESOURCE_GATHERING" else 0.0
+        feat[17] = 1.0 if a_type == "LEVEL_UP" else 0.0
+        feat[18] = 1.0 if a_type == "BUILD" else 0.0
+        feat[19] = 1.0 if a_type == "CLEAR_FOREST" else 0.0
+        feat[20] = 1.0 if a_type == "GROW_FOREST" else 0.0
+        known = is_move or bool(feat[12] or feat[13] or feat[14] or feat[15] or feat[16] or feat[17] or feat[18] or feat[19] or feat[20])
+        feat[21] = 0.0 if known else 1.0
+        return feat
+
+    def _build_legal_action_features_padded(self, legal_global_ids_padded, legal_action_valid_mask, legal_id_to_raw_index, legal_actions, obs):
+        profile = {
+            "feature_alloc_zero_fill_s": 0.0,
+            "feature_mask_construct_s": 0.0,
+            "feature_step_precompute_s": 0.0,
+            "feature_loop_iteration_s": 0.0,
+            "feature_gid_decode_s": 0.0,
+            "feature_canonical_lookup_s": 0.0,
+            "feature_static_metadata_extract_s": 0.0,
+            "feature_dynamic_state_extract_s": 0.0,
+            "feature_padding_write_s": 0.0,
+            "feature_repr_string_s": 0.0,
+            "feature_java_calls_s": 0.0,
+        }
+        t_alloc0 = time.perf_counter() if self._profile_sps_enabled else None
+        features = np.zeros((int(self._max_legal_actions), int(self.ACTION_FEATURE_DIM)), dtype=np.float32)
+        if self._profile_sps_enabled:
+            profile["feature_alloc_zero_fill_s"] += time.perf_counter() - t_alloc0
+        self._last_step_feature_profile = profile
+        if legal_global_ids_padded is None or legal_action_valid_mask is None:
+            return features
+        if not isinstance(legal_id_to_raw_index, dict) or not isinstance(legal_actions, list):
+            return features
+
+        t_mask0 = time.perf_counter() if self._profile_sps_enabled else None
+        ids = np.asarray(legal_global_ids_padded, dtype=np.int64).reshape(-1)
+        valid = np.asarray(legal_action_valid_mask, dtype=bool).reshape(-1)
+        if self._profile_sps_enabled:
+            profile["feature_mask_construct_s"] += time.perf_counter() - t_mask0
+        max_slots = min(ids.shape[0], valid.shape[0], int(self._max_legal_actions))
+
+        t_ctx0 = time.perf_counter() if self._profile_sps_enabled else None
+        ctx = self._build_feature_step_context(obs)
+        if self._profile_sps_enabled:
+            profile["feature_step_precompute_s"] += time.perf_counter() - t_ctx0
+        self._profile_feature_build_active = bool(self._profile_sps_enabled)
+        self._profile_feature_build_repr_parse_s = 0.0
+        for slot in range(max_slots):
+            t_loop0 = time.perf_counter() if self._profile_sps_enabled else None
+            if not bool(valid[slot]):
+                if self._profile_sps_enabled:
+                    profile["feature_loop_iteration_s"] += time.perf_counter() - t_loop0
+                continue
+            t_gid0 = time.perf_counter() if self._profile_sps_enabled else None
+            gid = int(ids[slot])
+            if self._profile_sps_enabled:
+                profile["feature_gid_decode_s"] += time.perf_counter() - t_gid0
+            t_lookup0 = time.perf_counter() if self._profile_sps_enabled else None
+            raw_idx = legal_id_to_raw_index.get(gid, None)
+            if self._profile_sps_enabled:
+                profile["feature_canonical_lookup_s"] += time.perf_counter() - t_lookup0
+            if raw_idx is None:
+                if self._profile_sps_enabled:
+                    profile["feature_loop_iteration_s"] += time.perf_counter() - t_loop0
+                continue
+            if int(raw_idx) < 0 or int(raw_idx) >= len(legal_actions):
+                if self._profile_sps_enabled:
+                    profile["feature_loop_iteration_s"] += time.perf_counter() - t_loop0
+                continue
+            t_static0 = time.perf_counter() if self._profile_sps_enabled else None
+            action = legal_actions[int(raw_idx)]
+            _a_type = str(action.get("type", "UNKNOWN")).upper()
+            if self._profile_sps_enabled:
+                profile["feature_static_metadata_extract_s"] += time.perf_counter() - t_static0
+            t_dynamic0 = time.perf_counter() if self._profile_sps_enabled else None
+            vec = self._compute_legal_action_feature_vector_cached(action, obs, ctx, gid)
+            if self._profile_sps_enabled:
+                profile["feature_dynamic_state_extract_s"] += time.perf_counter() - t_dynamic0
+            t_write0 = time.perf_counter() if self._profile_sps_enabled else None
+            features[slot, :] = vec
+            if self._profile_sps_enabled:
+                profile["feature_padding_write_s"] += time.perf_counter() - t_write0
+                profile["feature_loop_iteration_s"] += time.perf_counter() - t_loop0
+        self._profile_feature_build_active = False
+        if self._profile_sps_enabled:
+            profile["feature_repr_string_s"] += float(self._profile_feature_build_repr_parse_s)
+            self._last_step_feature_profile = profile
+
+        if self._feature_equiv_check_enabled:
+            if self._current_action_mask is not None:
+                ids_check, mask_check, _count_check = self._build_legal_slot_tensors(self._current_action_mask)
+                if np.asarray(ids_check).shape != np.asarray(legal_global_ids_padded).shape:
+                    raise RuntimeError(
+                        f"feature_equiv_ids_shape_mismatch: "
+                        f"recomputed={np.asarray(ids_check).shape} input={np.asarray(legal_global_ids_padded).shape}"
+                    )
+                if np.asarray(mask_check).shape != np.asarray(legal_action_valid_mask).shape:
+                    raise RuntimeError(
+                        f"feature_equiv_mask_shape_mismatch: "
+                        f"recomputed={np.asarray(mask_check).shape} input={np.asarray(legal_action_valid_mask).shape}"
+                    )
+                if not np.array_equal(np.asarray(ids_check), np.asarray(legal_global_ids_padded)):
+                    raise RuntimeError("feature_equiv_ids_value_mismatch between recomputed and input legal ids.")
+                if not np.array_equal(np.asarray(mask_check), np.asarray(legal_action_valid_mask)):
+                    raise RuntimeError("feature_equiv_mask_value_mismatch between recomputed and input legal masks.")
+            ref = self._build_legal_action_features_padded_reference(
+                legal_global_ids_padded,
+                legal_action_valid_mask,
+                legal_id_to_raw_index,
+                legal_actions,
+                obs,
+            )
+            if features.shape != ref.shape:
+                raise RuntimeError(
+                    f"feature_equiv_shape_mismatch: new={features.shape} ref={ref.shape}"
+                )
+            if not np.allclose(features, ref, atol=1e-6, rtol=1e-6):
+                diff = np.abs(features - ref)
+                max_idx = np.unravel_index(np.argmax(diff), diff.shape)
+                raise RuntimeError(
+                    "feature_equiv_value_mismatch: "
+                    f"max_abs_diff={float(np.max(diff)):.8f} at_slot={int(max_idx[0])} feature_idx={int(max_idx[1])}"
+                )
+        return features
+
+    def _compute_legal_action_feature_vector_reference(self, action, obs):
         feat = np.zeros((int(self.ACTION_FEATURE_DIM),), dtype=np.float32)
         a_type = str(action.get("type", "UNKNOWN")).upper()
         is_move = a_type == "MOVE"
@@ -1220,6 +2140,9 @@ class TribesGymWrapper(gym.Env):
         known = is_move or bool(feat[12] or feat[13] or feat[14] or feat[15] or feat[16] or feat[17] or feat[18] or feat[19] or feat[20])
         feat[21] = 0.0 if known else 1.0
         return feat
+
+    def _compute_legal_action_feature_vector(self, action, obs):
+        return self._compute_legal_action_feature_vector_reference(action, obs)
 
     def _count_adjacent_fog_tiles(self, obs, center_x, center_y):
         dims = self._board_dimensions_from_obs(obs)
@@ -1497,32 +2420,77 @@ class TribesGymWrapper(gym.Env):
         idx = int((self._level_pool_offset + self._episode_index) % self._level_pool_size)
         return self._level_pool[idx], idx
 
-    def _filter_allowed_raw_indices(self, legal_actions, obs):
+    def _filter_allowed_raw_indices(
+        self,
+        legal_actions,
+        obs,
+        profile=None,
+        optimize_visible_village_filter=True,
+    ):
+        use_profile = isinstance(profile, dict)
+        if use_profile:
+            profile["filter_allowed_type_s"] = 0.0
+            profile["filter_oob_move_s"] = 0.0
+            profile["filter_resource_upgrade_s"] = 0.0
+            profile["filter_city_count_tactical_s"] = 0.0
+            profile["filter_capture_priority_s"] = 0.0
+            profile["filter_move_visible_village_s"] = 0.0
+            profile["filter_closest_reduce_distance_s"] = 0.0
+            profile["filter_early_backtrack_s"] = 0.0
+            profile["filter_board_city_village_scans_s"] = 0.0
+            profile["raw_actions_count"] = 0
+            profile["allowed_after_base_count"] = 0
+            profile["allowed_after_tactical_count"] = 0
+            profile["allowed_final_count"] = 0
         allowed_indices = []
+        if use_profile:
+            profile["raw_actions_count"] = int(len(legal_actions)) if isinstance(legal_actions, list) else 0
         for idx, a in enumerate(legal_actions):
+            t_type0 = time.perf_counter() if use_profile else None
             a_type = str(a.get("type", "")).upper()
+            if use_profile:
+                profile["filter_allowed_type_s"] += time.perf_counter() - t_type0
             if a_type not in self.ALLOWED_ACTION_TYPES:
                 continue
+            t_oob0 = time.perf_counter() if use_profile else None
             if a_type == "MOVE" and not self._is_move_destination_within_board(a, obs):
+                if use_profile:
+                    profile["filter_oob_move_s"] += time.perf_counter() - t_oob0
                 continue
+            if use_profile:
+                profile["filter_oob_move_s"] += time.perf_counter() - t_oob0
+            t_rg0 = time.perf_counter() if use_profile else None
             if (
                 a_type == "RESOURCE_GATHERING"
                 and bool(self._resource_gather_upgrade_filter_enabled)
                 and not self._is_resource_gather_legal_for_upgrade(a, legal_actions, obs)
             ):
+                if use_profile:
+                    profile["filter_resource_upgrade_s"] += time.perf_counter() - t_rg0
                 continue
+            if use_profile:
+                profile["filter_resource_upgrade_s"] += time.perf_counter() - t_rg0
             allowed_indices.append(idx)
+        if use_profile:
+            profile["allowed_after_base_count"] = int(len(allowed_indices))
 
         # Hard guardrail: if <2 cities, prioritize village-capture lines.
+        t_city_gate0 = time.perf_counter() if use_profile else None
         if self._get_city_count(obs) < 2 and allowed_indices:
+            if use_profile:
+                profile["filter_city_count_tactical_s"] += time.perf_counter() - t_city_gate0
             forced_village_captures = []
+            t_capture0 = time.perf_counter() if use_profile else None
             for idx in allowed_indices:
                 a = legal_actions[idx]
                 if a.get("type") != "CAPTURE":
                     continue
                 if self._is_capture_of_village(a, obs):
                     forced_village_captures.append(idx)
+            if use_profile:
+                profile["filter_capture_priority_s"] += time.perf_counter() - t_capture0
             if forced_village_captures:
+                t_capture0 = time.perf_counter() if use_profile else None
                 frozen_units = set()
                 for idx in forced_village_captures:
                     u = self._parse_unit_id_from_action_repr(str(legal_actions[idx].get("repr", "")))
@@ -1545,21 +2513,42 @@ class TribesGymWrapper(gym.Env):
                 else:
                     end_turn_idx = next((i for i, a in enumerate(legal_actions) if a.get("type") == "END_TURN"), None)
                     allowed_indices = [end_turn_idx] if end_turn_idx is not None else []
+                if use_profile:
+                    profile["filter_capture_priority_s"] += time.perf_counter() - t_capture0
             else:
                 self._queued_village_capture_unit_ids = set()
 
+            t_scan0 = time.perf_counter() if use_profile else None
             visible_village_positions = self._get_visible_uncaptured_village_positions(obs)
+            if use_profile:
+                profile["filter_board_city_village_scans_s"] += time.perf_counter() - t_scan0
+            village_mask = None
+            if bool(optimize_visible_village_filter):
+                village_mask = self._build_village_lookup_mask(obs, visible_village_positions)
             forced_village_moves = []
             if not forced_village_captures:
+                t_move_visible0 = time.perf_counter() if use_profile else None
                 for idx in allowed_indices:
                     a = legal_actions[idx]
                     if a.get("type") != "MOVE":
                         continue
-                    if self._is_move_to_visible_uncaptured_village(a, obs):
-                        forced_village_moves.append(idx)
+                    if bool(optimize_visible_village_filter):
+                        if self._is_move_to_visible_uncaptured_village(
+                            a,
+                            obs,
+                            village_positions=visible_village_positions,
+                            village_mask=village_mask,
+                        ):
+                            forced_village_moves.append(idx)
+                    else:
+                        if self._is_move_to_visible_uncaptured_village(a, obs):
+                            forced_village_moves.append(idx)
+                if use_profile:
+                    profile["filter_move_visible_village_s"] += time.perf_counter() - t_move_visible0
                 if forced_village_moves:
                     allowed_indices = forced_village_moves
                 elif visible_village_positions:
+                    t_closest0 = time.perf_counter() if use_profile else None
                     closest_unit_id, _closest_pos, _closest_dist = self._closest_owned_unit_to_targets(
                         obs,
                         visible_village_positions,
@@ -1579,11 +2568,21 @@ class TribesGymWrapper(gym.Env):
                                 forced_progress_moves.append(idx)
                     if forced_progress_moves:
                         allowed_indices = forced_progress_moves
+                    if use_profile:
+                        profile["filter_closest_reduce_distance_s"] += time.perf_counter() - t_closest0
         else:
+            if use_profile:
+                profile["filter_city_count_tactical_s"] += time.perf_counter() - t_city_gate0
             self._queued_village_capture_unit_ids = set()
+        if use_profile:
+            profile["allowed_after_tactical_count"] = int(len(allowed_indices))
 
         # Early-turn constraint: only block unit 2 immediate backtracking on T1/T2.
+        t_backtrack0 = time.perf_counter() if use_profile else None
         allowed_indices = self._apply_t1_t2_unit2_backtrack_mask(allowed_indices, legal_actions, obs)
+        if use_profile:
+            profile["filter_early_backtrack_s"] += time.perf_counter() - t_backtrack0
+            profile["allowed_final_count"] = int(len(allowed_indices))
 
         return allowed_indices
 
@@ -1630,7 +2629,10 @@ class TribesGymWrapper(gym.Env):
         dst_x = self._action_int(action, "dst_x", None)
         dst_y = self._action_int(action, "dst_y", None)
         if (dst_x is None or dst_y is None) or (unit_id is None):
+            t_repr_parse0 = time.perf_counter() if self._profile_feature_build_active else None
             parsed_move = self._parse_move_unit_and_dest_from_action_repr(str(action.get("repr", "")))
+            if self._profile_feature_build_active:
+                self._profile_feature_build_repr_parse_s += time.perf_counter() - t_repr_parse0
             if parsed_move is not None:
                 if unit_id is None:
                     unit_id = int(parsed_move[0])
@@ -1665,7 +2667,28 @@ class TribesGymWrapper(gym.Env):
             return False
         return int(dist_after) < int(dist_before)
 
-    def _build_action_mask_and_mapping(self, legal_actions=None, obs=None):
+    def _build_action_mask_and_mapping(self, legal_actions=None, obs=None, profile=None):
+        use_profile = bool(self._profile_sps_enabled and isinstance(profile, dict))
+        if use_profile:
+            profile["filter_allowed_indices_s"] = 0.0
+            profile["filter_allowed_type_s"] = 0.0
+            profile["filter_oob_move_s"] = 0.0
+            profile["filter_resource_upgrade_s"] = 0.0
+            profile["filter_city_count_tactical_s"] = 0.0
+            profile["filter_capture_priority_s"] = 0.0
+            profile["filter_move_visible_village_s"] = 0.0
+            profile["filter_closest_reduce_distance_s"] = 0.0
+            profile["filter_early_backtrack_s"] = 0.0
+            profile["filter_board_city_village_scans_s"] = 0.0
+            profile["raw_actions_count"] = 0
+            profile["allowed_after_base_count"] = 0
+            profile["allowed_after_tactical_count"] = 0
+            profile["allowed_final_count"] = 0
+            profile["canonicalize_global_id_s"] = 0.0
+            profile["collision_check_s"] = 0.0
+            profile["legal_id_list_construct_s"] = 0.0
+            profile["mask_build_s"] = 0.0
+            profile["diag_build_s"] = 0.0
         if legal_actions is None:
             legal_actions = self.tribes_env.list_actions()
         if obs is None:
@@ -1675,7 +2698,22 @@ class TribesGymWrapper(gym.Env):
         if self._catalog is None:
             raise RuntimeError("Global action catalog is not initialized.")
 
-        allowed_indices = self._filter_allowed_raw_indices(legal_actions, obs)
+        t_filter0 = time.perf_counter() if use_profile else None
+        allowed_indices = self._filter_allowed_raw_indices(legal_actions, obs, profile=profile if use_profile else None)
+        if use_profile:
+            profile["filter_allowed_indices_s"] += time.perf_counter() - t_filter0
+        run_filter_equiv = bool(
+            self._filter_equiv_check_enabled
+            and int(self._total_action_decisions) % int(self._filter_equiv_check_every_n) == 0
+        )
+        legacy_allowed_indices = None
+        if run_filter_equiv:
+            legacy_allowed_indices = self._filter_allowed_raw_indices(
+                legal_actions,
+                obs,
+                profile=None,
+                optimize_visible_village_filter=False,
+            )
         legal_id_to_raw_index = {}
         uncanonicalized = []
         collisions = []
@@ -1685,20 +2723,35 @@ class TribesGymWrapper(gym.Env):
             action = legal_actions[raw_idx]
             a_type = str(action.get("type", "UNKNOWN")).upper()
             per_type_counts[a_type] = per_type_counts.get(a_type, 0) + 1
+            t_can0 = time.perf_counter() if use_profile else None
             gid, reason = self._canonicalize_action_to_global_id(action, obs)
+            if use_profile:
+                profile["canonicalize_global_id_s"] += time.perf_counter() - t_can0
             if gid is None:
                 uncanonicalized.append({"raw_idx": int(raw_idx), "type": a_type, "reason": str(reason), "repr": str(action.get("repr", ""))})
                 continue
+            t_collision0 = time.perf_counter() if use_profile else None
             if gid in legal_id_to_raw_index and legal_id_to_raw_index[gid] != raw_idx:
                 collisions.append({"global_id": int(gid), "raw_a": int(legal_id_to_raw_index[gid]), "raw_b": int(raw_idx), "type": a_type})
+                if use_profile:
+                    profile["collision_check_s"] += time.perf_counter() - t_collision0
             else:
+                if use_profile:
+                    profile["collision_check_s"] += time.perf_counter() - t_collision0
+                t_lid0 = time.perf_counter() if use_profile else None
                 legal_id_to_raw_index[int(gid)] = int(raw_idx)
+                if use_profile:
+                    profile["legal_id_list_construct_s"] += time.perf_counter() - t_lid0
 
+        t_mask0 = time.perf_counter() if use_profile else None
         mask = np.zeros(self.action_space.n, dtype=np.int8)
         for gid in legal_id_to_raw_index.keys():
             if 0 <= int(gid) < self.action_space.n:
                 mask[int(gid)] = 1
+        if use_profile:
+            profile["mask_build_s"] += time.perf_counter() - t_mask0
 
+        t_diag0 = time.perf_counter() if use_profile else None
         diag = {
             "legal_actions_total": int(len(allowed_indices)),
             "canonicalized_legal_actions": int(len(legal_id_to_raw_index)),
@@ -1711,6 +2764,74 @@ class TribesGymWrapper(gym.Env):
             "legal_action_count_by_type": per_type_counts,
             "global_id_collisions": collisions[:20],
         }
+        if use_profile:
+            profile["diag_build_s"] += time.perf_counter() - t_diag0
+
+        if run_filter_equiv and legacy_allowed_indices is not None:
+            if list(allowed_indices) != list(legacy_allowed_indices):
+                raise RuntimeError(
+                    "FILTER_EQUIV: allowed_indices mismatch "
+                    f"new_n={len(allowed_indices)} legacy_n={len(legacy_allowed_indices)}"
+                )
+            new_types = [str(legal_actions[i].get("type", "UNKNOWN")).upper() for i in allowed_indices]
+            legacy_types = [str(legal_actions[i].get("type", "UNKNOWN")).upper() for i in legacy_allowed_indices]
+            if new_types != legacy_types:
+                raise RuntimeError("FILTER_EQUIV: allowed action type order mismatch")
+            new_ordered_gids = []
+            for raw_idx in allowed_indices:
+                gid, _reason = self._canonicalize_action_to_global_id(legal_actions[raw_idx], obs)
+                if gid is not None:
+                    new_ordered_gids.append(int(gid))
+
+            legacy_map = {}
+            legacy_uncanonicalized = []
+            legacy_collisions = []
+            legacy_per_type_counts = {}
+            legacy_ordered_gids = []
+            for raw_idx in legacy_allowed_indices:
+                action = legal_actions[raw_idx]
+                a_type = str(action.get("type", "UNKNOWN")).upper()
+                legacy_per_type_counts[a_type] = legacy_per_type_counts.get(a_type, 0) + 1
+                gid, reason = self._canonicalize_action_to_global_id(action, obs)
+                if gid is None:
+                    legacy_uncanonicalized.append(
+                        {
+                            "raw_idx": int(raw_idx),
+                            "type": a_type,
+                            "reason": str(reason),
+                            "repr": str(action.get("repr", "")),
+                        }
+                    )
+                    continue
+                legacy_ordered_gids.append(int(gid))
+                if gid in legacy_map and legacy_map[gid] != raw_idx:
+                    legacy_collisions.append(
+                        {
+                            "global_id": int(gid),
+                            "raw_a": int(legacy_map[gid]),
+                            "raw_b": int(raw_idx),
+                            "type": a_type,
+                        }
+                    )
+                else:
+                    legacy_map[int(gid)] = int(raw_idx)
+            legacy_mask = np.zeros(self.action_space.n, dtype=np.int8)
+            for gid in legacy_map.keys():
+                if 0 <= int(gid) < self.action_space.n:
+                    legacy_mask[int(gid)] = 1
+
+            if dict(legacy_map) != dict(legal_id_to_raw_index):
+                raise RuntimeError("FILTER_EQUIV: canonical legal_id_to_raw_index mismatch")
+            if new_ordered_gids != legacy_ordered_gids:
+                raise RuntimeError("FILTER_EQUIV: ordered canonical IDs mismatch")
+            if not np.array_equal(np.asarray(mask), np.asarray(legacy_mask)):
+                raise RuntimeError("FILTER_EQUIV: mask mismatch")
+            if dict(per_type_counts) != dict(legacy_per_type_counts):
+                raise RuntimeError("FILTER_EQUIV: legal_action_count_by_type mismatch")
+            if len(uncanonicalized) != len(legacy_uncanonicalized):
+                raise RuntimeError("FILTER_EQUIV: uncanonicalized count mismatch")
+            if len(collisions) != len(legacy_collisions):
+                raise RuntimeError("FILTER_EQUIV: collision count mismatch")
 
         # Fail-fast: never silently continue on canonicalization or collision gaps.
         if len(collisions) > 0:
@@ -2775,7 +3896,20 @@ class TribesGymWrapper(gym.Env):
                 return True
         return False
 
-    def _is_move_to_visible_uncaptured_village(self, action, obs):
+    def _build_village_lookup_mask(self, obs, village_positions):
+        dims = self._board_dimensions_from_obs(obs)
+        if dims is None:
+            return None
+        width, height = int(dims[0]), int(dims[1])
+        if width <= 0 or height <= 0:
+            return None
+        mask = np.zeros((height, width), dtype=np.bool_)
+        for vx, vy in village_positions:
+            if 0 <= int(vx) < width and 0 <= int(vy) < height:
+                mask[int(vy), int(vx)] = True
+        return mask
+
+    def _is_move_to_visible_uncaptured_village(self, action, obs, village_positions=None, village_mask=None):
         parsed = self._parse_move_unit_and_dest_from_action_repr(str(action.get("repr", "")))
         if parsed is None:
             return False
@@ -2788,8 +3922,17 @@ class TribesGymWrapper(gym.Env):
         if int(unit.get("tribeId", -1)) != 0:
             return False
 
-        village_positions = self._get_visible_uncaptured_village_positions(obs)
+        if village_positions is None:
+            village_positions = self._get_visible_uncaptured_village_positions(obs)
         if not village_positions:
+            return False
+
+        if isinstance(village_mask, np.ndarray) and village_mask.ndim == 2:
+            h, w = village_mask.shape
+            dx = int(dest_x)
+            dy = int(dest_y)
+            if 0 <= dx < int(w) and 0 <= dy < int(h):
+                return bool(village_mask[int(dy), int(dx)])
             return False
 
         return (int(dest_x), int(dest_y)) in village_positions
@@ -2893,11 +4036,14 @@ class TribesGymWrapper(gym.Env):
             out.add(int(uid))
         return out
 
-    def _owned_units_on_visible_uncaptured_village_without_capture(self, obs, legal_actions):
-        village_positions = self._get_visible_uncaptured_village_positions(obs)
+    def _owned_units_on_visible_uncaptured_village_without_capture_from_sets(
+        self,
+        obs,
+        village_positions,
+        capture_unit_ids,
+    ):
         if not village_positions:
             return set()
-        capture_unit_ids = self._legal_capture_unit_ids(legal_actions)
         out = set()
         units = obs.get("unit", {})
         if not isinstance(units, dict):
@@ -2918,6 +4064,176 @@ class TribesGymWrapper(gym.Env):
             if (ux, uy) in village_positions and int(uid) not in capture_unit_ids:
                 out.add(int(uid))
         return out
+
+    def _owned_units_on_visible_uncaptured_village_without_capture(self, obs, legal_actions):
+        village_positions = self._get_visible_uncaptured_village_positions(obs)
+        capture_unit_ids = self._legal_capture_unit_ids(legal_actions)
+        return self._owned_units_on_visible_uncaptured_village_without_capture_from_sets(
+            obs,
+            village_positions,
+            capture_unit_ids,
+        )
+
+    def _build_step_legal_action_summary(self, legal_actions, obs, visible_villages_before=None):
+        if not isinstance(legal_actions, list):
+            legal_actions = []
+        if not isinstance(obs, dict):
+            obs = {}
+        if visible_villages_before is None:
+            visible_villages_before = self._get_visible_uncaptured_village_positions(obs)
+        visible_villages_before = set(visible_villages_before or set())
+
+        per_type_counts = {}
+        capture_unit_ids = set()
+        completion_gather_raw_indices = set()
+        move_to_visible_village_raw_indices = set()
+        move_reveals_fog_raw_indices = set()
+        move_reduces_village_distance_raw_indices = set()
+        useful_move_raw_indices = set()
+        unit_ids_with_adjacent_fog_move = set()
+
+        units = obs.get("unit", {})
+        if not isinstance(units, dict):
+            units = {}
+
+        for raw_idx, action in enumerate(legal_actions):
+            a_type = str(action.get("type", "UNKNOWN")).upper()
+            per_type_counts[a_type] = int(per_type_counts.get(a_type, 0) + 1)
+
+            if a_type == "CAPTURE":
+                uid = self._action_int(action, "unit_id", None)
+                if uid is None:
+                    uid = self._parse_unit_id_from_action_repr(str(action.get("repr", "")))
+                if uid is not None:
+                    capture_unit_ids.add(int(uid))
+                continue
+
+            if a_type == "RESOURCE_GATHERING":
+                if self._resource_gather_action_completes_city_upgrade(action, obs):
+                    completion_gather_raw_indices.add(int(raw_idx))
+                continue
+
+            if a_type != "MOVE":
+                continue
+
+            move_uid, src_x, src_y, dst_x, dst_y = self._extract_move_components(action, obs)
+            if move_uid is None or dst_x is None or dst_y is None:
+                continue
+            uid_key = str(int(move_uid))
+            unit = units.get(uid_key, None)
+            owns_unit = isinstance(unit, dict) and int(unit.get("tribeId", -1)) == 0
+
+            move_to_visible_village = bool(
+                owns_unit and (int(dst_x), int(dst_y)) in visible_villages_before
+            )
+            if move_to_visible_village:
+                move_to_visible_village_raw_indices.add(int(raw_idx))
+
+            move_reveals_fog = self._move_action_reveals_any_fog(action, obs)
+            if move_reveals_fog:
+                move_reveals_fog_raw_indices.add(int(raw_idx))
+            if self._tile_has_adjacent_fog(obs, int(dst_x), int(dst_y)):
+                unit_ids_with_adjacent_fog_move.add(int(move_uid))
+
+            move_reduces_village_distance = False
+            if visible_villages_before:
+                if src_x is None or src_y is None:
+                    pos = self._unit_position_by_id(obs, move_uid)
+                    if pos is not None:
+                        src_x, src_y = int(pos[0]), int(pos[1])
+                dist_before = self._min_manhattan_distance(
+                    (int(src_x), int(src_y)),
+                    visible_villages_before,
+                ) if src_x is not None and src_y is not None else None
+                dist_after = self._min_manhattan_distance((int(dst_x), int(dst_y)), visible_villages_before)
+                if dist_before is not None and dist_after is not None:
+                    move_reduces_village_distance = int(dist_after) < int(dist_before)
+            if move_reduces_village_distance:
+                move_reduces_village_distance_raw_indices.add(int(raw_idx))
+
+            if move_to_visible_village or move_reveals_fog or move_reduces_village_distance:
+                useful_move_raw_indices.add(int(raw_idx))
+
+        return {
+            "per_type_counts": per_type_counts,
+            "capture_unit_ids": capture_unit_ids,
+            "legal_capture_exists": bool("CAPTURE" in per_type_counts),
+            "legal_level_up_exists": bool("LEVEL_UP" in per_type_counts),
+            "completion_gather_raw_indices": completion_gather_raw_indices,
+            "completion_gather_available": bool(len(completion_gather_raw_indices) > 0),
+            "move_to_visible_village_raw_indices": move_to_visible_village_raw_indices,
+            "move_reveals_fog_raw_indices": move_reveals_fog_raw_indices,
+            "move_reduces_village_distance_raw_indices": move_reduces_village_distance_raw_indices,
+            "useful_move_raw_indices": useful_move_raw_indices,
+            "legal_move_onto_visible_village_exists": bool(len(move_to_visible_village_raw_indices) > 0),
+            "legal_useful_move_exists": bool(len(useful_move_raw_indices) > 0),
+            "unit_ids_with_adjacent_fog_move": unit_ids_with_adjacent_fog_move,
+            "visible_villages_before": visible_villages_before,
+        }
+
+    def _assert_legal_summary_equivalence(self, legal_actions, obs, visible_villages_before, summary):
+        legacy_capture_exists = any(str(a.get("type", "")).upper() == "CAPTURE" for a in legal_actions)
+        legacy_level_up_exists = any(str(a.get("type", "")).upper() == "LEVEL_UP" for a in legal_actions)
+        legacy_completion_indices = set(
+            int(i)
+            for i, a in enumerate(legal_actions)
+            if str(a.get("type", "")).upper() == "RESOURCE_GATHERING"
+            and self._resource_gather_action_completes_city_upgrade(a, obs)
+        )
+        legacy_move_to_visible = set()
+        legacy_useful = set()
+        legacy_adjacent_fog_unit_ids = set()
+        for i, a in enumerate(legal_actions):
+            if str(a.get("type", "")).upper() != "MOVE":
+                continue
+            move_to_visible = self._is_move_to_visible_uncaptured_village(a, obs)
+            if move_to_visible:
+                legacy_move_to_visible.add(int(i))
+            move_reveals_fog = self._move_action_reveals_any_fog(a, obs)
+            move_uid, _sx, _sy, dst_x, dst_y = self._extract_move_components(a, obs)
+            if move_uid is not None and dst_x is not None and dst_y is not None:
+                if self._tile_has_adjacent_fog(obs, int(dst_x), int(dst_y)):
+                    legacy_adjacent_fog_unit_ids.add(int(move_uid))
+            move_reduces = False
+            if visible_villages_before:
+                if move_uid is not None:
+                    move_reduces = self._is_move_reducing_distance_to_targets(
+                        a,
+                        obs,
+                        int(move_uid),
+                        visible_villages_before,
+                    )
+            if move_to_visible or move_reveals_fog or move_reduces:
+                legacy_useful.add(int(i))
+
+        legacy_capture_unit_ids = self._legal_capture_unit_ids(legal_actions)
+        if bool(summary.get("legal_capture_exists", False)) != bool(legacy_capture_exists):
+            raise RuntimeError("LEGAL_SUMMARY_EQUIV: legal_capture_exists mismatch")
+        if bool(summary.get("legal_level_up_exists", False)) != bool(legacy_level_up_exists):
+            raise RuntimeError("LEGAL_SUMMARY_EQUIV: legal_level_up_exists mismatch")
+        if set(summary.get("completion_gather_raw_indices", set())) != legacy_completion_indices:
+            raise RuntimeError("LEGAL_SUMMARY_EQUIV: completion_gather_raw_indices mismatch")
+        if bool(summary.get("completion_gather_available", False)) != bool(len(legacy_completion_indices) > 0):
+            raise RuntimeError("LEGAL_SUMMARY_EQUIV: completion_gather_available mismatch")
+        if set(summary.get("move_to_visible_village_raw_indices", set())) != legacy_move_to_visible:
+            raise RuntimeError("LEGAL_SUMMARY_EQUIV: move_to_visible_village_raw_indices mismatch")
+        if bool(summary.get("legal_move_onto_visible_village_exists", False)) != bool(len(legacy_move_to_visible) > 0):
+            raise RuntimeError("LEGAL_SUMMARY_EQUIV: legal_move_onto_visible_village_exists mismatch")
+        if set(summary.get("useful_move_raw_indices", set())) != legacy_useful:
+            new_useful = set(summary.get("useful_move_raw_indices", set()))
+            only_new = sorted(list(new_useful - legacy_useful))[:10]
+            only_old = sorted(list(legacy_useful - new_useful))[:10]
+            raise RuntimeError(
+                "LEGAL_SUMMARY_EQUIV: useful_move_raw_indices mismatch "
+                f"only_new={only_new} only_old={only_old} "
+                f"new_n={len(new_useful)} old_n={len(legacy_useful)}"
+            )
+        if bool(summary.get("legal_useful_move_exists", False)) != bool(len(legacy_useful) > 0):
+            raise RuntimeError("LEGAL_SUMMARY_EQUIV: legal_useful_move_exists mismatch")
+        if set(summary.get("capture_unit_ids", set())) != legacy_capture_unit_ids:
+            raise RuntimeError("LEGAL_SUMMARY_EQUIV: capture_unit_ids mismatch")
+        if set(summary.get("unit_ids_with_adjacent_fog_move", set())) != legacy_adjacent_fog_unit_ids:
+            raise RuntimeError("LEGAL_SUMMARY_EQUIV: unit_ids_with_adjacent_fog_move mismatch")
 
     def _min_manhattan_distance(self, origin, targets):
         if origin is None or not targets:

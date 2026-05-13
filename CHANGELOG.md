@@ -2,6 +2,115 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Data-022] - 2026-05-13
+
+### Scope
+- Improve end-to-end Phase-1 SPS instrumentation across Java bridge, Python wrapper, and PPO trainer timing/reporting.
+- Add fast-path legal-action batching and optional equivalence checks to validate behavior parity with legacy per-action JSON flow.
+- Add solo/no-opponent execution mode controls to stabilize single-tribe throughput experiments.
+- Add generated profiling outputs, validator snapshots, and a new 12x12 Bardur phase-1 level pool for data-driven iteration.
+
+### Implemented
+- Updated Java bridge wrapper behavior and profiling toggles in `pol_env/Tribes/py/gym_env.py`:
+  - added runtime env switches:
+    - `POLYVISION_SOLO_NO_OPPONENT_MODE`,
+    - `POLYVISION_PROFILE_SPS`,
+    - `POLYVISION_BATCH_LEGAL_ACTION_FETCH`,
+    - `POLYVISION_BATCH_LEGAL_FETCH_EQUIV_CHECK`,
+    - `POLYVISION_BATCH_LEGAL_FETCH_EQUIV_CHECK_EVERY_N_STEPS`.
+  - added per-step/per-legal-call profiling state:
+    - `_list_actions_call_count`,
+    - `_last_step_profile`,
+    - `_last_list_actions_profile`.
+  - instrumented `step(...)` with detailed timing buckets for Java apply, parsing, legal regeneration, reward assembly, and info construction.
+  - split legal action fetch paths into:
+    - `_list_actions_legacy(...)` (existing per-action JSON path),
+    - `_list_actions_batch(...)` (new `listActionsJsonBatch()` array payload path).
+  - added optional batch-vs-legacy equivalence assertion path to catch raw action mismatches during rollout.
+- Expanded wrapper-level instrumentation and legality diagnostics in `pol_env/Tribes/py/register_env.py`:
+  - expanded `info_mode` handling to include `"train"` in addition to `"fast"` and `"debug"`.
+  - added profiling controls:
+    - `POLYVISION_PROFILE_SPS`,
+    - `POLYVISION_PROFILE_EVERY_N_STEPS`.
+  - added feature/legal-equivalence validation controls:
+    - `POLYVISION_FEATURE_EQUIV_CHECK`,
+    - `POLYVISION_LEGAL_SUMMARY_EQUIV_CHECK`,
+    - `POLYVISION_LEGAL_SUMMARY_EQUIV_CHECK_EVERY_N_STEPS`,
+    - `POLYVISION_FILTER_EQUIV_CHECK`,
+    - `POLYVISION_FILTER_EQUIV_CHECK_EVERY_N_STEPS`,
+    - `POLYVISION_BATCH_LEGAL_FETCH_EQUIV_CHECK`,
+    - `POLYVISION_BATCH_LEGAL_FETCH_EQUIV_CHECK_EVERY_N_STEPS`.
+  - added and wired legal-summary/equivalence helpers:
+    - `_build_step_legal_action_summary(...)`,
+    - `_assert_legal_summary_equivalence(...)`.
+  - added village-lookup optimization helpers used by tactical/legal scans:
+    - `_build_village_lookup_mask(...)`,
+    - `_owned_units_on_visible_uncaptured_village_without_capture_from_sets(...)`,
+    - updated `_is_move_to_visible_uncaptured_village(...)` call paths to support precomputed lookup data.
+  - added high-granularity `profile_env_reset_*` and `profile_env_step_*` metrics into `info` payload for trainer-side aggregation, including:
+    - pre/post fast-forward timing,
+    - Java apply sub-stage timing,
+    - post-legal filtering/canonicalization/mask-build timing,
+    - reward subcomponent timing,
+    - info/diagnostic payload build timing,
+    - legal-action count and raw-character volume counters.
+- Updated Java game-state invalidation support in `pol_env/Tribes/src/core/game/GameState.java`:
+  - added `invalidateComputedActions()` to force recomputation of cached legal-action sets after manual turn-state rewrites.
+- Updated Java Python bridge API and solo-turn behavior in `pol_env/Tribes/src/core/game/PythonEnv.java`:
+  - added solo mode state and accessors:
+    - `soloNoOpponentMode`,
+    - `setSoloNoOpponentMode(boolean enabled)`,
+    - `getSoloNoOpponentMode()`.
+  - refactored action serialization with `buildActionJsonObject(...)` to centralize per-action JSON formatting.
+  - added `listActionsJsonBatch()` returning one JSON array payload for all legal actions.
+  - updated `stepByIndex(...)` end-turn behavior for solo/single-tribe runs:
+    - when solo mode is enabled and selected action is `END_TURN`, prevents unintended game-over termination,
+    - invalidates cached actions and reinitializes turn/action state to continue training progression.
+- Added trainer-side SPS profiling pipeline in `py_rl/cleanrl/cleanrl/ppo.py`:
+  - added env-flag helpers:
+    - `_env_flag_bool(...)`,
+    - `_env_flag_int(...)`.
+  - added profiling/stat primitives:
+    - `_TimerStats`,
+    - `_ScalarStats`,
+    - `SPSProfiler` with timer/scalar key maps for environment/trainer stages.
+  - added run-time profiler controls:
+    - `POLYVISION_PROFILE_SPS`,
+    - `POLYVISION_PROFILE_EVERY_N_STEPS`,
+    - `POLYVISION_PROFILE_WRITE_JSON`,
+    - `POLYVISION_PROFILE_OUTPUT_DIR` (default `outputs/sps_profiles`).
+  - integrated profiler measurements across:
+    - env reset/step,
+    - tensor conversion and rollout extraction,
+    - policy/value forward timing,
+    - PPO update timing,
+    - logging/checkpoint/final-save timing.
+  - added scalar handling updates:
+    - blocklisted `reward/terminal_spt_bonus` from default scalar passthrough in `log_scalar`,
+    - added explicit `economy/episode_end_village_capture_pct_t10` logging path from episode-end infos.
+  - added end-of-run profile summary and JSON emission (file names: `sps_profile_<run_name>.json`).
+- Added runbook `EFFICIENT_TRAINING_RUN.md`:
+  - documents three operating modes (full training, debug, SPS profiling),
+  - provides concrete PowerShell command templates with environment flags,
+  - records SPS bottleneck hierarchy and a checklist for high-throughput runs,
+  - includes guidance on offline W&B sync workflow.
+- Added validator cache artifacts under `.cache/action_validator`:
+  - `20d1149fe7357ccaf8f0f877999fc2b8ea529d848237c5cfef22bde05e885041.json`:
+    - `checked_states=100`, `passed=true`.
+  - `2d9aead549c836fe65ff614ff08147cce3b1a5983fe95dccb3b75cd81b35dfc0.json`:
+    - `checked_states=10000`, `passed=true`.
+  - `da6b5e6cb44fbccf7df9c27d85a8afeddc974d00686cf2da7ede7b6fcf74d40a.json`:
+    - `checked_states=100`, `passed=true`.
+  - `e43fbbdee14a6623e837c98e1d44188b08d3cfe94e2b4b190a13e131362a51b2.json`:
+    - `checked_states=10000`, `passed=true`.
+  - each cache snapshot stores action-interface fingerprint payloads/hashes for replay-safe validation reuse against current wrapper/bridge states at capture time.
+- Added Phase-1 level pool data in `pol_env/Tribes/levels/phase1_pool_bardur_solo`:
+  - new files `phase1_12x12_pool_000.csv` through `phase1_12x12_pool_255.csv` (`256` total CSV maps),
+  - each file provides a 12x12 tile-grid map layout encoded in the existing terrain/resource token format used by the Java/Python environment loaders.
+- Updated benchmark registry in `model_run_benchmark_log.md`:
+  - added `Tribes-v0__ppo__1__1778673883 -> Phase1-Data-022 (1M)`.
+- Updated `CHANGELOG.md` with this detailed `[Phase1-Data-022]` entry to keep source-control documentation synchronized with the full pending change set.
+
 ## [Phase1-Data-021] - 2026-05-12
 
 ### Scope

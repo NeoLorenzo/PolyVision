@@ -135,6 +135,290 @@ class Args:
     num_iterations: int = 0
     """the number of iterations (computed in runtime)"""
 
+def _env_flag_bool(key: str, default: bool = False) -> bool:
+    raw = os.environ.get(key, None)
+    if raw is None:
+        return bool(default)
+    return str(raw).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_flag_int(key: str, default: int) -> int:
+    raw = os.environ.get(key, None)
+    if raw is None:
+        return int(default)
+    try:
+        return int(str(raw).strip())
+    except Exception:
+        return int(default)
+
+
+class _TimerStats:
+    def __init__(self):
+        self.total_s = 0.0
+        self.count = 0
+        self.samples_s = []
+
+    def add(self, duration_s: float):
+        if duration_s is None:
+            return
+        d = float(duration_s)
+        if d < 0:
+            return
+        self.total_s += d
+        self.count += 1
+        self.samples_s.append(d)
+
+    def summary_ms(self):
+        if self.count <= 0:
+            return {
+                "count": 0,
+                "total_ms": 0.0,
+                "mean_ms": 0.0,
+                "median_ms": 0.0,
+                "p95_ms": 0.0,
+                "max_ms": 0.0,
+            }
+        arr = np.asarray(self.samples_s, dtype=np.float64) * 1000.0
+        return {
+            "count": int(self.count),
+            "total_ms": float(self.total_s * 1000.0),
+            "mean_ms": float(np.mean(arr)),
+            "median_ms": float(np.median(arr)),
+            "p95_ms": float(np.percentile(arr, 95)),
+            "max_ms": float(np.max(arr)),
+        }
+
+
+class _ScalarStats:
+    def __init__(self):
+        self.total = 0.0
+        self.count = 0
+        self.min_v = None
+        self.max_v = None
+        self.samples = []
+
+    def add(self, value):
+        if value is None:
+            return
+        try:
+            v = float(value)
+        except Exception:
+            return
+        self.total += v
+        self.count += 1
+        self.samples.append(v)
+        if self.min_v is None or v < self.min_v:
+            self.min_v = v
+        if self.max_v is None or v > self.max_v:
+            self.max_v = v
+
+    def summary(self):
+        if self.count <= 0:
+            return {
+                "count": 0,
+                "mean": 0.0,
+                "median": 0.0,
+                "p95": 0.0,
+                "min": 0.0,
+                "max": 0.0,
+            }
+        arr = np.asarray(self.samples, dtype=np.float64)
+        return {
+            "count": int(self.count),
+            "mean": float(np.mean(arr)),
+            "median": float(np.median(arr)),
+            "p95": float(np.percentile(arr, 95)),
+            "min": float(self.min_v),
+            "max": float(self.max_v),
+        }
+
+
+class SPSProfiler:
+    def __init__(self, enabled: bool, every_n_env_steps: int, write_json: bool, output_dir: str):
+        self.enabled = bool(enabled)
+        self.every_n_env_steps = max(1, int(every_n_env_steps))
+        self.write_json = bool(write_json)
+        self.output_dir = str(output_dir)
+        self.start_perf = time.perf_counter()
+        self.last_report_env_step = 0
+        self.timers = {}
+        self.scalars = {}
+        self.env_timer_key_map = {
+            "profile_env_step_total_s": "env/step_total",
+            "profile_env_step_pre_fast_forward_s": "env/pre_step_fast_forward",
+            "profile_env_step_pre_legal_generation_s": "env/pre_legal_action_generation",
+            "profile_env_step_action_decode_s": "env/action_decode_canonicalization",
+            "profile_env_step_java_apply_s": "env/java_action_apply",
+            "profile_env_step_post_fast_forward_s": "env/post_action_fast_forward",
+            "profile_env_step_reward_calc_s": "env/reward_calculation",
+            "profile_env_step_post_legal_generation_s": "env/post_legal_action_generation",
+            "profile_env_step_slot_mask_build_s": "env/legal_action_padding_mask_build",
+            "profile_env_step_feature_build_s": "env/legal_action_feature_build",
+            "profile_env_step_info_build_s": "env/info_dict_build",
+            "profile_env_step_diag_build_s": "env/step_diagnostics_build",
+            "profile_env_step_obs_flatten_s": "env/observation_flatten",
+            "profile_env_step_sanitize_info_s": "env/info_sanitize",
+            "profile_env_step_info_build_scalar_s": "env/info_build_scalar_telemetry",
+            "profile_env_step_info_build_diag_counter_s": "env/info_build_diag_counters",
+            "profile_env_step_info_build_legal_summary_s": "env/info_build_legal_summary",
+            "profile_env_step_info_build_large_payload_s": "env/info_build_large_payload",
+            "profile_env_step_info_build_action_repr_s": "env/info_build_action_repr",
+            "profile_env_step_info_build_terminal_episode_s": "env/info_build_terminal_episode",
+            "profile_env_step_info_build_metric_packaging_s": "env/info_build_metric_packaging",
+            "profile_env_step_feature_alloc_zero_fill_s": "env/feature_build_alloc_zero_fill",
+            "profile_env_step_feature_mask_construct_s": "env/feature_build_mask_construct",
+            "profile_env_step_feature_precompute_s": "env/feature_build_step_precompute",
+            "profile_env_step_feature_loop_iteration_s": "env/feature_build_loop_iteration",
+            "profile_env_step_feature_gid_decode_s": "env/feature_build_gid_decode",
+            "profile_env_step_feature_canonical_lookup_s": "env/feature_build_canonical_lookup",
+            "profile_env_step_feature_static_metadata_s": "env/feature_build_static_metadata",
+            "profile_env_step_feature_dynamic_state_s": "env/feature_build_dynamic_state",
+            "profile_env_step_feature_padding_write_s": "env/feature_build_padding_write",
+            "profile_env_step_feature_action_repr_s": "env/feature_build_action_repr",
+            "profile_env_step_feature_java_calls_s": "env/feature_build_java_calls",
+            "profile_env_step_reward_spt_delta_s": "env/reward_spt_delta",
+            "profile_env_step_reward_city_capture_delta_s": "env/reward_city_capture_delta",
+            "profile_env_step_reward_fog_calc_s": "env/reward_fog_calculation",
+            "profile_env_step_reward_village_reveal_s": "env/reward_village_reveal",
+            "profile_env_step_reward_move_village_shaping_s": "env/reward_move_village_shaping",
+            "profile_env_step_reward_tactical_diag_s": "env/reward_tactical_diagnostics",
+            "profile_env_step_reward_resource_upgrade_checks_s": "env/reward_resource_upgrade_checks",
+            "profile_env_step_reward_legal_action_scans_s": "env/reward_legal_action_scans",
+            "profile_env_step_reward_board_scans_s": "env/reward_board_scans",
+            "profile_env_step_reward_java_calls_s": "env/reward_java_calls",
+            "profile_env_step_post_legal_java_fetch_s": "env/post_legal_java_fetch",
+            "profile_env_step_post_legal_java_compute_bridge_s": "env/post_legal_java_compute_bridge",
+            "profile_env_step_post_legal_java_list_materialize_s": "env/post_legal_java_list_materialize",
+            "profile_env_step_post_legal_java_json_parse_s": "env/post_legal_java_json_parse",
+            "profile_env_step_post_legal_action_filter_s": "env/post_legal_action_filter",
+            "profile_env_step_post_legal_filter_allowed_type_s": "env/post_legal_filter_allowed_type",
+            "profile_env_step_post_legal_filter_oob_move_s": "env/post_legal_filter_oob_move",
+            "profile_env_step_post_legal_filter_resource_upgrade_s": "env/post_legal_filter_resource_upgrade",
+            "profile_env_step_post_legal_filter_city_count_tactical_s": "env/post_legal_filter_city_count_tactical",
+            "profile_env_step_post_legal_filter_capture_priority_s": "env/post_legal_filter_capture_priority",
+            "profile_env_step_post_legal_filter_move_visible_village_s": "env/post_legal_filter_move_visible_village",
+            "profile_env_step_post_legal_filter_closest_reduce_distance_s": "env/post_legal_filter_closest_reduce_distance",
+            "profile_env_step_post_legal_filter_early_backtrack_s": "env/post_legal_filter_early_backtrack",
+            "profile_env_step_post_legal_filter_board_city_village_scans_s": "env/post_legal_filter_board_city_village_scans",
+            "profile_env_step_post_legal_canonicalize_s": "env/post_legal_canonicalize",
+            "profile_env_step_post_legal_collision_checks_s": "env/post_legal_collision_checks",
+            "profile_env_step_post_legal_id_list_build_s": "env/post_legal_id_list_build",
+            "profile_env_step_post_legal_mask_build_s": "env/post_legal_mask_build",
+            "profile_env_step_post_legal_diag_build_s": "env/post_legal_diag_build",
+            "profile_env_step_post_legal_padding_mask_s": "env/post_legal_padding_mask",
+            "profile_env_step_post_legal_feature_build_s": "env/post_legal_feature_build",
+            "profile_env_step_post_legal_info_attach_s": "env/post_legal_info_attach",
+            "profile_env_step_post_legal_terminal_path_s": "env/post_legal_terminal_path",
+            "profile_env_step_java_apply_action_serialize_s": "env/java_apply_action_serialize",
+            "profile_env_step_java_apply_call_s": "env/java_apply_call",
+            "profile_env_step_java_apply_response_parse_s": "env/java_apply_response_parse",
+            "profile_env_step_java_apply_obs_fetch_s": "env/java_apply_obs_fetch",
+            "profile_env_step_java_apply_done_fetch_s": "env/java_apply_done_fetch",
+            "profile_env_step_java_apply_scores_fetch_s": "env/java_apply_scores_fetch",
+            "profile_env_step_java_apply_tick_fetch_s": "env/java_apply_tick_fetch",
+            "profile_env_step_java_apply_active_fetch_s": "env/java_apply_active_fetch",
+            "profile_env_step_java_apply_spt_compute_s": "env/java_apply_spt_compute",
+            "profile_env_step_java_apply_active_check_pre_s": "env/java_apply_active_check_pre",
+            "profile_env_step_java_apply_active_check_post_s": "env/java_apply_active_check_post",
+            "profile_env_step_java_apply_solo_fast_forward_pre_s": "env/java_apply_solo_fast_forward_pre",
+            "profile_env_step_java_apply_solo_fast_forward_post_s": "env/java_apply_solo_fast_forward_post",
+            "profile_env_reset_total_s": "env/reset_total",
+            "profile_env_reset_java_reset_s": "env/reset_java_reset",
+            "profile_env_reset_opening_script_s": "env/reset_opening_script",
+            "profile_env_reset_legal_generation_s": "env/reset_legal_action_generation",
+            "profile_env_reset_slot_mask_build_s": "env/reset_legal_action_padding_mask_build",
+            "profile_env_reset_feature_build_s": "env/reset_legal_action_feature_build",
+            "profile_env_reset_info_build_s": "env/reset_info_dict_build",
+            "profile_env_reset_obs_flatten_s": "env/reset_observation_flatten",
+            "profile_env_reset_sanitize_info_s": "env/reset_info_sanitize",
+        }
+        self.env_scalar_key_map = {
+            "profile_env_step_post_legal_raw_actions_count": "env/post_legal_raw_actions_count",
+            "profile_env_step_post_legal_canonical_actions_count": "env/post_legal_canonical_actions_count",
+            "profile_env_step_post_legal_allowed_after_base_count": "env/post_legal_allowed_after_base_count",
+            "profile_env_step_post_legal_allowed_after_tactical_count": "env/post_legal_allowed_after_tactical_count",
+            "profile_env_step_post_legal_allowed_final_count": "env/post_legal_allowed_final_count",
+            "profile_env_step_post_legal_raw_action_total_chars": "env/post_legal_raw_action_total_chars",
+            "raw_valid_actions": "env/raw_valid_actions",
+            "valid_actions": "env/valid_actions",
+        }
+
+    def add(self, key: str, duration_s: float):
+        if not self.enabled:
+            return
+        if key not in self.timers:
+            self.timers[key] = _TimerStats()
+        self.timers[key].add(duration_s)
+
+    def add_scalar(self, key: str, value):
+        if not self.enabled:
+            return
+        if key not in self.scalars:
+            self.scalars[key] = _ScalarStats()
+        self.scalars[key].add(value)
+
+    def ingest_env_profile_infos(self, infos, num_envs: int):
+        if not self.enabled or infos is None:
+            return
+        for info_key, timer_key in self.env_timer_key_map.items():
+            vals = _extract_vector_field(infos, info_key, num_envs, default_value=None)
+            for v in vals:
+                if v is None:
+                    continue
+                try:
+                    self.add(timer_key, float(v))
+                except Exception:
+                    continue
+        for info_key, scalar_key in self.env_scalar_key_map.items():
+            vals = _extract_vector_field(infos, info_key, num_envs, default_value=None)
+            for v in vals:
+                if v is None:
+                    continue
+                self.add_scalar(scalar_key, v)
+
+    def maybe_report(self, global_step: int, num_envs: int):
+        if not self.enabled:
+            return
+        env_step = int(global_step // max(1, int(num_envs)))
+        if (env_step - self.last_report_env_step) < self.every_n_env_steps:
+            return
+        self.last_report_env_step = env_step
+        elapsed = max(1e-9, time.perf_counter() - self.start_perf)
+        sps = float(global_step) / elapsed
+        env_total = self.timers.get("env/step_total")
+        env_total_ms = env_total.summary_ms()["mean_ms"] if env_total is not None else 0.0
+        env_step_wall = self.timers.get("trainer/envs_step_wall")
+        env_step_wall_ms = env_step_wall.summary_ms()["mean_ms"] if env_step_wall is not None else 0.0
+        print(
+            "[SPS_PROFILE] "
+            f"global_step={global_step} env_steps={env_step} sps={sps:.2f} "
+            f"mean_env_step_wall_ms={env_step_wall_ms:.3f} "
+            f"mean_env_internal_step_ms_per_env={env_total_ms:.3f}"
+        )
+
+    def build_summary(self, global_step: int):
+        elapsed = max(1e-9, time.perf_counter() - self.start_perf)
+        out = {
+            "global_step": int(global_step),
+            "total_wall_s": float(elapsed),
+            "sps": float(global_step / elapsed),
+            "timers": {},
+            "scalars": {},
+        }
+        for k, v in sorted(self.timers.items()):
+            out["timers"][k] = v.summary_ms()
+        for k, v in sorted(self.scalars.items()):
+            out["scalars"][k] = v.summary()
+        wall_total = float(elapsed)
+        for k, stats in out["timers"].items():
+            stats["pct_of_wall"] = float((stats["total_ms"] / 1000.0) / wall_total * 100.0) if wall_total > 0 else 0.0
+        env_total_ms = out["timers"].get("env/step_total", {}).get("total_ms", 0.0)
+        if env_total_ms > 0:
+            for k, stats in out["timers"].items():
+                if k.startswith("env/"):
+                    stats["pct_of_env_step_total"] = float(stats["total_ms"] / env_total_ms * 100.0)
+        return out
+
 
 def make_env(env_id, idx, capture_video, run_name, startup_jitter_min_s=0.1, startup_jitter_max_s=2.0):
     def thunk():
@@ -432,51 +716,96 @@ def _extract_action_mask_from_info_dict(info, action_dim):
 def _extract_vector_legal_tensors(infos, num_envs, max_legal_actions, action_dim, device):
     if infos is None:
         raise RuntimeError("Missing infos payload; cannot extract legal tensors for legal_only actor.")
-    if "legal_global_ids_padded" not in infos or "legal_action_valid_mask" not in infos:
-        raise RuntimeError("Infos missing legal_global_ids_padded/legal_action_valid_mask for legal_only actor.")
 
-    raw_ids = np.asarray(infos["legal_global_ids_padded"])
-    raw_valid = np.asarray(infos["legal_action_valid_mask"])
-    ids_mask = infos.get("_legal_global_ids_padded", None)
-    valid_mask = infos.get("_legal_action_valid_mask", None)
+    if "legal_global_ids_padded" in infos and "legal_action_valid_mask" in infos:
+        raw_ids = np.asarray(infos["legal_global_ids_padded"])
+        raw_valid = np.asarray(infos["legal_action_valid_mask"])
+        ids_mask = infos.get("_legal_global_ids_padded", None)
+        valid_mask = infos.get("_legal_action_valid_mask", None)
 
+        ids_out = np.zeros((num_envs, max_legal_actions), dtype=np.int64)
+        valid_out = np.zeros((num_envs, max_legal_actions), dtype=np.bool_)
+
+        def _copy_row(i, src_ids, src_valid):
+            ids_row = np.asarray(src_ids, dtype=np.int64).reshape(-1)
+            valid_row = np.asarray(src_valid, dtype=bool).reshape(-1)
+            if ids_row.shape[0] != max_legal_actions or valid_row.shape[0] != max_legal_actions:
+                raise RuntimeError(
+                    f"legal tensor shape mismatch at env={i}: ids={ids_row.shape}, valid={valid_row.shape}, "
+                    f"expected=({max_legal_actions},)"
+                )
+            if valid_row.any():
+                valid_ids = ids_row[valid_row]
+                if np.unique(valid_ids).size != valid_ids.size:
+                    raise RuntimeError(f"Duplicate valid legal_global_ids_padded detected at env={i}.")
+                if np.any(valid_ids < 0) or np.any(valid_ids >= action_dim):
+                    raise RuntimeError(f"Out-of-range legal global ID detected at env={i}.")
+            ids_out[i] = ids_row
+            valid_out[i] = valid_row
+
+        if raw_ids.ndim == 2 and raw_valid.ndim == 2 and raw_ids.shape[0] == num_envs and raw_valid.shape[0] == num_envs:
+            for i in range(num_envs):
+                _copy_row(i, raw_ids[i], raw_valid[i])
+        else:
+            if ids_mask is None or valid_mask is None:
+                raise RuntimeError(
+                    f"Cannot align legal tensors in vector infos: ids_shape={raw_ids.shape}, valid_shape={raw_valid.shape}"
+                )
+            ids_mask_arr = np.asarray(ids_mask, dtype=bool).reshape(-1)
+            valid_mask_arr = np.asarray(valid_mask, dtype=bool).reshape(-1)
+            if ids_mask_arr.shape[0] != num_envs or valid_mask_arr.shape[0] != num_envs:
+                raise RuntimeError("Invalid _legal_* validity masks in vector infos.")
+            for i in range(num_envs):
+                if ids_mask_arr[i] and valid_mask_arr[i]:
+                    _copy_row(i, raw_ids[i], raw_valid[i])
+                else:
+                    raise RuntimeError(f"Missing legal tensor row for env={i} in legal_only actor mode.")
+
+        return (
+            torch.tensor(ids_out, dtype=torch.long, device=device),
+            torch.tensor(valid_out, dtype=torch.bool, device=device),
+        )
+
+    if "legal_global_ids" not in infos:
+        raise RuntimeError("Infos missing legal_global_ids_padded/legal_action_valid_mask and legal_global_ids.")
+
+    raw_ids = infos["legal_global_ids"]
+    ids_mask = infos.get("_legal_global_ids", None)
     ids_out = np.zeros((num_envs, max_legal_actions), dtype=np.int64)
     valid_out = np.zeros((num_envs, max_legal_actions), dtype=np.bool_)
 
-    def _copy_row(i, src_ids, src_valid):
-        ids_row = np.asarray(src_ids, dtype=np.int64).reshape(-1)
-        valid_row = np.asarray(src_valid, dtype=bool).reshape(-1)
-        if ids_row.shape[0] != max_legal_actions or valid_row.shape[0] != max_legal_actions:
+    def _copy_sparse_row(i, ids_like):
+        ids_arr = np.asarray(ids_like, dtype=np.int64).reshape(-1)
+        if ids_arr.shape[0] > max_legal_actions:
             raise RuntimeError(
-                f"legal tensor shape mismatch at env={i}: ids={ids_row.shape}, valid={valid_row.shape}, "
-                f"expected=({max_legal_actions},)"
+                f"legal_action_count={ids_arr.shape[0]} exceeded max_legal_actions={max_legal_actions} at env={i}"
             )
-        if valid_row.any():
-            valid_ids = ids_row[valid_row]
-            if np.unique(valid_ids).size != valid_ids.size:
-                raise RuntimeError(f"Duplicate valid legal_global_ids_padded detected at env={i}.")
-            if np.any(valid_ids < 0) or np.any(valid_ids >= action_dim):
+        if ids_arr.size > 0:
+            if np.unique(ids_arr).size != ids_arr.size:
+                raise RuntimeError(f"Duplicate legal_global_ids detected at env={i}.")
+            if np.any(ids_arr < 0) or np.any(ids_arr >= action_dim):
                 raise RuntimeError(f"Out-of-range legal global ID detected at env={i}.")
-        ids_out[i] = ids_row
-        valid_out[i] = valid_row
+            ids_out[i, : ids_arr.shape[0]] = ids_arr
+            valid_out[i, : ids_arr.shape[0]] = True
 
-    if raw_ids.ndim == 2 and raw_valid.ndim == 2 and raw_ids.shape[0] == num_envs and raw_valid.shape[0] == num_envs:
-        for i in range(num_envs):
-            _copy_row(i, raw_ids[i], raw_valid[i])
-    else:
-        if ids_mask is None or valid_mask is None:
-            raise RuntimeError(
-                f"Cannot align legal tensors in vector infos: ids_shape={raw_ids.shape}, valid_shape={raw_valid.shape}"
-            )
-        ids_mask_arr = np.asarray(ids_mask, dtype=bool).reshape(-1)
-        valid_mask_arr = np.asarray(valid_mask, dtype=bool).reshape(-1)
-        if ids_mask_arr.shape[0] != num_envs or valid_mask_arr.shape[0] != num_envs:
-            raise RuntimeError("Invalid _legal_* validity masks in vector infos.")
-        for i in range(num_envs):
-            if ids_mask_arr[i] and valid_mask_arr[i]:
-                _copy_row(i, raw_ids[i], raw_valid[i])
+    try:
+        if ids_mask is None:
+            if len(raw_ids) == num_envs:
+                for i in range(num_envs):
+                    _copy_sparse_row(i, raw_ids[i])
             else:
-                raise RuntimeError(f"Missing legal tensor row for env={i} in legal_only actor mode.")
+                for i in range(num_envs):
+                    _copy_sparse_row(i, raw_ids)
+        else:
+            mask_arr = np.asarray(ids_mask, dtype=bool).reshape(-1)
+            if len(mask_arr) != num_envs or len(raw_ids) != num_envs:
+                raise RuntimeError("Invalid _legal_global_ids validity mask in vector infos.")
+            for i in range(num_envs):
+                if mask_arr[i]:
+                    _copy_sparse_row(i, raw_ids[i])
+    except TypeError:
+        for i in range(num_envs):
+            _copy_sparse_row(i, raw_ids)
 
     return (
         torch.tensor(ids_out, dtype=torch.long, device=device),
@@ -487,39 +816,83 @@ def _extract_vector_legal_tensors(infos, num_envs, max_legal_actions, action_dim
 def _extract_vector_legal_feature_tensors(infos, num_envs, max_legal_actions, feature_dim, device):
     if infos is None:
         raise RuntimeError("Missing infos payload; cannot extract legal action feature tensors.")
-    if "legal_action_features_padded" not in infos:
-        raise RuntimeError("Infos missing legal_action_features_padded for legal_features actor.")
-
-    raw_features = np.asarray(infos["legal_action_features_padded"])
-    features_mask = infos.get("_legal_action_features_padded", None)
     feat_out = np.zeros((num_envs, max_legal_actions, feature_dim), dtype=np.float32)
 
-    def _copy_row(i, src_feat):
+    if "legal_action_features_padded" in infos:
+        raw_features = np.asarray(infos["legal_action_features_padded"])
+        features_mask = infos.get("_legal_action_features_padded", None)
+
+        def _copy_dense_row(i, src_feat):
+            feat_row = np.asarray(src_feat, dtype=np.float32)
+            if feat_row.ndim != 2:
+                raise RuntimeError(f"legal feature tensor must be rank-2 at env={i}; got shape={feat_row.shape}")
+            if feat_row.shape[0] != max_legal_actions or feat_row.shape[1] != feature_dim:
+                raise RuntimeError(
+                    f"legal feature shape mismatch at env={i}: got={feat_row.shape}, expected=({max_legal_actions}, {feature_dim})"
+                )
+            if not np.all(np.isfinite(feat_row)):
+                raise RuntimeError(f"Non-finite values in legal_action_features_padded at env={i}.")
+            feat_out[i] = feat_row
+
+        if raw_features.ndim == 3 and raw_features.shape[0] == num_envs:
+            for i in range(num_envs):
+                _copy_dense_row(i, raw_features[i])
+        else:
+            if features_mask is None:
+                raise RuntimeError(f"Cannot align legal feature tensors: features_shape={raw_features.shape}")
+            mask_arr = np.asarray(features_mask, dtype=bool).reshape(-1)
+            if mask_arr.shape[0] != num_envs:
+                raise RuntimeError("Invalid _legal_action_features_padded validity mask in vector infos.")
+            for i in range(num_envs):
+                if mask_arr[i]:
+                    _copy_dense_row(i, raw_features[i])
+                else:
+                    raise RuntimeError(f"Missing legal feature tensor row for env={i} in legal_features actor mode.")
+        return torch.tensor(feat_out, dtype=torch.float32, device=device)
+
+    if "legal_action_features" not in infos:
+        raise RuntimeError("Infos missing legal_action_features_padded and legal_action_features for legal_features actor.")
+
+    raw_features = infos["legal_action_features"]
+    features_mask = infos.get("_legal_action_features", None)
+
+    def _copy_sparse_row(i, src_feat):
         feat_row = np.asarray(src_feat, dtype=np.float32)
+        if feat_row.ndim == 1 and feat_row.size == 0:
+            return
         if feat_row.ndim != 2:
-            raise RuntimeError(f"legal feature tensor must be rank-2 at env={i}; got shape={feat_row.shape}")
-        if feat_row.shape[0] != max_legal_actions or feat_row.shape[1] != feature_dim:
+            raise RuntimeError(f"legal_action_features must be rank-2 at env={i}; got shape={feat_row.shape}")
+        if feat_row.shape[1] != feature_dim:
             raise RuntimeError(
-                f"legal feature shape mismatch at env={i}: got={feat_row.shape}, expected=({max_legal_actions}, {feature_dim})"
+                f"legal_action_features width mismatch at env={i}: got={feat_row.shape[1]}, expected={feature_dim}"
+            )
+        if feat_row.shape[0] > max_legal_actions:
+            raise RuntimeError(
+                f"legal_action_features rows exceeded max_legal_actions at env={i}: "
+                f"{feat_row.shape[0]} > {max_legal_actions}"
             )
         if not np.all(np.isfinite(feat_row)):
-            raise RuntimeError(f"Non-finite values in legal_action_features_padded at env={i}.")
-        feat_out[i] = feat_row
+            raise RuntimeError(f"Non-finite values in legal_action_features at env={i}.")
+        feat_out[i, : feat_row.shape[0], :] = feat_row
 
-    if raw_features.ndim == 3 and raw_features.shape[0] == num_envs:
-        for i in range(num_envs):
-            _copy_row(i, raw_features[i])
-    else:
+    try:
         if features_mask is None:
-            raise RuntimeError(f"Cannot align legal feature tensors: features_shape={raw_features.shape}")
-        mask_arr = np.asarray(features_mask, dtype=bool).reshape(-1)
-        if mask_arr.shape[0] != num_envs:
-            raise RuntimeError("Invalid _legal_action_features_padded validity mask in vector infos.")
-        for i in range(num_envs):
-            if mask_arr[i]:
-                _copy_row(i, raw_features[i])
+            if len(raw_features) == num_envs:
+                for i in range(num_envs):
+                    _copy_sparse_row(i, raw_features[i])
             else:
-                raise RuntimeError(f"Missing legal feature tensor row for env={i} in legal_features actor mode.")
+                for i in range(num_envs):
+                    _copy_sparse_row(i, raw_features)
+        else:
+            mask_arr = np.asarray(features_mask, dtype=bool).reshape(-1)
+            if len(mask_arr) != num_envs or len(raw_features) != num_envs:
+                raise RuntimeError("Invalid _legal_action_features validity mask in vector infos.")
+            for i in range(num_envs):
+                if mask_arr[i]:
+                    _copy_sparse_row(i, raw_features[i])
+    except TypeError:
+        for i in range(num_envs):
+            _copy_sparse_row(i, raw_features)
     return torch.tensor(feat_out, dtype=torch.float32, device=device)
 
 
@@ -832,6 +1205,18 @@ if __name__ == "__main__":
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     run_dir = os.path.join("runs", run_name)
     os.makedirs(run_dir, exist_ok=True)
+    profile_enabled = _env_flag_bool("POLYVISION_PROFILE_SPS", default=False)
+    profile_every_n_steps = max(1, _env_flag_int("POLYVISION_PROFILE_EVERY_N_STEPS", default=1000))
+    profile_write_json = _env_flag_bool("POLYVISION_PROFILE_WRITE_JSON", default=True)
+    profile_output_dir = os.environ.get("POLYVISION_PROFILE_OUTPUT_DIR", os.path.join("outputs", "sps_profiles"))
+    os.environ["POLYVISION_PROFILE_SPS"] = "1" if profile_enabled else "0"
+    os.environ["POLYVISION_PROFILE_EVERY_N_STEPS"] = str(profile_every_n_steps)
+    profiler = SPSProfiler(
+        enabled=profile_enabled,
+        every_n_env_steps=profile_every_n_steps,
+        write_json=profile_write_json,
+        output_dir=profile_output_dir,
+    )
     wandb_run = None
     if args.track:
         import wandb
@@ -851,10 +1236,16 @@ if __name__ == "__main__":
         wandb_run.define_metric("*", step_metric="global_step")
     writer = SummaryWriter(run_dir)
 
+    _LOG_SCALAR_BLOCKLIST = {"reward/terminal_spt_bonus"}
+
     def log_scalar(name, value, step):
+        if name in _LOG_SCALAR_BLOCKLIST:
+            return
+        t0_log = time.perf_counter()
         writer.add_scalar(name, value, step)
         if wandb_run is not None:
             wandb_run.log({"global_step": int(step), name: float(value)})
+        profiler.add("trainer/logging_scalar", time.perf_counter() - t0_log)
 
     writer.add_text(
         "hyperparameters",
@@ -941,26 +1332,35 @@ if __name__ == "__main__":
 
     # TRY NOT TO MODIFY: start the game
     global_step = 0
+    profiler.start_perf = time.perf_counter()
     start_time = time.time()
+    t0_env_reset = time.perf_counter()
     next_obs, reset_infos = envs.reset(seed=args.seed)
+    profiler.add("trainer/envs_reset_wall", time.perf_counter() - t0_env_reset)
+    t0_reset_tensor = time.perf_counter()
     next_obs = torch.Tensor(next_obs).to(device)
+    profiler.add("trainer/reset_tensor_conversion", time.perf_counter() - t0_reset_tensor)
+    profiler.ingest_env_profile_infos(reset_infos, args.num_envs)
     next_done = torch.zeros(args.num_envs).to(device)
     next_action_mask = None
     next_legal_global_ids = None
     next_legal_action_valid_mask = None
     next_legal_action_features = None
     if args.actor_mode == "dense_debug":
+        t0_extract_mask = time.perf_counter()
         next_action_mask = _extract_vector_action_mask(
             reset_infos,
             args.num_envs,
             envs.single_action_space.n,
             device,
         )
+        profiler.add("trainer/reset_info_extract", time.perf_counter() - t0_extract_mask)
         if next_action_mask.shape[-1] != envs.single_action_space.n:
             raise RuntimeError(
                 f"action_mask.shape[-1]={next_action_mask.shape[-1]} does not match action space n={envs.single_action_space.n}"
             )
     else:
+        t0_extract_legal = time.perf_counter()
         next_legal_global_ids, next_legal_action_valid_mask = _extract_vector_legal_tensors(
             reset_infos,
             args.num_envs,
@@ -968,7 +1368,9 @@ if __name__ == "__main__":
             envs.single_action_space.n,
             device,
         )
+        profiler.add("trainer/reset_info_extract", time.perf_counter() - t0_extract_legal)
         if args.actor_mode == "legal_features":
+            t0_extract_features = time.perf_counter()
             next_legal_action_features = _extract_vector_legal_feature_tensors(
                 reset_infos,
                 args.num_envs,
@@ -976,6 +1378,7 @@ if __name__ == "__main__":
                 int(args.legal_action_feature_dim),
                 device,
             )
+            profiler.add("trainer/reset_feature_extract", time.perf_counter() - t0_extract_features)
     if args.actor_mode == "dense_debug":
         if agent.actor[-1].out_features != envs.single_action_space.n:
             raise RuntimeError(
@@ -1049,6 +1452,7 @@ if __name__ == "__main__":
     writer.add_text("meta/action_interface", json.dumps(action_interface_meta, sort_keys=True, default=str))
 
     for iteration in range(1, args.num_iterations + 1):
+        t0_rollout_iter = time.perf_counter()
         # Per-iteration diagnostics for dashboard clarity.
         iter_valid_actions_sum = 0.0
         iter_valid_actions_count = 0
@@ -1089,6 +1493,7 @@ if __name__ == "__main__":
                     legal_action_features_buf[step] = next_legal_action_features
 
             # ALGO LOGIC: action logic
+            t0_policy = time.perf_counter()
             with torch.no_grad():
                 if args.actor_mode == "dense_debug":
                     action, action_slot, logprob, _, value = agent.get_action_and_value(
@@ -1109,24 +1514,36 @@ if __name__ == "__main__":
                     if not bool(torch.equal(selected_global_from_slot.long(), action.long())):
                         raise RuntimeError("selected_global_id mismatch with selected_slot mapping during rollout.")
                 values[step] = value.flatten()
+            profiler.add("trainer/policy_forward_action_selection", time.perf_counter() - t0_policy)
             actions[step] = action
             if action_slot is not None:
                 selected_slots[step] = action_slot.long()
             logprobs[step] = logprob
 
             # TRY NOT TO MODIFY: execute the game and log data.
-            next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
+            t0_action_numpy = time.perf_counter()
+            action_np = action.cpu().numpy()
+            profiler.add("trainer/action_to_numpy", time.perf_counter() - t0_action_numpy)
+            t0_env_step = time.perf_counter()
+            next_obs, reward, terminations, truncations, infos = envs.step(action_np)
+            profiler.add("trainer/envs_step_wall", time.perf_counter() - t0_env_step)
+            profiler.ingest_env_profile_infos(infos, args.num_envs)
             next_done = np.logical_or(terminations, truncations)
+            t0_step_tensor = time.perf_counter()
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
+            profiler.add("trainer/step_tensor_conversion", time.perf_counter() - t0_step_tensor)
             if args.actor_mode == "dense_debug":
+                t0_extract_mask = time.perf_counter()
                 next_action_mask = _extract_vector_action_mask(
                     infos,
                     args.num_envs,
                     envs.single_action_space.n,
                     device,
                 )
+                profiler.add("trainer/step_info_extract", time.perf_counter() - t0_extract_mask)
             else:
+                t0_extract_legal = time.perf_counter()
                 next_legal_global_ids, next_legal_action_valid_mask = _extract_vector_legal_tensors(
                     infos,
                     args.num_envs,
@@ -1134,7 +1551,9 @@ if __name__ == "__main__":
                     envs.single_action_space.n,
                     device,
                 )
+                profiler.add("trainer/step_info_extract", time.perf_counter() - t0_extract_legal)
                 if args.actor_mode == "legal_features":
+                    t0_extract_features = time.perf_counter()
                     next_legal_action_features = _extract_vector_legal_feature_tensors(
                         infos,
                         args.num_envs,
@@ -1142,6 +1561,7 @@ if __name__ == "__main__":
                         int(args.legal_action_feature_dim),
                         device,
                     )
+                    profiler.add("trainer/step_feature_extract", time.perf_counter() - t0_extract_features)
                 selected_global_values = _extract_vector_field(infos, "selected_global_id", args.num_envs, default_value=None)
                 for env_i, v in enumerate(selected_global_values):
                     if v is None:
@@ -1299,6 +1719,7 @@ if __name__ == "__main__":
                     )
 
             if args.enable_step_diagnostics:
+                t0_step_diag = time.perf_counter()
                 # ---- Custom diagnostics from wrapper infos ----
                 valid_actions_values = _extract_vector_field(infos, "valid_actions", args.num_envs, default_value=None)
                 for v in valid_actions_values:
@@ -1359,6 +1780,7 @@ if __name__ == "__main__":
                 lumber_huts_built_t10_values = []
                 sawmills_built_t10_values = []
                 forests_cleared_t10_values = []
+                village_capture_pct_t10_values = []
                 terminal_spt_bonus_values = []
                 final_spt_over_10_values = []
                 final_spt_over_15_values = []
@@ -1382,6 +1804,7 @@ if __name__ == "__main__":
                         lumber_huts_built_t10_value = None
                         sawmills_built_t10_value = None
                         forests_cleared_t10_value = None
+                        village_capture_pct_t10_value = None
                         terminal_spt_bonus_value = None
 
                         def _extract_done_metric(metric_key):
@@ -1414,6 +1837,7 @@ if __name__ == "__main__":
                         lumber_huts_built_t10_value = _extract_done_metric("lumber_huts_built_t10")
                         sawmills_built_t10_value = _extract_done_metric("sawmills_built_t10")
                         forests_cleared_t10_value = _extract_done_metric("forests_cleared_t10")
+                        village_capture_pct_t10_value = _extract_done_metric("village_capture_pct_t10")
                         terminal_spt_bonus_value = _extract_done_metric("terminal_spt_bonus")
 
                         # Case 2: final_info often carries final per-env info dicts.
@@ -1452,6 +1876,8 @@ if __name__ == "__main__":
                                     sawmills_built_t10_value = finfo["sawmills_built_t10"]
                                 if forests_cleared_t10_value is None and "forests_cleared_t10" in finfo:
                                     forests_cleared_t10_value = finfo["forests_cleared_t10"]
+                                if village_capture_pct_t10_value is None and "village_capture_pct_t10" in finfo:
+                                    village_capture_pct_t10_value = finfo["village_capture_pct_t10"]
                                 if terminal_spt_bonus_value is None and "terminal_spt_bonus" in finfo:
                                     terminal_spt_bonus_value = finfo["terminal_spt_bonus"]
 
@@ -1491,6 +1917,8 @@ if __name__ == "__main__":
                             sawmills_built_t10_values.append(float(sawmills_built_t10_value))
                         if forests_cleared_t10_value is not None:
                             forests_cleared_t10_values.append(float(forests_cleared_t10_value))
+                        if village_capture_pct_t10_value is not None:
+                            village_capture_pct_t10_values.append(float(village_capture_pct_t10_value))
                         if terminal_spt_bonus_value is not None:
                             terminal_spt_bonus_values.append(float(terminal_spt_bonus_value))
                 if done_episode_count > 0:
@@ -1576,6 +2004,13 @@ if __name__ == "__main__":
                         float(np.mean(forests_cleared_t10_values)),
                         global_step,
                     )
+                if village_capture_pct_t10_values:
+                    log_scalar(
+                        "economy/episode_end_village_capture_pct_t10",
+                        float(np.mean(village_capture_pct_t10_values)),
+                        global_step,
+                    )
+                profiler.add("trainer/step_diagnostics", time.perf_counter() - t0_step_diag)
 
             if "final_info" in infos:
                 for info in infos["final_info"]:
@@ -1593,6 +2028,7 @@ if __name__ == "__main__":
                     for checkpoint_step in range(first_checkpoint, last_checkpoint + 1, args.save_frequency):
                         if checkpoint_step > 0 and checkpoint_step % args.save_frequency == 0:
                             checkpoint_path = os.path.join(run_dir, f"model_checkpoint_{checkpoint_step}.cleanrl_model")
+                            t0_ckpt = time.perf_counter()
                             torch.save(agent.state_dict(), checkpoint_path)
                             meta_path = checkpoint_path + ".action_interface.json"
                             try:
@@ -1601,8 +2037,12 @@ if __name__ == "__main__":
                             except Exception as e:
                                 print(f"warning: failed to save action interface metadata: {e}")
                             print(f"checkpoint_saved={checkpoint_path}")
+                            profiler.add("trainer/checkpoint_save", time.perf_counter() - t0_ckpt)
+
+        profiler.add("trainer/rollout_collection", time.perf_counter() - t0_rollout_iter)
 
         # bootstrap value if not done
+        t0_update_iter = time.perf_counter()
         with torch.no_grad():
             next_value = agent.get_value(next_obs).reshape(1, -1)
             advantages = torch.zeros_like(rewards).to(device)
@@ -1660,6 +2100,7 @@ if __name__ == "__main__":
                     )
 
         # Optimizing the policy and value network
+        t0_ppo_update = time.perf_counter()
         b_inds = np.arange(args.batch_size)
         clipfracs = []
         for epoch in range(args.update_epochs):
@@ -1732,6 +2173,7 @@ if __name__ == "__main__":
 
             if args.target_kl is not None and approx_kl > args.target_kl:
                 break
+        profiler.add("trainer/ppo_update", time.perf_counter() - t0_ppo_update)
 
         y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
         var_y = np.var(y_true)
@@ -1808,8 +2250,11 @@ if __name__ == "__main__":
         )
         print("SPS:", int(global_step / (time.time() - start_time)))
         log_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+        profiler.add("trainer/update_and_logging_iteration", time.perf_counter() - t0_update_iter)
+        profiler.maybe_report(global_step, args.num_envs)
 
     if args.save_model:
+        t0_final_save = time.perf_counter()
         model_path = args.model_path or os.path.join(run_dir, f"{args.exp_name}.cleanrl_model")
         torch.save(agent.state_dict(), model_path)
         meta_path = model_path + ".action_interface.json"
@@ -1819,6 +2264,37 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"warning: failed to save action interface metadata: {e}")
         print(f"model_saved={model_path}")
+        profiler.add("trainer/final_model_save", time.perf_counter() - t0_final_save)
+
+    if profiler.enabled:
+        profile_summary = profiler.build_summary(global_step)
+        profile_summary["run_name"] = run_name
+        profile_summary["run_dir"] = run_dir
+        profile_summary["actor_mode"] = str(args.actor_mode)
+        profile_summary["num_envs"] = int(args.num_envs)
+        profile_summary["num_steps"] = int(args.num_steps)
+        profile_summary["total_timesteps"] = int(args.total_timesteps)
+        profile_summary["env_id"] = str(args.env_id)
+        profile_summary["enable_step_diagnostics"] = bool(args.enable_step_diagnostics)
+        profile_summary["wandb_track_enabled"] = bool(args.track)
+        profile_summary["detected_info_mode"] = str(detected_info_mode)
+        profile_summary["legacy_sps_formula"] = int(global_step / max(1e-9, (time.time() - start_time)))
+        print(
+            "[SPS_PROFILE] FINAL "
+            f"sps={profile_summary['sps']:.2f} "
+            f"global_step={profile_summary['global_step']} "
+            f"wall_s={profile_summary['total_wall_s']:.3f}"
+        )
+        if profiler.write_json:
+            try:
+                os.makedirs(profiler.output_dir, exist_ok=True)
+                out_name = f"sps_profile_{run_name}.json"
+                out_path = os.path.join(profiler.output_dir, out_name)
+                with open(out_path, "w", encoding="utf-8") as f:
+                    json.dump(profile_summary, f, indent=2, sort_keys=True, default=str)
+                print(f"[SPS_PROFILE] wrote_json={out_path}")
+            except Exception as e:
+                print(f"[SPS_PROFILE] warning: failed to write json summary: {e}")
 
     envs.close()
     writer.close()

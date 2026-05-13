@@ -777,6 +777,10 @@ public class GameState {
         this.gameIsOver = gameIsOver;
     }
 
+    void invalidateComputedActions() {
+        this.computedActionTribeIdFlag = -1;
+    }
+
     /**
      * Gathers and returns all the available actions for the active tribe in a single ArrayList
      * @return all available actions
