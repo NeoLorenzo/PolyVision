@@ -2,6 +2,142 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Data-023] - 2026-05-14
+
+### Scope
+- Expand legal-action feature semantics from move-centric v1.1 to richer economy/research/city-upgrade aware v1.3 signals.
+- Harden tech-state tracking across reset/invalid-action/fallback paths for Bardur-focused training episodes.
+- Increase observation richness with fog-safe resource channels and normalized economy context features.
+- Add focused validation tooling and troubleshooting records for feature correctness and runtime stability.
+
+### Implemented
+- Updated benchmark registry in `model_run_benchmark_log.md`:
+  - added `Tribes-v0__ppo__1__1778695665 -> Phase1-Data-023 (6M)`.
+- Expanded wrapper legal-action feature schema and economy diagnostics in `pol_env/Tribes/py/register_env.py`:
+  - bumped `LEGAL_ACTION_FEATURE_VERSION` from `v1_1_move_focus` to `v1_3_move_focus_plus_semantic_econ`.
+  - expanded `LEGAL_ACTION_FEATURE_NAMES` from `22` to `42` dimensions by appending semantic/economy slots:
+    - research semantics:
+      - `research_tech_id_norm`,
+      - `research_is_organization`,
+      - `research_is_forestry`.
+    - resource semantics:
+      - `resource_id_norm`,
+      - `resource_is_animal`,
+      - `resource_is_fruit`,
+      - `resource_is_fish`,
+      - `resource_is_crop`,
+      - `resource_is_metal`.
+    - build semantics:
+      - `build_id_norm`,
+      - `build_is_lumber_hut`,
+      - `build_is_sawmill`.
+    - level-up semantics:
+      - `levelup_choice_id_norm`,
+      - `levelup_is_workshop`.
+    - economy/upgrade expectation semantics:
+      - `expected_population_delta_norm`,
+      - `expected_immediate_spt_delta_norm`,
+      - `makes_level_up_available`,
+      - `is_level_up_claim`,
+      - `action_city_upgrade_progress_before_norm`,
+      - `action_city_upgrade_ready_before`.
+  - added `TRIBE_STARTING_TECH_BY_TYPE` lookup for fallback initialization of researched-tech state.
+  - added reverse vocab mapping `_obs_idx_to_tech_name` for observation tech-flag decoding.
+  - added wrapper state for selected-action prediction-vs-actual diagnostics:
+    - `_last_selected_predicted_population_delta`,
+    - `_last_selected_predicted_spt_delta`,
+    - `_last_selected_city_id`.
+  - added reset-time tech-state bootstrap:
+    - `_initialize_episode_researched_tech_state(obs)` now seeds `_researched_techs_t10` from:
+      - observed tech flags when available, else
+      - tribe starting-tech defaults (Bardur starts with `HUNTING`).
+  - reworked researched-tech reads to use effective tech sets:
+    - added `_raw_obs_researched_techs(...)`,
+    - added `_get_effective_researched_techs(...)`,
+    - `_get_researched_tech_count(...)` and `_has_researched_tech(...)` now resolve through effective sets instead of raw index-only checks.
+  - moved economy counter updates to post-Java-apply success path:
+    - `_update_economy_counters_from_action(...)` now executes only after selected legal action is confirmed applied.
+  - added selected-action economy prediction tracking in step info:
+    - `selected_expected_population_delta`,
+    - `selected_actual_population_delta`,
+    - `selected_population_delta_abs_error`,
+    - `selected_expected_immediate_spt_delta`,
+    - `selected_actual_immediate_spt_delta`,
+    - `selected_immediate_spt_delta_abs_error`,
+    - `selected_expected_city_id`.
+  - added tactical mistake counters for capture passivity:
+    - `tm_end_turn_with_capture_available_num`,
+    - `tm_end_turn_with_capture_available_den`.
+  - appended new semantic/economy feature computation in both legal-feature builders:
+    - `_compute_legal_action_feature_vector_reference(...)`,
+    - `_compute_legal_action_feature_vector(...)`.
+  - added helper layer for semantic decoding and economy expectation modeling:
+    - `_parse_levelup_choice_from_action_repr(...)`,
+    - `_normalize_vocab_index(...)`,
+    - `_resolve_action_resource_type(...)`,
+    - `_resolve_action_building_type(...)`,
+    - `_resolve_action_tech_type(...)`,
+    - `_resolve_action_levelup_choice(...)`,
+    - `_resolve_action_city_id(...)`,
+    - `_resolve_action_city_info(...)`,
+    - `_city_upgrade_progress_from_city_info(...)`,
+    - `_expected_population_delta_from_action(...)`,
+    - `_expected_immediate_spt_delta_from_action(...)`,
+    - `_summarize_action_economy_expectation(...)`.
+  - expanded `_dict_to_array(...)` observation flattening:
+    - preserves original 438-entry prefix for compatibility,
+    - appends fog-safe visible-resource map block (`144` slots for 12x12 board),
+    - appends normalized global economy/context features:
+      - stars/SPT,
+      - turn/turns-remaining (two variants),
+      - org/forestry tech flags,
+      - researched-tech count,
+      - city-count/level/progress/ready-fraction features.
+    - resulting expected observation length aligns to `597`.
+- Updated diagnostics tool in `py_rl/cleanrl/cleanrl/legal_features_diagnostics.py`:
+  - added dynamic legal-feature-dim inference:
+    - `_infer_feature_dim(...)` checks `infos["legal_action_feature_dim"]` first, then env wrapper fallback.
+  - `_extract_tensors(...)` now accepts inferred feature width instead of fixed `22`.
+  - test harness agent construction now uses inferred `legal_action_feature_dim` for compatibility with widened feature vectors (`42`).
+- Updated trainer plumbing in `py_rl/cleanrl/cleanrl/ppo.py`:
+  - changed default `legal_action_feature_dim` to dynamic wrapper-derived value:
+    - `int(getattr(TribesGymWrapper, "ACTION_FEATURE_DIM", 22))`.
+  - updated `Agent(...)` constructor default to same dynamic feature-dim behavior.
+  - added tactical capture-passivity aggregation counters:
+    - `tm_end_turn_with_capture_available_num`,
+    - `tm_end_turn_with_capture_available_den`.
+  - added scalar logging:
+    - `tactical_mistakes/end_turn_with_capture_available_rate`.
+- Added troubleshooting record `docs/TROUBLESHOOTING.md`:
+  - documented W&B chart incident where `global_step` axis was blank while `Step` axis worked,
+  - recorded attempted mitigations and working resolution:
+    - deleting problematic dashboard run and syncing as a new run ID,
+  - included concrete command:
+    - `wandb beta sync ".\run-pvh5hss7.wandb"`.
+- Added feature-validation harness `py_rl/cleanrl/cleanrl/validate_bardur_features.py`:
+  - validates expected obs/feature dimensions (`597` obs, `42` legal feature width),
+  - verifies legacy first-22 legal features are preserved,
+  - cross-checks slot alignment by recomputing feature vectors from decoded legal actions,
+  - validates research/resource/build/level-up semantic feature bits,
+  - validates city-upgrade expectation fields (`makes_level_up_available`, ready/progress),
+  - validates fog-safe resource observation encoding,
+  - validates tech-state lifecycle behavior across reset and invalid-action attempts,
+  - validates selected predicted-vs-actual population/SPT delta diagnostics.
+- Added focused capture validator `py_rl/cleanrl/cleanrl/validate_capture_features.py`:
+  - validates CAPTURE slot semantics across up to `50` inspected capture actions,
+  - enforces that appended semantic/economy feature tail remains zeroed on capture actions,
+  - verifies capture-slot recomputed feature equality against reference builder,
+  - executes chosen legal actions and confirms capture transitions through:
+    - city-count increase,
+    - captured-village counter increase,
+    - or village-position transition evidence.
+- Added JVM crash artifact `pol_env/Tribes/hs_err_pid67336.log`:
+  - captured Java runtime out-of-memory startup failure:
+    - `Native memory allocation (mmap) failed to map 532676608 bytes`,
+    - error context: `G1 virtual space`,
+  - records process/environment snapshot for postmortem analysis (JDK 21.0.8 hotspot, Windows 11 host, JVM flags/path context).
+- Updated `CHANGELOG.md` with this detailed `[Phase1-Data-023]` entry to keep source-control documentation synchronized with the current pending change set.
+
 ## [Phase1-Data-022] - 2026-05-13
 
 ### Scope

@@ -122,7 +122,7 @@ class Args:
     """policy actor mode: legal_only (default), legal_features, or dense_debug"""
     max_legal_actions: int = 1024
     """fixed legal-action slot tensor length for legal_only actor mode"""
-    legal_action_feature_dim: int = 22
+    legal_action_feature_dim: int = int(getattr(TribesGymWrapper, "ACTION_FEATURE_DIM", 22))
     """per-legal-slot feature width for legal_features actor mode"""
     old_logprob_recompute_tol: float = 1e-5
     """absolute tolerance for pre-update old_logprob recomputation invariant"""
@@ -443,7 +443,13 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class Agent(nn.Module):
-    def __init__(self, envs, actor_mode: str = "legal_only", max_legal_actions: int = 1024, legal_action_feature_dim: int = 22):
+    def __init__(
+        self,
+        envs,
+        actor_mode: str = "legal_only",
+        max_legal_actions: int = 1024,
+        legal_action_feature_dim: int = int(getattr(TribesGymWrapper, "ACTION_FEATURE_DIM", 22)),
+    ):
         super().__init__()
         self.actor_mode = str(actor_mode).strip().lower()
         if self.actor_mode not in ("legal_only", "legal_features", "dense_debug"):
@@ -1464,6 +1470,8 @@ if __name__ == "__main__":
         tm_move_onto_visible_village_available_den = 0.0
         tm_ignored_capture_num = 0.0
         tm_capture_available_den = 0.0
+        tm_end_turn_with_capture_available_num = 0.0
+        tm_end_turn_with_capture_available_den = 0.0
         tm_end_turn_with_level_up_num = 0.0
         tm_level_up_available_den = 0.0
         tm_missed_city_upgrade_completion_num = 0.0
@@ -1608,6 +1616,20 @@ if __name__ == "__main__":
             )
             tm_capture_available_den += sum(
                 float(v) for v in _extract_vector_field(infos, "tm_capture_available_den", args.num_envs, default_value=0) if v is not None
+            )
+            tm_end_turn_with_capture_available_num += sum(
+                float(v)
+                for v in _extract_vector_field(
+                    infos, "tm_end_turn_with_capture_available_num", args.num_envs, default_value=0
+                )
+                if v is not None
+            )
+            tm_end_turn_with_capture_available_den += sum(
+                float(v)
+                for v in _extract_vector_field(
+                    infos, "tm_end_turn_with_capture_available_den", args.num_envs, default_value=0
+                )
+                if v is not None
             )
             tm_end_turn_with_level_up_num += sum(
                 float(v) for v in _extract_vector_field(infos, "tm_end_turn_with_level_up_num", args.num_envs, default_value=0) if v is not None
@@ -2217,6 +2239,13 @@ if __name__ == "__main__":
             "tactical_mistakes/ignored_capture_rate",
             (tm_ignored_capture_num / tm_capture_available_den)
             if tm_capture_available_den > 0
+            else 0.0,
+            global_step,
+        )
+        log_scalar(
+            "tactical_mistakes/end_turn_with_capture_available_rate",
+            (tm_end_turn_with_capture_available_num / tm_end_turn_with_capture_available_den)
+            if tm_end_turn_with_capture_available_den > 0
             else 0.0,
             global_step,
         )

@@ -208,7 +208,7 @@ class TribesGymWrapper(gym.Env):
     CATALOG_VERSION = "flat-v1"
     CANONICALIZER_VERSION = "flat-v1-structured"
     MAX_LEGAL_ACTIONS_DEFAULT = 1024
-    LEGAL_ACTION_FEATURE_VERSION = "v1_1_move_focus"
+    LEGAL_ACTION_FEATURE_VERSION = "v1_3_move_focus_plus_semantic_econ"
     REVEAL_CLIP = 12.0
     ADJ_FOG_MAX = 8.0
     LEGAL_ACTION_FEATURE_NAMES = (
@@ -234,8 +234,42 @@ class TribesGymWrapper(gym.Env):
         "is_clear_forest",
         "is_grow_forest",
         "is_other",
+        "research_tech_id_norm",
+        "research_is_organization",
+        "research_is_forestry",
+        "resource_id_norm",
+        "resource_is_animal",
+        "resource_is_fruit",
+        "resource_is_fish",
+        "resource_is_crop",
+        "resource_is_metal",
+        "build_id_norm",
+        "build_is_lumber_hut",
+        "build_is_sawmill",
+        "levelup_choice_id_norm",
+        "levelup_is_workshop",
+        "expected_population_delta_norm",
+        "expected_immediate_spt_delta_norm",
+        "makes_level_up_available",
+        "is_level_up_claim",
+        "action_city_upgrade_progress_before_norm",
+        "action_city_upgrade_ready_before",
     )
     ACTION_FEATURE_DIM = len(LEGAL_ACTION_FEATURE_NAMES)
+    TRIBE_STARTING_TECH_BY_TYPE = {
+        0: "CLIMBING",      # XIN_XI
+        1: "ORGANIZATION",  # IMPERIUS
+        2: "HUNTING",       # BARDUR
+        3: "RIDING",        # OUMAJI
+        4: "FISHING",       # KICKOO
+        5: "ARCHERY",       # HOODRICK
+        6: None,            # LUXIDOOR
+        7: "SMITHERY",      # VENGIR
+        8: "FARMING",       # ZEBASI
+        9: "MEDITATION",    # AI_MO
+        10: "SHIELDS",      # QUETZALI
+        11: "ROADS",        # YADAKK
+    }
 
     def __init__(self, level_file=None):
         self.tribes_env = make_default_env()
@@ -301,6 +335,7 @@ class TribesGymWrapper(gym.Env):
         self._catalog = None
         self._catalog_fingerprint = ""
         self._tech_name_to_obs_idx = {}
+        self._obs_idx_to_tech_name = {}
         self._last_step_canonical_diag = {}
         self._illegal_sample_count = 0
         self._fallback_end_turn_count = 0
@@ -340,6 +375,9 @@ class TribesGymWrapper(gym.Env):
             self._parse_int_env("POLYVISION_BATCH_LEGAL_FETCH_EQUIV_CHECK_EVERY_N_STEPS", default=50),
         )
         self._feature_action_meta_cache = {}
+        self._last_selected_predicted_population_delta = 0.0
+        self._last_selected_predicted_spt_delta = 0.0
+        self._last_selected_city_id = None
         self._max_legal_actions = max(
             1,
             self._parse_int_env("POLYVISION_MAX_LEGAL_ACTIONS", default=self.MAX_LEGAL_ACTIONS_DEFAULT),
@@ -371,6 +409,10 @@ class TribesGymWrapper(gym.Env):
             )
             self._tech_name_to_obs_idx = {
                 str(name).upper(): int(i)
+                for i, name in enumerate(vocab.get("TECHNOLOGY", []))
+            }
+            self._obs_idx_to_tech_name = {
+                int(i): str(name).upper()
                 for i, name in enumerate(vocab.get("TECHNOLOGY", []))
             }
             self._catalog_fingerprint = self._catalog.fingerprint()
@@ -444,6 +486,7 @@ class TribesGymWrapper(gym.Env):
         self._sawmills_built_t10 = 0
         self._forests_cleared_t10 = 0
         self._terminal_spt_bonus_applied_this_episode = False
+        self._initialize_episode_researched_tech_state(obs)
         
         # Log action space info for debugging
         t_legal0 = time.perf_counter() if self._profile_sps_enabled else None
@@ -710,6 +753,21 @@ class TribesGymWrapper(gym.Env):
             selected_global_id = int(self._catalog.id_end_turn()) if self._catalog is not None else selected_global_id
 
         selected_action = legal_actions[selected_raw_action]
+        selected_eco = self._summarize_action_economy_expectation(selected_action, start_obs)
+        selected_city_id_for_delta = selected_eco.get("city_id", None)
+        selected_city_pop_before = None
+        selected_city_prod_before = None
+        if selected_city_id_for_delta is not None:
+            selected_city_info = (start_obs.get("city", {}) or {}).get(str(int(selected_city_id_for_delta)), None)
+            if isinstance(selected_city_info, dict):
+                try:
+                    selected_city_pop_before = int(selected_city_info.get("population", 0))
+                except Exception:
+                    selected_city_pop_before = None
+                try:
+                    selected_city_prod_before = float(selected_city_info.get("production", 0.0))
+                except Exception:
+                    selected_city_prod_before = None
         t_reward_resource0 = time.perf_counter() if self._profile_sps_enabled else None
         pre_city_count = int(self._get_city_count(start_obs))
         combat_disabled = "ATTACK" not in self.ALLOWED_ACTION_TYPES
@@ -784,6 +842,10 @@ class TribesGymWrapper(gym.Env):
         )
         tactical_ignored_capture_num = int(legal_capture_exists and selected_action_type != "CAPTURE")
         tactical_ignored_capture_den = int(legal_capture_exists)
+        tactical_end_turn_with_capture_available_num = int(
+            legal_capture_exists and selected_action_type == "END_TURN"
+        )
+        tactical_end_turn_with_capture_available_den = int(legal_capture_exists)
         tactical_end_turn_with_level_up_num = int(legal_level_up_exists and selected_action_type == "END_TURN")
         tactical_end_turn_with_level_up_den = int(legal_level_up_exists)
         tactical_missed_city_upgrade_completion_num = int(
@@ -800,7 +862,6 @@ class TribesGymWrapper(gym.Env):
         tactical_end_turn_with_useful_move_den = int(
             tactical_window_active and legal_useful_move_exists
         )
-        self._update_economy_counters_from_action(selected_action_type, selected_action)
 
         if selected_action_type == "END_TURN":
             self._turn_count += 1
@@ -834,6 +895,26 @@ class TribesGymWrapper(gym.Env):
             t_java_apply_spt_compute += float(java_prof.get("java_spt_compute_s", 0.0))
         obs_after_selected = obs
         java_done = bool(done)
+        # Update wrapper-level economy and fallback tech state only after Java has
+        # successfully applied the selected legal action.
+        self._update_economy_counters_from_action(selected_action_type, selected_action)
+        actual_population_delta_selected = 0.0
+        actual_immediate_spt_delta_selected = 0.0
+        if selected_city_id_for_delta is not None:
+            city_after = (obs_after_selected.get("city", {}) or {}).get(str(int(selected_city_id_for_delta)), None)
+            if isinstance(city_after, dict):
+                if selected_city_pop_before is not None:
+                    try:
+                        actual_population_delta_selected = float(int(city_after.get("population", 0)) - int(selected_city_pop_before))
+                    except Exception:
+                        actual_population_delta_selected = 0.0
+                if selected_city_prod_before is not None:
+                    try:
+                        actual_immediate_spt_delta_selected = float(
+                            float(city_after.get("production", 0.0)) - float(selected_city_prod_before)
+                        )
+                    except Exception:
+                        pass
         self._assert_all_units_in_bounds(obs, context="post_selected_action")
 
         forced_post_end_turns = 0
@@ -1197,11 +1278,10 @@ class TribesGymWrapper(gym.Env):
         if self._profile_sps_enabled:
             t_info_scalar += time.perf_counter() - t_info_ws
             t_info_ws = time.perf_counter()
-        # Research telemetry is tracked from executed RESEARCH_TECH actions because
-        # Java observation payload does not currently expose tribes[].technology.
-        info["techs_researched"] = int(len(self._researched_techs_t10))
-        info["forestry_researched"] = int("FORESTRY" in self._researched_techs_t10)
-        info["organization_researched"] = int("ORGANIZATION" in self._researched_techs_t10)
+        effective_techs = self._get_effective_researched_techs(obs, tribe_id=0)
+        info["techs_researched"] = int(len(effective_techs))
+        info["forestry_researched"] = int("FORESTRY" in effective_techs)
+        info["organization_researched"] = int("ORGANIZATION" in effective_techs)
         info["turn_first_uncaptured_village_visible"] = (
             int(self._turn_first_uncaptured_village_visible)
             if self._turn_first_uncaptured_village_visible is not None
@@ -1243,6 +1323,17 @@ class TribesGymWrapper(gym.Env):
         info["turn"] = int(self._turn_count)
         info["unit_count"] = int(self._get_owned_unit_count(obs))
         info["stars"] = int(self._get_tribe_stars(obs, tribe_id=0))
+        info["selected_expected_population_delta"] = float(selected_eco.get("expected_population_delta", 0.0))
+        info["selected_actual_population_delta"] = float(actual_population_delta_selected)
+        info["selected_population_delta_abs_error"] = float(
+            abs(float(selected_eco.get("expected_population_delta", 0.0)) - float(actual_population_delta_selected))
+        )
+        info["selected_expected_immediate_spt_delta"] = float(selected_eco.get("expected_immediate_spt_delta", 0.0))
+        info["selected_actual_immediate_spt_delta"] = float(actual_immediate_spt_delta_selected)
+        info["selected_immediate_spt_delta_abs_error"] = float(
+            abs(float(selected_eco.get("expected_immediate_spt_delta", 0.0)) - float(actual_immediate_spt_delta_selected))
+        )
+        info["selected_expected_city_id"] = int(selected_city_id_for_delta) if selected_city_id_for_delta is not None else -1
         if self._profile_sps_enabled:
             t_info_metric_packaging += time.perf_counter() - t_info_ws
         t_slot0 = time.perf_counter() if self._profile_sps_enabled else None
@@ -1314,6 +1405,8 @@ class TribesGymWrapper(gym.Env):
         info["tm_move_onto_visible_village_available_den"] = int(tactical_missed_move_onto_visible_village_den)
         info["tm_ignored_capture_num"] = int(tactical_ignored_capture_num)
         info["tm_capture_available_den"] = int(tactical_ignored_capture_den)
+        info["tm_end_turn_with_capture_available_num"] = int(tactical_end_turn_with_capture_available_num)
+        info["tm_end_turn_with_capture_available_den"] = int(tactical_end_turn_with_capture_available_den)
         info["tm_end_turn_with_level_up_num"] = int(tactical_end_turn_with_level_up_num)
         info["tm_level_up_available_den"] = int(tactical_end_turn_with_level_up_den)
         info["tm_missed_city_upgrade_completion_num"] = int(tactical_missed_city_upgrade_completion_num)
@@ -1948,6 +2041,52 @@ class TribesGymWrapper(gym.Env):
         feat[20] = 1.0 if a_type == "GROW_FOREST" else 0.0
         known = is_move or bool(feat[12] or feat[13] or feat[14] or feat[15] or feat[16] or feat[17] or feat[18] or feat[19] or feat[20])
         feat[21] = 0.0 if known else 1.0
+
+        tech_type = self._resolve_action_tech_type(action)
+        if tech_type and self._catalog is not None:
+            feat[22] = self._normalize_vocab_index(
+                self._catalog.tech_to_idx.get(tech_type, -1),
+                len(self._catalog.tech_types),
+            )
+        feat[23] = 1.0 if tech_type == "ORGANIZATION" else 0.0
+        feat[24] = 1.0 if tech_type == "FORESTRY" else 0.0
+
+        resource_type = self._resolve_action_resource_type(action)
+        if resource_type and self._catalog is not None:
+            feat[25] = self._normalize_vocab_index(
+                self._catalog.resource_to_idx.get(resource_type, -1),
+                len(self._catalog.resource_types),
+            )
+        feat[26] = 1.0 if resource_type == "ANIMAL" else 0.0
+        feat[27] = 1.0 if resource_type == "FRUIT" else 0.0
+        feat[28] = 1.0 if resource_type == "FISH" else 0.0
+        feat[29] = 1.0 if resource_type == "CROPS" else 0.0
+        feat[30] = 1.0 if resource_type == "ORE" else 0.0
+
+        building_type = self._resolve_action_building_type(action)
+        if building_type and self._catalog is not None:
+            feat[31] = self._normalize_vocab_index(
+                self._catalog.building_to_idx.get(building_type, -1),
+                len(self._catalog.building_types),
+            )
+        feat[32] = 1.0 if building_type == "LUMBER_HUT" else 0.0
+        feat[33] = 1.0 if building_type == "SAWMILL" else 0.0
+
+        levelup_choice = self._resolve_action_levelup_choice(action)
+        if levelup_choice and self._catalog is not None:
+            feat[34] = self._normalize_vocab_index(
+                self._catalog.levelup_to_idx.get(levelup_choice, -1),
+                len(self._catalog.levelup_choices),
+            )
+        feat[35] = 1.0 if levelup_choice == "WORKSHOP" else 0.0
+
+        eco = self._summarize_action_economy_expectation(action, obs)
+        feat[36] = float(np.clip(float(eco["expected_population_delta"]) / 2.0, -1.0, 1.0))
+        feat[37] = float(np.clip(float(eco["expected_immediate_spt_delta"]) / 5.0, -1.0, 1.0))
+        feat[38] = 1.0 if bool(eco["makes_level_up_available"]) else 0.0
+        feat[39] = 1.0 if bool(eco["is_level_up_claim"]) else 0.0
+        feat[40] = float(np.clip(float(eco["progress_before"]), 0.0, 1.0))
+        feat[41] = 1.0 if bool(eco["ready_before"]) else 0.0
         return feat
 
     def _build_legal_action_features_padded(self, legal_global_ids_padded, legal_action_valid_mask, legal_id_to_raw_index, legal_actions, obs):
@@ -2139,6 +2278,52 @@ class TribesGymWrapper(gym.Env):
         feat[20] = 1.0 if a_type == "GROW_FOREST" else 0.0
         known = is_move or bool(feat[12] or feat[13] or feat[14] or feat[15] or feat[16] or feat[17] or feat[18] or feat[19] or feat[20])
         feat[21] = 0.0 if known else 1.0
+
+        tech_type = self._resolve_action_tech_type(action)
+        if tech_type and self._catalog is not None:
+            feat[22] = self._normalize_vocab_index(
+                self._catalog.tech_to_idx.get(tech_type, -1),
+                len(self._catalog.tech_types),
+            )
+        feat[23] = 1.0 if tech_type == "ORGANIZATION" else 0.0
+        feat[24] = 1.0 if tech_type == "FORESTRY" else 0.0
+
+        resource_type = self._resolve_action_resource_type(action)
+        if resource_type and self._catalog is not None:
+            feat[25] = self._normalize_vocab_index(
+                self._catalog.resource_to_idx.get(resource_type, -1),
+                len(self._catalog.resource_types),
+            )
+        feat[26] = 1.0 if resource_type == "ANIMAL" else 0.0
+        feat[27] = 1.0 if resource_type == "FRUIT" else 0.0
+        feat[28] = 1.0 if resource_type == "FISH" else 0.0
+        feat[29] = 1.0 if resource_type == "CROPS" else 0.0
+        feat[30] = 1.0 if resource_type == "ORE" else 0.0
+
+        building_type = self._resolve_action_building_type(action)
+        if building_type and self._catalog is not None:
+            feat[31] = self._normalize_vocab_index(
+                self._catalog.building_to_idx.get(building_type, -1),
+                len(self._catalog.building_types),
+            )
+        feat[32] = 1.0 if building_type == "LUMBER_HUT" else 0.0
+        feat[33] = 1.0 if building_type == "SAWMILL" else 0.0
+
+        levelup_choice = self._resolve_action_levelup_choice(action)
+        if levelup_choice and self._catalog is not None:
+            feat[34] = self._normalize_vocab_index(
+                self._catalog.levelup_to_idx.get(levelup_choice, -1),
+                len(self._catalog.levelup_choices),
+            )
+        feat[35] = 1.0 if levelup_choice == "WORKSHOP" else 0.0
+
+        eco = self._summarize_action_economy_expectation(action, obs)
+        feat[36] = float(np.clip(float(eco["expected_population_delta"]) / 2.0, -1.0, 1.0))
+        feat[37] = float(np.clip(float(eco["expected_immediate_spt_delta"]) / 5.0, -1.0, 1.0))
+        feat[38] = 1.0 if bool(eco["makes_level_up_available"]) else 0.0
+        feat[39] = 1.0 if bool(eco["is_level_up_claim"]) else 0.0
+        feat[40] = float(np.clip(float(eco["progress_before"]), 0.0, 1.0))
+        feat[41] = 1.0 if bool(eco["ready_before"]) else 0.0
         return feat
 
     def _compute_legal_action_feature_vector(self, action, obs):
@@ -3417,52 +3602,75 @@ class TribesGymWrapper(gym.Env):
             return 0.0
         return float(sum(levels) / len(levels))
 
-    def _get_researched_tech_count(self, obs, tribe_id=0):
+    def _get_tribe_type(self, obs, tribe_id=0):
         tribes = obs.get("tribes", {})
         if not isinstance(tribes, dict):
-            return 0
+            return None
         tribe = tribes.get(str(int(tribe_id)), {})
         if not isinstance(tribe, dict):
-            return 0
+            return None
+        try:
+            return int(tribe.get("type", -1))
+        except Exception:
+            return None
+
+    def _raw_obs_researched_techs(self, obs, tribe_id=0):
+        tribes = obs.get("tribes", {})
+        if not isinstance(tribes, dict):
+            return None
+        tribe = tribes.get(str(int(tribe_id)), {})
+        if not isinstance(tribe, dict):
+            return None
         technology = tribe.get("technology", {})
         if not isinstance(technology, dict):
-            return 0
+            return None
         researched = technology.get("researched", [])
         if not isinstance(researched, list):
-            return 0
-        count = 0
-        for flag in researched:
+            return None
+        if len(researched) <= 0:
+            return None
+        out = set()
+        for idx, flag in enumerate(researched):
             try:
-                if bool(flag):
-                    count += 1
+                if not bool(flag):
+                    continue
             except Exception:
                 continue
-        return int(count)
+            tech_name = self._obs_idx_to_tech_name.get(int(idx), None)
+            if tech_name is None:
+                continue
+            out.add(str(tech_name).upper())
+        return out
+
+    def _get_effective_researched_techs(self, obs, tribe_id=0):
+        raw = self._raw_obs_researched_techs(obs, tribe_id=tribe_id)
+        if raw is not None:
+            return set(raw)
+        if int(tribe_id) == 0:
+            return set(self._researched_techs_t10)
+        return set()
+
+    def _initialize_episode_researched_tech_state(self, obs):
+        self._researched_techs_t10 = set()
+        raw = self._raw_obs_researched_techs(obs, tribe_id=0)
+        if raw is not None and len(raw) > 0:
+            self._researched_techs_t10.update(str(t).upper() for t in raw)
+            return
+        tribe_type = self._get_tribe_type(obs, tribe_id=0)
+        if tribe_type is None:
+            return
+        initial_tech = self.TRIBE_STARTING_TECH_BY_TYPE.get(int(tribe_type), None)
+        if isinstance(initial_tech, str) and initial_tech:
+            self._researched_techs_t10.add(str(initial_tech).upper())
+
+    def _get_researched_tech_count(self, obs, tribe_id=0):
+        return int(len(self._get_effective_researched_techs(obs, tribe_id=tribe_id)))
 
     def _has_researched_tech(self, obs, tech_name, tribe_id=0):
         if not isinstance(tech_name, str):
             return False
-        tech_idx = self._tech_name_to_obs_idx.get(str(tech_name).upper(), None)
-        if tech_idx is None:
-            return False
-        tribes = obs.get("tribes", {})
-        if not isinstance(tribes, dict):
-            return False
-        tribe = tribes.get(str(int(tribe_id)), {})
-        if not isinstance(tribe, dict):
-            return False
-        technology = tribe.get("technology", {})
-        if not isinstance(technology, dict):
-            return False
-        researched = technology.get("researched", [])
-        if not isinstance(researched, list):
-            return False
-        if tech_idx < 0 or tech_idx >= len(researched):
-            return False
-        try:
-            return bool(researched[tech_idx])
-        except Exception:
-            return False
+        target = str(tech_name).upper()
+        return target in self._get_effective_researched_techs(obs, tribe_id=tribe_id)
 
     def _get_active_tribe_id(self, obs):
         try:
@@ -3524,6 +3732,139 @@ class TribesGymWrapper(gym.Env):
         if m is None:
             return None
         return m.group(1)
+
+    def _parse_levelup_choice_from_action_repr(self, action_repr):
+        if not isinstance(action_repr, str):
+            return None
+        m = re.search(r"\bbonus\s+([A-Z_]+)\s*$", action_repr.strip(), flags=re.IGNORECASE)
+        if m is None:
+            return None
+        return str(m.group(1)).upper()
+
+    def _normalize_vocab_index(self, idx, count):
+        try:
+            idx_i = int(idx)
+            n = int(count)
+        except Exception:
+            return 0.0
+        if n <= 1:
+            return 0.0
+        if idx_i < 0 or idx_i >= n:
+            return 0.0
+        return float(idx_i) / float(n - 1)
+
+    def _resolve_action_resource_type(self, action):
+        r_type = self._action_str(action, "resource_type", None)
+        if r_type is None:
+            r_type = self._parse_resource_type_from_action_repr(str(action.get("repr", "")))
+        return str(r_type or "").upper()
+
+    def _resolve_action_building_type(self, action):
+        b_type = self._action_str(action, "building_type", None)
+        if b_type is None:
+            b_type = self._parse_building_type_from_action_repr(str(action.get("repr", "")))
+        return str(b_type or "").upper()
+
+    def _resolve_action_tech_type(self, action):
+        tech_type = self._action_str(action, "tech_type", None)
+        if tech_type is None:
+            tech_type = self._parse_tech_type_from_action_repr(str(action.get("repr", "")))
+        return str(tech_type or "").upper()
+
+    def _resolve_action_levelup_choice(self, action):
+        choice = self._action_str(action, "levelup_choice", None)
+        if choice is None:
+            choice = self._parse_levelup_choice_from_action_repr(str(action.get("repr", "")))
+        return str(choice or "").upper()
+
+    def _resolve_action_city_id(self, action, obs):
+        city_id = self._action_int(action, "city_id", None)
+        if city_id is not None:
+            return int(city_id)
+        city_x = self._action_int(action, "city_x", None)
+        city_y = self._action_int(action, "city_y", None)
+        if city_x is not None and city_y is not None:
+            city_map = obs.get("city", {})
+            if isinstance(city_map, dict):
+                for cid_s, city in city_map.items():
+                    if not isinstance(city, dict):
+                        continue
+                    try:
+                        if int(city.get("x", -1)) == int(city_x) and int(city.get("y", -1)) == int(city_y):
+                            return int(cid_s)
+                    except Exception:
+                        continue
+        repr_s = str(action.get("repr", ""))
+        parsed_city_id = self._parse_city_id_from_action_repr(repr_s)
+        if parsed_city_id is not None:
+            return int(parsed_city_id)
+        return None
+
+    def _resolve_action_city_info(self, action, obs):
+        city_id = self._resolve_action_city_id(action, obs)
+        if city_id is None:
+            return None, None
+        city_info = (obs.get("city", {}) or {}).get(str(int(city_id)), None)
+        if not isinstance(city_info, dict):
+            return int(city_id), None
+        return int(city_id), city_info
+
+    def _city_upgrade_progress_from_city_info(self, city_info):
+        if not isinstance(city_info, dict):
+            return 0.0, False, 0, 0
+        try:
+            pop = int(city_info.get("population", 0))
+            pop_need = int(city_info.get("population_need", 0))
+        except Exception:
+            pop, pop_need = 0, 0
+        denom = max(1, int(pop_need))
+        progress = float(np.clip(float(pop) / float(denom), 0.0, 1.0))
+        ready = int(pop) >= int(pop_need) if int(pop_need) > 0 else True
+        return progress, bool(ready), int(pop), int(pop_need)
+
+    def _expected_population_delta_from_action(self, action):
+        a_type = str(action.get("type", "")).upper()
+        if a_type == "RESOURCE_GATHERING":
+            r_type = self._resolve_action_resource_type(action)
+            meta = self._resource_cost_and_population_bonus(r_type)
+            if meta is None:
+                return 0
+            _cost, bonus = meta
+            return int(bonus)
+        # Conservative default for uncertain rules.
+        return 0
+
+    def _expected_immediate_spt_delta_from_action(self, action):
+        a_type = str(action.get("type", "")).upper()
+        if a_type == "LEVEL_UP":
+            choice = self._resolve_action_levelup_choice(action)
+            # Deterministic from rules: WORKSHOP grants +1 production.
+            if choice == "WORKSHOP":
+                return 1.0
+        # Conservative default when uncertain.
+        return 0.0
+
+    def _summarize_action_economy_expectation(self, action, obs):
+        city_id, city_info = self._resolve_action_city_info(action, obs)
+        progress_before, ready_before, pop_before, pop_need_before = self._city_upgrade_progress_from_city_info(city_info)
+        pop_delta = int(self._expected_population_delta_from_action(action))
+        spt_delta = float(self._expected_immediate_spt_delta_from_action(action))
+        makes_level_up_available = False
+        if city_info is not None and not bool(ready_before):
+            post_pop = int(pop_before) + int(pop_delta)
+            makes_level_up_available = int(post_pop) >= int(pop_need_before)
+        is_level_up_claim = str(action.get("type", "")).upper() == "LEVEL_UP"
+        if is_level_up_claim:
+            makes_level_up_available = False
+        return {
+            "city_id": city_id,
+            "progress_before": float(progress_before),
+            "ready_before": bool(ready_before),
+            "expected_population_delta": int(pop_delta),
+            "expected_immediate_spt_delta": float(spt_delta),
+            "makes_level_up_available": bool(makes_level_up_available),
+            "is_level_up_claim": bool(is_level_up_claim),
+        }
 
     def _resource_cost_and_population_bonus(self, resource_type):
         # Costs/bonuses aligned with TribesConfig defaults.
@@ -4357,42 +4698,120 @@ class TribesGymWrapper(gym.Env):
             )
     
     def _dict_to_array(self, obs_dict):
-        # convert your complex dict observation to flat array
-        # this is the key missing piece - you need to flatten your board state
+        # Keep the original 438-entry observation prefix unchanged for compatibility.
         features = []
-        
         board = obs_dict.get("board", {})
-        
-        # Extract terrain as flattened array
+
         terrain = board.get("terrain", [])
         if terrain:
             features.extend(np.array(terrain).flatten())
-        
-        # Extract unit IDs as flattened array  
+
         unit_ids = board.get("unitID", [])
         if unit_ids:
             features.extend(np.array(unit_ids).flatten())
-            
-        # Extract city IDs as flattened array
+
         city_ids = board.get("cityID", [])
         if city_ids:
             features.extend(np.array(city_ids).flatten())
-            
-        # Add tribe information
+
         tribes_info = obs_dict.get("tribes", {})
         if isinstance(tribes_info, dict):
             tribe0 = tribes_info.get("0", {})
             if isinstance(tribe0, dict):
-                # Add some key tribe stats as features
                 features.append(tribe0.get("star", 0))
                 features.append(tribe0.get("score", 0))
                 features.append(len(tribe0.get("citiesID", [])))
                 features.append(tribe0.get("nKills", 0))
-            
-        # Add game state info
+
         features.append(obs_dict.get("tick", 0))
         features.append(obs_dict.get("activeTribeID", 0))
-        
+
+        # Append visible-only resource map and normalized economy/state features.
+        dims = self._board_dimensions_from_obs(obs_dict)
+        if dims is not None:
+            width, height = int(dims[0]), int(dims[1])
+        else:
+            width, height = 0, 0
+        terrain_arr = np.full((width, height), -1, dtype=np.int16)
+        resource_arr = np.full((width, height), -1, dtype=np.int16)
+        try:
+            terrain_raw = np.asarray(board.get("terrain", []), dtype=np.int16)
+            if terrain_raw.shape == (width, height):
+                terrain_arr = terrain_raw
+        except Exception:
+            pass
+        try:
+            resource_raw = np.asarray(board.get("resource", []), dtype=np.int16)
+            if resource_raw.shape == (width, height):
+                resource_arr = resource_raw
+        except Exception:
+            pass
+        if width > 0 and height > 0:
+            fog_mask = terrain_arr == 7
+            masked_resource = np.array(resource_arr, copy=True)
+            masked_resource[fog_mask] = -1
+            resource_norm = np.clip((masked_resource.astype(np.float32) + 1.0) / 8.0, 0.0, 1.0)
+            features.extend(resource_norm.flatten())
+
+        current_stars = float(self._get_bardur_stars(obs_dict))
+        current_spt = float(self._compute_bardur_spt(obs_dict))
+        turn_count = float(self._turn_count)
+        max_turns = float(max(1, int(self.MAX_TURNS)))
+        turns_remaining_after_current = float(np.clip((max_turns - turn_count) / max_turns, 0.0, 1.0))
+        turns_remaining_including_current = float(np.clip((max_turns - turn_count + 1.0) / max_turns, 0.0, 1.0))
+        tech_has_organization = 1.0 if self._has_researched_tech(obs_dict, "ORGANIZATION", tribe_id=0) else 0.0
+        tech_has_forestry = 1.0 if self._has_researched_tech(obs_dict, "FORESTRY", tribe_id=0) else 0.0
+        tech_researched_count = float(self._get_researched_tech_count(obs_dict, tribe_id=0))
+
+        city_map = obs_dict.get("city", {})
+        owned_cities = []
+        if isinstance(city_map, dict):
+            for city in city_map.values():
+                if not isinstance(city, dict):
+                    continue
+                try:
+                    if int(city.get("tribeID", -1)) != 0:
+                        continue
+                except Exception:
+                    continue
+                owned_cities.append(city)
+        city_count = len(owned_cities)
+        city_levels = []
+        city_progress = []
+        ready_count = 0
+        for city in owned_cities:
+            try:
+                city_levels.append(int(city.get("level", 0)))
+            except Exception:
+                city_levels.append(0)
+            progress, ready, _pop, _need = self._city_upgrade_progress_from_city_info(city)
+            city_progress.append(float(progress))
+            if bool(ready):
+                ready_count += 1
+
+        avg_city_level = float(np.mean(city_levels)) if city_levels else 0.0
+        max_city_level = float(np.max(city_levels)) if city_levels else 0.0
+        mean_upgrade_progress = float(np.mean(city_progress)) if city_progress else 0.0
+        max_upgrade_progress = float(np.max(city_progress)) if city_progress else 0.0
+        upgrade_ready_frac = float(ready_count / max(1, city_count))
+        any_level_up_available = 1.0 if ready_count > 0 else 0.0
+
+        features.append(float(np.clip(current_stars / 50.0, 0.0, 1.0)))
+        features.append(float(np.clip(current_spt / 30.0, 0.0, 1.0)))
+        features.append(float(np.clip(turn_count / max_turns, 0.0, 1.0)))
+        features.append(turns_remaining_after_current)
+        features.append(turns_remaining_including_current)
+        features.append(tech_has_organization)
+        features.append(tech_has_forestry)
+        features.append(float(np.clip(tech_researched_count / 24.0, 0.0, 1.0)))
+        features.append(float(np.clip(float(city_count) / 6.0, 0.0, 1.0)))
+        features.append(float(np.clip(avg_city_level / 5.0, 0.0, 1.0)))
+        features.append(float(np.clip(max_city_level / 5.0, 0.0, 1.0)))
+        features.append(float(np.clip(mean_upgrade_progress, 0.0, 1.0)))
+        features.append(float(np.clip(max_upgrade_progress, 0.0, 1.0)))
+        features.append(float(np.clip(upgrade_ready_frac, 0.0, 1.0)))
+        features.append(any_level_up_available)
+
         return np.array(features, dtype=np.float32)
     
     def close(self):

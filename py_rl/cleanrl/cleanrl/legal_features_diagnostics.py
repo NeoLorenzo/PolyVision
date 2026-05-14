@@ -45,7 +45,29 @@ def make_sync_env(seed: int):
     return envs, obs, infos
 
 
-def _extract_tensors(infos, envs, device, max_legal_actions=1024, feature_dim=22):
+def _infer_feature_dim(infos, envs):
+    fd_raw = infos.get("legal_action_feature_dim", None)
+    if isinstance(fd_raw, (list, tuple, np.ndarray)):
+        vals = np.asarray(fd_raw).reshape(-1)
+        for v in vals:
+            try:
+                return int(v)
+            except Exception:
+                continue
+    elif fd_raw is not None:
+        try:
+            return int(fd_raw)
+        except Exception:
+            pass
+    try:
+        return int(envs.envs[0].unwrapped.ACTION_FEATURE_DIM)
+    except Exception:
+        return 22
+
+
+def _extract_tensors(infos, envs, device, max_legal_actions=1024, feature_dim=None):
+    if feature_dim is None:
+        feature_dim = _infer_feature_dim(infos, envs)
     ids, valid = _extract_vector_legal_tensors(
         infos,
         num_envs=1,
@@ -162,10 +184,16 @@ def test_actor_uses_features(envs, obs, infos, model_path=None, seed=1):
     np.random.seed(seed)
     torch.manual_seed(seed)
     device = torch.device("cpu")
-    ids_t, valid_t, feats_t = _extract_tensors(infos, envs, device)
+    feature_dim = _infer_feature_dim(infos, envs)
+    ids_t, valid_t, feats_t = _extract_tensors(infos, envs, device, feature_dim=feature_dim)
     obs_t = torch.tensor(obs, dtype=torch.float32, device=device)
 
-    agent = Agent(envs, actor_mode="legal_features", max_legal_actions=1024, legal_action_feature_dim=22).to(device)
+    agent = Agent(
+        envs,
+        actor_mode="legal_features",
+        max_legal_actions=1024,
+        legal_action_feature_dim=int(feature_dim),
+    ).to(device)
     loaded = False
     if model_path:
         sd = torch.load(model_path, map_location=device)
@@ -215,10 +243,16 @@ def test_selected_vs_average_move_features(model_path=None, steps=400, seed=7):
 
     envs, obs, infos = make_sync_env(seed=seed)
     try:
-        ids_t, valid_t, feats_t = _extract_tensors(infos, envs, device)
+        feature_dim = _infer_feature_dim(infos, envs)
+        ids_t, valid_t, feats_t = _extract_tensors(infos, envs, device, feature_dim=feature_dim)
         obs_t = torch.tensor(obs, dtype=torch.float32, device=device)
 
-        agent = Agent(envs, actor_mode="legal_features", max_legal_actions=1024, legal_action_feature_dim=22).to(device)
+        agent = Agent(
+            envs,
+            actor_mode="legal_features",
+            max_legal_actions=1024,
+            legal_action_feature_dim=int(feature_dim),
+        ).to(device)
         loaded = False
         if model_path:
             sd = torch.load(model_path, map_location=device)
