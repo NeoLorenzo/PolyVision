@@ -2,6 +2,69 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Docs-024] - 2026-08-10
+
+### Scope
+- Replace the stale root `README.md` status document with a comprehensive guide to the currently implemented Phase 1 system.
+- Make the distinction between implemented behavior, code-level defaults, recommended experiment configuration, optional diagnostics, and future roadmap work explicit.
+- Bring setup, training, evaluation, profiling, and troubleshooting examples into alignment with the current 128-slot / 42-feature action interface.
+
+### Implemented
+- Rebuilt `README.md` as the primary current-capabilities and operating guide:
+  - replaced the obsolete "Immediate Next Steps" and "strict enforcement in progress" status statements;
+  - added a capability matrix covering the Java simulation, Py4J bridge, Gymnasium wrapper, Phase 1 task enforcement, map pools, solo play, stable global action IDs, legality-aware PPO actors, validation, evaluation, diagnostics, and profiling;
+  - documented the implemented Bardur Turn 10 task, including:
+    - 12x12 Drylands map-pool behavior,
+    - the 128-map default Phase 1 pool,
+    - the 256-map Bardur-solo pool,
+    - deterministic round-robin and seeded-random selection,
+    - the scripted Bardur opening,
+    - wrapper-owned Turn 10 truncation,
+    - optional Java-level solo/no-opponent mode,
+    - automatic non-Bardur turn fast-forwarding when an opponent remains present;
+  - documented the Phase 1 action policy and guardrails:
+    - allowed economy/exploration/capture action families,
+    - combat-attack exclusion,
+    - out-of-bounds movement rejection,
+    - CITY_WALL hard masking,
+    - optional resource-upgrade filtering,
+    - early village-acquisition and backtracking constraints;
+  - added an end-to-end architecture description from PPO/evaluation clients through `TribesGymWrapper`, `TribesGymEnv`, Py4J, and the Java `PythonEnv` bridge;
+  - documented both environment layers with current Python examples and explicit JVM cleanup guidance;
+  - replaced the obsolete fixed-`Discrete(200)` / modulo-remapping description with the active deterministic global action catalog, dense masks, global-ID-to-Java-index mapping, and fail-fast canonicalization/collision behavior;
+  - documented the current sparse legal-action tensors:
+    - `legal_global_ids_padded`,
+    - `legal_action_valid_mask`,
+    - `legal_action_count`,
+    - `legal_action_features_padded`,
+    - 128-slot default capacity and overflow failure behavior;
+  - documented all current legal-action feature categories and the 42-dimensional `v1_3_move_focus_plus_semantic_econ` schema;
+  - documented the current observation vector, including the compatibility prefix, fog-masked resource channel, and appended normalized economy/city/research context;
+  - documented dense SPT reward behavior, active exploration/village/capture/tactical shaping, intentionally zeroed historical hooks, and the optional terminal SPT bonus with its defaults;
+  - documented the available episode, economy, research, tactical, legality, map, and profiling telemetry;
+  - added current Windows PowerShell and Bash setup instructions for Java compilation, Python environment creation, and dependency installation;
+  - added smoke-test commands, expected results, headless-rendering behavior, and a Windows `PYTHONUTF8=1` workaround for legacy console encoding failures;
+  - documented PPO defaults and the three active actor modes:
+    - `legal_only`,
+    - `legal_features`,
+    - `dense_debug`;
+  - added current 128-slot short-run and full tracked/checkpointed training examples using the recommended Bardur-solo map pool;
+  - documented strict validator caching, illegal/fallback failure thresholds, TensorBoard/W&B behavior, checkpoints, model files, action-interface metadata sidecars, videos, and SPS JSON outputs;
+  - added behavioral-debug and SPS-profiling guidance that separates expensive diagnostics from long training runs;
+  - documented current checkpoint inspection, Java rendering, human Turn 10 play, policy/oracle comparisons, per-map analysis, validators, and capture/village/coordinate audits;
+  - added a consolidated environment-variable reference covering map selection, seeding, solo mode, legal-slot capacity, info modes, terminal reward, filtering, profiling, batching, assertions, reset logging, and equivalence checks;
+  - added an explicit current-limitations section covering curriculum shaping, missing combat/self-play, scripted-opening constraints, JVM/vectorization cost, legal-slot capacity, partial map-generation parity, test coverage, headless rendering, stale historical documents, and unimplemented live-game/leaderboard work;
+  - refreshed the project roadmap and labeled documentation by current, historical, hardware-specific, or partially stale status;
+  - preserved and expanded upstream `polytopia_rl` and CleanRL lineage/attribution guidance.
+- Verified the new README against the working repository:
+  - confirmed every documented repository path exists;
+  - checked PPO example flags and defaults against `python py_rl/cleanrl/cleanrl/ppo.py --help`;
+  - confirmed the live trainer reports `max_legal_actions=128` and `legal_action_feature_dim=42`;
+  - ran `git diff --check -- README.md` successfully;
+  - confirmed Markdown code fences are balanced;
+  - ran the documented `Tribes-v0` Gymnasium reset/step smoke test successfully with Windows UTF-8 console mode enabled.
+- No engine, wrapper, trainer, evaluation, reward, or action-interface behavior was changed by this documentation update.
+
 ## [Phase1-Data-023] - 2026-05-14
 
 ### Scope
