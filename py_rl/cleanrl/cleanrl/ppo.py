@@ -5,6 +5,7 @@ import hashlib
 import random
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Optional
 
 import gymnasium as gym
@@ -34,6 +35,18 @@ except Exception:
     spec.loader.exec_module(register_env)
 
 from pol_env.Tribes.py.register_env import TribesGymWrapper  # adjust if folder name differs
+
+
+def _format_duration(seconds: float) -> str:
+    total_seconds = max(0, int(round(seconds)))
+    days, remainder = divmod(total_seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if days > 0:
+        return f"{days}d {hours:02d}h {minutes:02d}m"
+    if hours > 0:
+        return f"{hours}h {minutes:02d}m {secs:02d}s"
+    return f"{minutes}m {secs:02d}s"
 
 @dataclass
 class Args:
@@ -120,7 +133,7 @@ class Args:
     """abort training if fallback_end_turn_rate exceeds this threshold (0.0001 = 0.01%)"""
     actor_mode: str = "legal_only"
     """policy actor mode: legal_only (default), legal_features, or dense_debug"""
-    max_legal_actions: int = 1024
+    max_legal_actions: int = 256
     """fixed legal-action slot tensor length for legal_only actor mode"""
     legal_action_feature_dim: int = int(getattr(TribesGymWrapper, "ACTION_FEATURE_DIM", 22))
     """per-legal-slot feature width for legal_features actor mode"""
@@ -447,7 +460,7 @@ class Agent(nn.Module):
         self,
         envs,
         actor_mode: str = "legal_only",
-        max_legal_actions: int = 1024,
+        max_legal_actions: int = 256,
         legal_action_feature_dim: int = int(getattr(TribesGymWrapper, "ACTION_FEATURE_DIM", 22)),
     ):
         super().__init__()
@@ -2277,8 +2290,19 @@ if __name__ == "__main__":
             else 0.0,
             global_step,
         )
-        print("SPS:", int(global_step / (time.time() - start_time)))
-        log_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+        elapsed_seconds = max(1e-9, time.time() - start_time)
+        average_sps = global_step / elapsed_seconds
+        scheduled_total_steps = int(args.num_iterations * args.batch_size)
+        remaining_steps = max(0, scheduled_total_steps - global_step)
+        eta_seconds = remaining_steps / max(1e-9, average_sps)
+        estimated_finish = datetime.now().astimezone() + timedelta(seconds=eta_seconds)
+        progress_pct = 100.0 * global_step / max(1, scheduled_total_steps)
+        print(
+            f"SPS: {int(average_sps)} | progress={global_step:,}/{scheduled_total_steps:,} "
+            f"({progress_pct:.1f}%) | ETA={_format_duration(eta_seconds)} | "
+            f"finish~={estimated_finish.strftime('%Y-%m-%d %H:%M %Z')}"
+        )
+        log_scalar("charts/SPS", int(average_sps), global_step)
         profiler.add("trainer/update_and_logging_iteration", time.perf_counter() - t0_update_iter)
         profiler.maybe_report(global_step, args.num_envs)
 

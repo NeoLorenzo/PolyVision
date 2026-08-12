@@ -8,11 +8,11 @@ Separate **training**, **profiling**, and **debugging**.
 
 | Mode | Purpose | Diagnostics | W&B | Timesteps |
 |---|---|---:|---:|---:|
-| Full training | Learn policy efficiently | Off | Offline | Millions |
+| Comparable full training | Learn and retain gameplay charts | On, cadence 3 | Online or offline | Millions |
 | Debug run | Inspect exact behavior | On | Optional | 5k–20k |
-| SPS profiling | Find bottlenecks | Minimal profiler only | Disabled/offline | 10k–20k |
+| SPS profiling | Find bottlenecks; gameplay charts intentionally absent | Off | Disabled/offline | 10k–20k |
 
-Do not run full training with step diagnostics unless actively debugging. Step diagnostics are useful, but they add env-side payload cost and are not required for normal W&B graphs.
+In the current trainer, `--enable-step-diagnostics` gates several normal W&B gameplay charts as well as detailed diagnostics. Keep it enabled for model-quality and comparison runs. Use `--no-enable-step-diagnostics` only when measuring throughput and explicitly accepting missing gameplay charts.
 
 ---
 
@@ -35,13 +35,14 @@ $env:WANDB_SILENT='true'
 python C:\PolyVision\py_rl\cleanrl\cleanrl\ppo.py `
   --env-id Tribes-v0 `
   --actor-mode legal_features `
-  --max-legal-actions 1024 `
+  --max-legal-actions 256 `
   --num-envs 20 `
   --total-timesteps 5000000 `
   --track `
   --save-model `
   --save-frequency 500000 `
-  --no-enable-step-diagnostics `
+  --enable-step-diagnostics `
+  --step-diagnostics-log-every 3 `
   --no-validate-action-interface
 ```
 
@@ -55,31 +56,18 @@ This keeps W&B graphs while avoiding live network overhead during training.
 
 ---
 
-## Why Step Diagnostics Should Usually Be Off
+## W&B Metrics Gated by Step Diagnostics
 
-Step diagnostics are for detailed debugging, not normal training.
+Despite the flag name, diagnostics currently control the logging path for these normal gameplay metrics:
 
-They help answer questions like:
+- final SPT, episode-end SPT, and custom SPT return;
+- unit count, stars, and reward;
+- city count, fog cleared, and economy episode summaries;
+- mean valid actions, non-end-turn rate, and mean delta SPT.
 
-- Did the agent ignore a legal capture?
-- Did it end turn while a useful move existed?
-- Which legal actions were available?
-- Was an illegal/fallback action triggered?
-- Did it miss a city-upgrade completion?
+With diagnostics disabled, the trainer still logs optimization losses, learning rate, research summaries, tactical mistake rates, and SPS, but the gameplay charts above are absent. This flag cannot be toggled after launch. Before leaving a long run unattended, verify that W&B records `enable_step_diagnostics=True` and that an SPT chart appears after the first completed episodes.
 
-They are not needed for standard training graphs such as:
-
-- SPS
-- episodic return
-- final SPT
-- city count
-- tech research rate
-- harvest counts
-- fog cleared
-- loss metrics
-- entropy / KL
-
-If a metric is important for every training run, it should be logged as a cheap scalar episode metric, not hidden behind expensive step diagnostics.
+Diagnostics add runtime overhead. Use `--step-diagnostics-log-every 3` for comparison runs, matching Phase1-Data-023, and disable them only for short throughput profiles.
 
 ---
 
@@ -98,7 +86,7 @@ $env:WANDB_MODE='offline'
 python C:\PolyVision\py_rl\cleanrl\cleanrl\ppo.py `
   --env-id Tribes-v0 `
   --actor-mode legal_features `
-  --max-legal-actions 1024 `
+  --max-legal-actions 256 `
   --num-envs 20 `
   --total-timesteps 10000 `
   --track `
@@ -125,7 +113,7 @@ $env:POLYVISION_PROFILE_SPS='1'
 python C:\PolyVision\py_rl\cleanrl\cleanrl\ppo.py `
   --env-id Tribes-v0 `
   --actor-mode legal_features `
-  --max-legal-actions 1024 `
+  --max-legal-actions 256 `
   --num-envs 20 `
   --total-timesteps 10240 `
   --track `
@@ -160,7 +148,7 @@ Before starting a full run:
 1. Confirm the environment is using the solo Bardur map pool.
 2. Use `WANDB_MODE=offline`, not `online`.
 3. Keep `--track` enabled so metrics are still recorded.
-4. Disable step diagnostics.
+4. Enable step diagnostics at cadence 3 when gameplay/W&B comparison charts are required; disable them only for throughput-only profiling.
 5. Disable validation/interface checks unless actively testing them.
 6. Use `actor-mode legal_features` if strategic action features are needed.
 7. Use `num-envs 20` unless profiling shows another count is better.
@@ -195,16 +183,16 @@ Before starting a full run:
 
 ---
 
-## Do Not Do This for Full Training
+## Throughput-only configuration
 
-Avoid this in long runs:
+Use this combination only for short throughput measurements:
 
 ```powershell
---enable-step-diagnostics
-$env:WANDB_MODE='online'
+--no-enable-step-diagnostics
+$env:POLYVISION_PROFILE_SPS='1'
 ```
 
-This combination is useful for visibility, but inefficient for sustained training.
+It improves measurement throughput but intentionally omits the W&B gameplay charts listed above, so it is not suitable for a comparable long training run.
 
 ---
 

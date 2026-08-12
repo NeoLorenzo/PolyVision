@@ -272,7 +272,7 @@ public class LevelGenerator {
         // Ruins generation.
         if (LEVELGEN_VERBOSE) System.out.println("Ruins generation");
 
-        int ruins_number = (int) Math.round((mapSize*mapSize)/40.0);
+        int ruins_number = ruinTargetForMapSize(mapSize);
         int water_ruins_number = (int) Math.round(ruins_number/3.0);
         int ruins_count = 0;
         int water_ruins_count = 0;
@@ -296,8 +296,9 @@ public class LevelGenerator {
                     water_ruins_count++;
                 }
 
-                //This avoids having contiguous ruins and favours dispersion.
-                for (int neighbour : circle(villageMap.get(ruin), 1)) {
+                // Exclude both the selected tile and its neighbours from later ruin placement.
+                villageMap.set(ruin, Math.max(villageMap.get(ruin), 2));
+                for (int neighbour : circle(ruin, 1)) {
                     villageMap.set(neighbour, Math.max(villageMap.get(neighbour), 2));
                 }
 
@@ -1083,6 +1084,10 @@ public class LevelGenerator {
      */
     public int randomInt(int min, int max) {
         return (int) Math.floor(min + rnd.nextDouble() * (max - min));
+    }
+
+    static int ruinTargetForMapSize(int mapSize) {
+        return (int) Math.round((mapSize * mapSize) / 40.0);
     }
 
     /**

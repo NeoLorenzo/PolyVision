@@ -41,6 +41,7 @@ public class PythonEnv {
     private GUI gui;
     private Game viewerGame;
     private boolean soloNoOpponentMode = false;
+    private String loadedLevelFile = null;
 
     /**
      * Initialize from a CSV level file path (relative to CWD or absolute), seed, and game mode.
@@ -49,6 +50,7 @@ public class PythonEnv {
         this.rnd = new Random(seed);
         this.gs = new GameState(rnd, gameMode);
         this.gs.init(filename);
+        this.loadedLevelFile = filename;
 
         // Start the turn for tribe 0, mirroring Game.processTurn preconditions
         Tribe t0 = gs.getTribe(0);
@@ -470,12 +472,17 @@ public class PythonEnv {
         long agentSeed = 0L;
         for (int i = 0; i < n; i++) players.add(new DoNothingAgent(agentSeed));
 
-        // Initialize viewerGame with a generated level matching current tribes to set up players array
-        // We won't use viewerGame's internal state for rendering; GUI.update uses the GameState we pass.
-        Types.TRIBE[] tribes = new Types.TRIBE[n];
-        for (int i = 0; i < n; i++) tribes[i] = gs.getTribe(i).getType();
-        long levelSeed = 0L;
-        viewerGame.init(players, levelSeed, tribes, 0L, gs.getGameMode());
+        // Initialize viewerGame from the same loaded CSV map whenever available.
+        // This prevents accidental procedural generation with unsupported single-tribe defaults.
+        if (loadedLevelFile != null && !loadedLevelFile.isEmpty()) {
+            viewerGame.init(players, loadedLevelFile, 0L, gs.getGameMode());
+        } else {
+            // Backward-compatible fallback if GUI is opened before initFromLevel().
+            Types.TRIBE[] tribes = new Types.TRIBE[n];
+            for (int i = 0; i < n; i++) tribes[i] = gs.getTribe(i).getType();
+            long levelSeed = 0L;
+            viewerGame.init(players, levelSeed, tribes, 0L, gs.getGameMode());
+        }
 
         KeyController ki = new KeyController(true);
         WindowInput wi = new WindowInput();

@@ -207,7 +207,7 @@ class TribesGymWrapper(gym.Env):
     }
     CATALOG_VERSION = "flat-v1"
     CANONICALIZER_VERSION = "flat-v1-structured"
-    MAX_LEGAL_ACTIONS_DEFAULT = 1024
+    MAX_LEGAL_ACTIONS_DEFAULT = 256
     LEGAL_ACTION_FEATURE_VERSION = "v1_3_move_focus_plus_semantic_econ"
     REVEAL_CLIP = 12.0
     ADJ_FOG_MAX = 8.0
@@ -2637,6 +2637,11 @@ class TribesGymWrapper(gym.Env):
                 profile["filter_allowed_type_s"] += time.perf_counter() - t_type0
             if a_type not in self.ALLOWED_ACTION_TYPES:
                 continue
+            # Hard mask: never allow CITY_WALL level-up claims into the legal set.
+            if a_type == "LEVEL_UP":
+                levelup_choice = self._resolve_action_levelup_choice(a)
+                if levelup_choice == "CITY_WALL":
+                    continue
             t_oob0 = time.perf_counter() if use_profile else None
             if a_type == "MOVE" and not self._is_move_destination_within_board(a, obs):
                 if use_profile:

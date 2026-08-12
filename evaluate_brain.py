@@ -378,7 +378,7 @@ def main() -> None:
     meta_actor_mode = str(meta.get("actor_mode", "")).strip().lower()
     state_dict = torch.load(model_path, map_location="cpu")
     actor_mode = meta_actor_mode if meta_actor_mode in ("legal_only", "dense_debug") else infer_actor_mode_from_state_dict(state_dict)
-    max_legal_actions = int(meta.get("max_legal_actions", 1024))
+    max_legal_actions = max(int(meta.get("max_legal_actions", 256)), 256)
     os.environ["POLYVISION_MAX_LEGAL_ACTIONS"] = str(max(1, max_legal_actions))
     device = torch.device(args.device if torch.cuda.is_available() or args.device == "cpu" else "cpu")
 

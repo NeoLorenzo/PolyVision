@@ -2,6 +2,143 @@
 
 All notable changes to this project are documented in this file.
 
+## Changelog entry requirements
+
+Every new change entry must include `Scope`, `Rationale`, `Implemented`, and `Validation` sections. The `Rationale` section must preserve:
+
+- the problem, failure mode, or evidence that motivated the change;
+- why the selected approach was preferred;
+- important trade-offs, limits, and compatibility consequences.
+
+Do not substitute a description of what changed for the reason it changed. If the original rationale or validation is unknown, record that explicitly rather than reconstructing it as fact.
+
+## [Phase1-Data-025] - (2026-08-11)
+
+### Scope
+- Reduce legal-action tensor width defaults from 1024 to 256 across training and evaluation paths for tighter runtime/memory behavior while retaining sufficient capacity for the 133-action state observed in training.
+- Harden legal-action filtering to explicitly remove unsupported city-wall level-up claims from the legal set.
+- Align Java GUI initialization with loaded CSV maps to prevent accidental procedural-map fallback during single-tribe workflows.
+- Align the live Bardur terrain/resource modifiers with the current `MapGen.md` specification without changing other tribes or the starting-area animal guarantee.
+- Correct ruin exclusion so counted ruins occupy unique, non-adjacent map tiles.
+- Rebuild the model-run benchmark log from the 2026-08-12 W&B export while preserving the canonical changelog-name-to-run-name mapping and making historical comparability limits explicit.
+
+### Rationale
+- The `1024` legal-slot default was inherited from the first sparse legal-action implementation as a deliberately generous safety bound. Carrying that full padded width through every environment observation, rollout buffer, legal-feature tensor, and policy evaluation wastes host/device memory and tensor work, so the initial Phase 1 change proposed `128`. A fixed-seed survey of all 256 Bardur-solo maps sampled 12,000 decision states and observed a maximum of `78`, and a 512-state checkpoint comparison found no greedy-action differences between 128- and 1024-slot padding. That sample did not cover the rarer state distribution reached during sustained policy training: tracked run `Tribes-v0__ppo__1__1786541745` (`ia432pug`) reached a real `legal_action_count=133` at step `1,832,960`, exceeded the 128-slot bound, and terminated through the intentional fail-fast guard. The result disproves `128` as a safe Phase 1 capacity and demonstrates that sampled padding equivalence cannot establish a capacity ceiling. The bound is therefore raised to `256`, which retains a fourfold reduction from 1024 and accommodates the observed state with 123 slots of headroom. This is a pragmatic bound, not proof that 256 is universal; the overflow guard remains in place, and future broader tasks must reassess it. Training, checkpoint metadata, environment tensors, evaluation, and operating documentation are changed together to avoid interface mismatches.
+- The `ia432pug` run was scrapped as a completed benchmark because it terminated at 61.1% of its scheduled `2,997,760` steps rather than reaching the common endpoint. Its W&B history remains useful failure evidence, and its latest model-only checkpoint at 1,750,000 steps remains available for inspection, but the trainer did not save optimizer/progress state and has no true resume path. Treating the partial run or a warm-start continuation as the requested end-to-end benchmark would make its results non-comparable with an uninterrupted run.
+- `CITY_WALL` is a combat-defense city bonus. Phase 1 intentionally excludes combat attacks and trains economy, exploration, village capture, and city growth through Turn 10, so selecting a wall consumes a city level-up choice and policy probability without advancing the scoped objective. Removing it from the legal set makes the task contract explicit and prevents the agent from learning or being evaluated on an unsupported choice. This is a Phase 1 policy restriction, not a claim that `CITY_WALL` is invalid in the full game; a later combat-capable phase must revisit the mask.
+- `PythonEnv.openGui()` previously created its plumbing `viewerGame` from a procedural seed even after the runtime state had been initialized from a CSV level. That allowed the viewer's player/map topology to diverge from the `GameState` it displayed and could enter unsupported procedural-generation behavior for single-tribe maps. Reusing the loaded CSV gives rendering and debugging the same map source as training. The procedural path remains only as a compatibility fallback when the GUI is opened before `initFromLevel()` supplies a filename.
+- `LevelGenerator` actively loads `pol_env/Tribes/terrainProbs.json` and applies its tribe multipliers through `getTribeProb(...)` in the terrain and resource quota paths. Bardur still carried legacy forest, fruit, crop, and animal values that contradicted `MapGen.md`; updating the live JSON makes the intended `0.8` forest and zero-crop profile effective while returning fruit and animals to normal multipliers. The separate Bardur `postGenerate(ANIMAL, FOREST, 2, capital)` branch remains unchanged because it is a local starting-area guarantee rather than a global resource multiplier.
+- Ruin placement mistakenly passed `villageMap.get(ruin)` to `circle(...)`. That expression is placement state stored at the selected tile, not its map index, so the exclusion ring was applied near a low-numbered unrelated tile. The selected tile also needs explicit exclusion because `circle(center, 1)` returns only the surrounding ring. Marking the actual ruin tile and calling `circle(ruin, 1)` prevents both repeated selection of the same tile and adjacent ruins without altering the target counter or broader map-generation methodology.
+- The trainer's `enable_step_diagnostics` flag currently gates several normal gameplay logging paths in addition to expensive debug telemetry. A long run launched with diagnostics disabled exposed only optimization, research, tactical-rate, and SPS charts; final SPT, unit count, stars, reward, non-end-turn rate, and related gameplay charts were absent. Training documentation must therefore treat diagnostics as required for comparable W&B runs until those metrics are decoupled in code, while retaining diagnostics-off mode for throughput-only profiling.
+- Long training runs previously printed only average steps per second, requiring manual arithmetic to estimate completion. Deriving remaining time from the same cumulative SPS measurement adds negligible overhead and makes unattended-run planning easier. The calculation uses `num_iterations * batch_size`, the trainer's actual scheduled work, rather than the requested timestep value that may not be exactly divisible by a rollout batch.
+- The previous `model_run_benchmark_log.md` preserved the essential model-name-to-run-folder mapping but did not contain the exported W&B configuration or result fields needed to understand what each historical run recorded. Folding the export into that document makes the available evidence auditable without discarding the established changelog identities. The runs span substantial changes to observations, legal-action capacity and features, action filtering, reward shaping, maps, telemetry, the Java bridge, and trainer behavior, so presenting their final W&B values as a leaderboard would be misleading. The revised document therefore separates final training-summary snapshots from dedicated multi-episode evaluation and states that defensible re-testing requires locating the producing commit, restoring its historical code and dependency environment, restoring the matching checkpoint metadata, and re-running the evaluation there.
+- No replacement end-to-end training test will be run for `[Phase1-Data-025]`. While closing this update, a major impending project-direction change was identified that will materially alter the assumptions behind the present training setup. Spending another long run on the soon-to-be-superseded configuration would consume compute without producing a durable comparison. The exact new direction is intentionally not reconstructed here before it is specified; it will receive its own changelog rationale when scoped. This does not erase the targeted code/regression validation below or the failed 128-slot run, but it means this update is committed without a completed post-change training benchmark.
+
+### Implemented
+- Updated evaluation runtime defaults in `evaluate_brain.py`:
+  - changed model metadata legal-action clamp behavior:
+    - from `max_legal_actions = int(meta.get("max_legal_actions", 1024))`,
+    - to `max_legal_actions = max(int(meta.get("max_legal_actions", 256)), 256)`.
+  - effect:
+    - default when metadata is absent is now `256` (previously `1024`),
+    - metadata values below `256`, including the scrapped run's 128-slot sidecar, are raised to the current safe minimum before exporting `POLYVISION_MAX_LEGAL_ACTIONS`,
+    - larger historical capacities such as `1024` remain respected rather than being narrowed during evaluation.
+- Updated wrapper legal-action defaults and filter policy in `pol_env/Tribes/py/register_env.py`:
+  - changed `MAX_LEGAL_ACTIONS_DEFAULT`:
+    - from `1024`,
+    - to `256`.
+  - added explicit legal-action hard-mask in `_build_action_mask_and_mapping(...)`:
+    - for actions with `type == "LEVEL_UP"`, resolve `levelup_choice`,
+    - if `levelup_choice == "CITY_WALL"`, skip action from allowed legal set.
+  - effect:
+    - CITY_WALL level-up claims no longer enter padded legal-ID/mask/action-feature tensors.
+- Updated Java bridge viewer initialization in `pol_env/Tribes/src/core/game/PythonEnv.java`:
+  - added state field:
+    - `private String loadedLevelFile = null;`
+  - in `initFromLevel(...)`:
+    - now stores `loadedLevelFile = filename` after map initialization.
+  - in GUI setup path:
+    - when `loadedLevelFile` is available, initializes `viewerGame` via `viewerGame.init(players, loadedLevelFile, 0L, gs.getGameMode())`.
+    - retains previous generated-map fallback only when GUI starts before `initFromLevel(...)`.
+  - effect:
+    - GUI/viewer map source now matches the currently loaded CSV level by default,
+    - reduces accidental procedural generation paths in single-tribe render/debug sessions.
+- Updated PPO defaults in `py_rl/cleanrl/cleanrl/ppo.py`:
+  - changed `Args.max_legal_actions`:
+    - from `1024`,
+    - to `256`.
+  - changed `Agent(...)` constructor default `max_legal_actions`:
+    - from `1024`,
+    - to `256`.
+  - effect:
+    - trainer config and policy module defaults are consistent with wrapper/evaluation legal-slot sizing;
+    - the initial 128-slot version was superseded after tracked run `ia432pug` encountered 133 legal actions and failed at step `1,832,960`.
+- Updated the active Bardur values in `pol_env/Tribes/terrainProbs.json`:
+  - `FOREST`: `1.0 -> 0.8`;
+  - `MOUNTAIN`: remains `1.0`;
+  - `FRUIT`: `1.5 -> 1.0`;
+  - `CROPS`: `0.1 -> 0.0`;
+  - `ANIMAL`: `2.0 -> 1.0`;
+  - `ORE`: remains `1.0`;
+  - no other tribe entries changed.
+- Corrected ruin placement in `LevelGenerator.java`:
+  - exclusion now uses the selected tile index through `circle(ruin, 1)` instead of the stored placement state;
+  - the selected ruin tile itself is marked excluded because `circle(...)` does not include its center;
+  - extracted the existing ruin-target formula into a package-private helper so regression coverage can compare actual unique tiles with the generator's intended target.
+- Added `tests/java/core/levelgen/LevelGeneratorRegressionTest.java` as a dependency-free Java regression test for runtime Bardur modifiers, the independent starting-animal guarantee, deterministic ruin counts, uniqueness, and spacing.
+- Corrected the README and efficient-training guide to require `--enable-step-diagnostics --step-diagnostics-log-every 3` for W&B comparison runs, list the charts currently gated by the flag, and label diagnostics-off commands as throughput-only.
+- Expanded the per-iteration console SPS line with actual scheduled-step progress, percentage complete, duration ETA, and estimated local completion time.
+- Rebuilt `model_run_benchmark_log.md` using `wandb_export_2026-08-12T14_08_14.427+01_00.csv`:
+  - retained all 27 existing changelog/plain-English model labels and their exact W&B/run-folder identifiers;
+  - added W&B state, creation date, logged-versus-planned steps, actor mode, legal-action interface, rollout configuration, and final reported SPS for every registered run;
+  - added a separate table of final W&B training-summary snapshots for T10 SPT, custom SPT return, villages, city level, fog clearing, Organization research, technology count, and critic explained variance;
+  - documented that these exported scalars are final retained W&B values rather than standardized run-wide evaluation means and must not be used alone to rank models;
+  - separated the tracked 500-episode Organization-only-oracle comparison as stronger multi-episode evidence and recorded its protocol limitations;
+  - added explicit comparability criteria and a required metadata/evaluation format for future benchmark entries;
+  - added a prominent historical-compatibility warning explaining that old checkpoints may be impossible to compare or re-run correctly in the current environment and must instead be evaluated from a restored historical commit and environment.
+- Updated `CHANGELOG.md` with this detailed `[Phase1-Data-025]` entry to keep source-control documentation synchronized with the current pending change set.
+
+### Validation
+- Passed `git diff --check` for the pending tracked changes.
+- Parsed the changed Python modules successfully with Python's AST parser.
+- Ran a read-only fixed-seed legal-capacity survey with the ceiling temporarily set to `1024`:
+  - covered all 256 `phase1_pool_bardur_solo` maps;
+  - sampled 12,000 decision states across 280 completed episodes;
+  - observed legal-action counts: median `12`, p95 `37`, p99 `50`, p99.9 `63`, maximum `78`;
+  - the maximum left 50 slots of apparent headroom below the initially proposed 128-slot capacity, but the later tracked run proved this sampled survey was not sufficient to establish a safe hard bound.
+- Compared 128-slot and 1024-slot policy inputs on 512 states using the existing 6M legal-features checkpoint:
+  - zero greedy global-action mismatches;
+  - maximum valid-action logit absolute difference approximately `7.15e-7`;
+  - maximum valid-action probability absolute difference approximately `5.96e-8`;
+  - differences are within ordinary floating-point tolerance and show that unused padding did not materially change policy decisions in those sampled states; this comparison tested numerical equivalence, not whether every reachable legal set fits within 128 slots.
+- Recorded the online tracked-run failure that invalidated the 128-slot proposal:
+  - W&B run `ia432pug` / `Tribes-v0__ppo__1__1786541745` terminated at step `1,832,960` of `2,997,760` scheduled steps (61.1%);
+  - Worker 18 exposed `legal_action_count=133`, triggering the expected `max_legal_actions=128` fail-fast exception;
+  - gameplay metrics remained synced through approximately 1.833M steps and the latest saved model checkpoint remained at 1.75M steps;
+  - the run was scrapped as the requested completed benchmark because it ended early and the checkpoint contains model weights only, without the optimizer and progress state required for a true continuation.
+- Validated the replacement 256-slot configuration:
+  - parsed `evaluate_brain.py`, `register_env.py`, and `ppo.py` successfully with Python's AST parser;
+  - imported the live trainer, policy, and wrapper definitions and confirmed defaults of `256` for all three;
+  - confirmed evaluator capacity resolution raises 128-slot metadata to `256` while continuing to respect historical 1024-slot metadata;
+  - checked all current README and efficient-training commands use `--max-legal-actions 256`;
+  - passed `git diff --check` apart from line-ending conversion notices.
+- Compiled the complete Java source tree plus the new generator regression test successfully with `javac` and the existing `lib/json.jar` dependency.
+- Ran `core.levelgen.LevelGeneratorRegressionTest` successfully:
+  - verified all six Bardur multipliers through `LevelGenerator.getTribeProb(...)`;
+  - verified the Bardur starting-area animal post-generation guarantee independently of the global animal multiplier;
+  - verified the intended ruin count, unique tile count, and radius-1 spacing on fixed seeds `0` and `7` (which respectively exposed adjacent ruins and a duplicate-count shortfall before the fix).
+- Parsed the updated PPO module successfully and verified duration formatting for zero, minute, hour, and multi-day ETA values.
+- Reconciled the rebuilt benchmark document against both the previous registry and the W&B CSV export:
+  - all 27 prior changelog-name-to-run-name mappings remain present and unchanged;
+  - all 27 exported W&B rows map to registered runs;
+  - no registered run is missing from the export and no export row is left unmapped;
+  - both generated 27-row benchmark tables have consistent Markdown column counts;
+  - `git diff --check -- model_run_benchmark_log.md` passed apart from the repository's existing LF-to-CRLF working-tree notice.
+- Deferred at close-out:
+  - no replacement long training run will be performed because the current training configuration is about to be superseded by a major separately scoped change;
+  - targeted wrapper coverage for the `CITY_WALL` mask, a full 256-slot reset/rollout check, and the Java GUI smoke check remain unperformed and must not be inferred from the narrower validation above;
+  - secondary diagnostic/evaluation tools that explicitly request the historical 1024-slot capacity remain unchanged pending the next training-design decision.
+
 ## [Phase1-Docs-024] - 2026-08-10
 
 ### Scope

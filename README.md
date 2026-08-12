@@ -23,8 +23,8 @@ The current implementation is centered on a reproducible Phase 1 task: control B
 | Reward shaping | Dense SPT rewards are combined with exploration, neutral-village, capture, and tactical shaping. An additional terminal SPT bonus is configurable and disabled by default. |
 | Validation | Training can run a strict 10,000-state preflight validator, cache successful validation fingerprints, reject action collisions/canonicalization gaps, and abort on excessive illegal/fallback rates. |
 | Training | Vectorized PPO supports CUDA, deterministic seeds, TensorBoard, optional Weights & Biases, periodic checkpoints, final model export, and action-interface metadata sidecars. |
-| Evaluation | The repository includes checkpoint introspection, greedy baselines, an Organization-focused oracle comparison, hidden-village oracle analysis, per-map SPT analysis, and human terminal play. |
-| Diagnostics | Targeted scripts cover capture legality, visible-village targeting, coordinate consistency, legal feature tensors, reward behavior, bad-map traces, and environment throughput. |
+| Evaluation | The repository includes checkpoint introspection, greedy baselines, an Organization-focused oracle comparison, hidden-village oracle analysis, and human terminal play. |
+| Diagnostics | Targeted scripts cover capture legality, visible-village targeting, coordinate consistency, legal feature tensors, reward behavior, and environment throughput. |
 | Profiling | Optional end-to-end SPS profiling breaks time down across JVM calls, observation parsing, legal-action generation, feature construction, reward calculation, info construction, rollout collection, and PPO updates. |
 
 ## Phase 1 task
@@ -138,7 +138,6 @@ Java `Tribes` engine / PythonEnv bridge
 | `py_rl/cleanrl/cleanrl/ppo.py` | Primary PPO implementation used for current training. |
 | `evaluate_brain.py` | Single-checkpoint policy introspection and optional live Java rendering. |
 | `tools/` | Human play, reward smoke tests, and policy/oracle comparison utilities. |
-| `py_rl/cleanrl/diagnostics/` | Per-map evaluation and bad-map tracing tools. |
 | `runs/` | TensorBoard logs, checkpoints, final models, and action-interface metadata. |
 | `outputs/` | Evaluation reports, human-run traces, and SPS profiles. |
 
@@ -243,7 +242,7 @@ The wrapper also emits fixed-width sparse tensors so PPO does not need to score 
 - `legal_action_count`: number of usable slots;
 - `legal_action_features_padded`: per-slot semantic/economic features.
 
-The current default capacity is 128 legal slots. The wrapper and trainer fail fast if the legal set exceeds the configured capacity; use the same `--max-legal-actions` value for training and evaluation metadata.
+The current default capacity is 256 legal slots. The wrapper and trainer fail fast if the legal set exceeds the configured capacity; use the same `--max-legal-actions` value for training and evaluation metadata. A previous 128-slot trial failed at 1,832,960 training steps when a state exposed 133 legal actions, so 128 must not be used for long runs.
 
 ### Legal-action features
 
@@ -433,7 +432,7 @@ $env:POLYVISION_INFO_MODE='fast'
 python py_rl/cleanrl/cleanrl/ppo.py `
   --env-id Tribes-v0 `
   --actor-mode legal_only `
-  --max-legal-actions 128 `
+  --max-legal-actions 256 `
   --num-envs 12 `
   --num-steps 64 `
   --total-timesteps 6144 `
@@ -461,16 +460,21 @@ $env:WANDB_SILENT='true'
 python py_rl/cleanrl/cleanrl/ppo.py `
   --env-id Tribes-v0 `
   --actor-mode legal_features `
-  --max-legal-actions 128 `
+  --max-legal-actions 256 `
   --num-envs 20 `
   --total-timesteps 5000000 `
   --track `
   --save-model `
   --save-frequency 500000 `
-  --no-enable-step-diagnostics
+  --enable-step-diagnostics `
+  --step-diagnostics-log-every 3
 ```
 
 The strict action-interface validator is enabled by default here. A successful fingerprint is cached under `.cache/action_validator/` and reused while the relevant interface code and configuration remain unchanged. Use `--force-revalidate-action-interface` when you explicitly want a fresh validation pass.
+
+> **W&B chart requirement:** Keep `--enable-step-diagnostics` enabled for training runs that will be compared by gameplay metrics. In the current trainer, this flag controls not only detailed debugging data but also the logging path for final SPT, custom SPT return, unit count, stars, reward, city count, fog cleared, economy summaries, mean valid actions, non-end-turn rate, and mean delta SPT. Using `--no-enable-step-diagnostics` leaves optimization, research, tactical-rate, and SPS charts available, but the gameplay charts above will be absent. The flag cannot be changed after a process starts, so verify the recorded `enable_step_diagnostics` hyperparameter in W&B before leaving a long run unattended. A cadence of `--step-diagnostics-log-every 3` matches the previous Phase1-Data-023 comparison run and limits high-frequency scalar logging.
+
+At the end of every PPO iteration, the console reports average SPS, completed/scheduled steps, percentage progress, estimated time remaining, and estimated local finish time. The ETA uses average throughput since rollout collection began, so it is approximate and normally becomes more stable after the first several iterations.
 
 Hardware and code changes can alter the best `num_envs`. Historical repository measurements have favored both 12 and 20 under different code paths; benchmark on the target machine instead of treating one count as universally optimal.
 
@@ -507,6 +511,8 @@ wandb sync wandb/offline-run-*
 
 Separate full training, behavioral debugging, and throughput profiling. Expensive step diagnostics are valuable when investigating a specific failure but reduce sustained training throughput.
 
+For a model-quality or benchmark run, diagnostics must currently remain enabled because several required W&B gameplay charts share that logging gate. Reserve `--no-enable-step-diagnostics` for short SPS/throughput measurements where missing gameplay charts are acceptable.
+
 ### Behavioral debug run
 
 Add:
@@ -527,7 +533,7 @@ $env:POLYVISION_PROFILE_EVERY_N_STEPS='1000'
 python py_rl/cleanrl/cleanrl/ppo.py `
   --env-id Tribes-v0 `
   --actor-mode legal_features `
-  --max-legal-actions 128 `
+  --max-legal-actions 256 `
   --num-envs 20 `
   --total-timesteps 10240 `
   --no-track `
@@ -564,7 +570,7 @@ Use `--level-pool-glob`, `--level-selection-mode`, and `--base-seed` to mirror a
 ```powershell
 python tools/play_human_t10_wrapper.py `
   --level-pool-glob 'levels/phase1_pool_bardur_solo/*.csv' `
-  --max-legal-actions 128 `
+  --max-legal-actions 256 `
   --show-ansi-map
 ```
 
@@ -579,8 +585,6 @@ tools/eval_org_only_oracle_vs_ppo.py
 py_rl/cleanrl/cleanrl/evaluate_visible_greedy_movement.py
 py_rl/cleanrl/cleanrl/evaluate_no_fog_runtime_village_greedy.py
 py_rl/cleanrl/cleanrl/privileged_nearest_village_oracle.py
-py_rl/cleanrl/diagnostics/evaluate_spt_by_map.py
-py_rl/cleanrl/diagnostics/trace_bad_maps.py
 ```
 
 The hidden-village oracle and no-fog evaluator deliberately use information unavailable to a normal agent. They are diagnostic ceilings and causal probes, not fair competitors.
@@ -610,7 +614,7 @@ Frequently used environment variables:
 | `POLYVISION_LEVEL_SELECTION_MODE` | `round_robin` | `round_robin` or `seeded_random`. |
 | `POLYVISION_BASE_SEED` | `42` | Base for wrapper-managed episode and map-selection streams. |
 | `POLYVISION_SOLO_NO_OPPONENT_MODE` | `0` | Disable opponent participation in the Java bridge. Recommended as `1` for solo Phase 1 training. |
-| `POLYVISION_MAX_LEGAL_ACTIONS` | `128` | Fixed sparse legal-slot capacity; normally set by PPO's matching CLI option. |
+| `POLYVISION_MAX_LEGAL_ACTIONS` | `256` | Fixed sparse legal-slot capacity; normally set by PPO's matching CLI option. |
 | `POLYVISION_INFO_MODE` | `fast` | Info payload mode: `fast`, `train`, or `debug`. |
 | `POLYVISION_TERMINAL_SPT_REWARD_ENABLED` | `0` | Enable the Turn 10 terminal SPT bonus. |
 | `POLYVISION_TERMINAL_SPT_BASE_WEIGHT` | `1.0` | Weight for final SPT. |
@@ -647,7 +651,7 @@ POLYVISION_BATCH_LEGAL_FETCH_EQUIV_CHECK_EVERY_N_STEPS
 - The wrapper contains tactical guardrails that sometimes narrow otherwise legal engine choices, especially before the second city is acquired.
 - The Gym observation is a hand-built flat vector, not a learned visual representation of the commercial game.
 - Each parallel environment launches a JVM; environment stepping and Python-side legal/action-feature processing remain major throughput costs.
-- The fixed 128-slot legal tensor is intentionally fail-fast. A future task with broader action sets may require a larger capacity and new checkpoint metadata.
+- The fixed 256-slot legal tensor is intentionally fail-fast. It is a pragmatic increase after a 128-slot run encountered 133 legal actions, not proof that every future task will remain below 256; broader action sets may require a larger capacity and new checkpoint metadata.
 - Map-generation parity with the commercial game is partial. See `MapGen.md` for the current parity inventory.
 - Root smoke scripts provide integration confidence but do not constitute comprehensive automated regression coverage.
 - The Java Swing renderer requires a graphical display. Headless training and image/text rendering do not.
