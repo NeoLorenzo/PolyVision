@@ -23,7 +23,7 @@ Test-Path out/core/game/PythonEnv.class
 
 The final command should print `True`. The Python bridge constructs its classpath from `out` and `lib/json.jar`; no manual `CLASSPATH` is normally needed.
 
-At the current cleanup boundary, a clean compile can instead fail because `GameState.java` still imports `core.levelgen.LevelGenerator` while pending repository-cleanup changes remove that source. This is a runtime/source-tree mismatch outside this documentation rewrite. Restore the matching tracked source or resolve the Java dependency in a dedicated code change; do not treat a pre-existing `out/core/game/PythonEnv.class` as proof that the current source compiles.
+Cleanup commit `6814978` briefly removed `core.levelgen.LevelGenerator` while `GameState.java` still depended on it. `Phase1-CI_Implimentation-029` restored the generator and CLI exactly. If a checkout at the cleanup commit fails with missing `LevelGenerator` symbols, update to this revision or later rather than relying on a pre-existing `out/core/game/PythonEnv.class`.
 
 ## JVMs linger or parallel startup fails
 

@@ -12,6 +12,32 @@ Every new change entry must include `Scope`, `Rationale`, `Implemented`, and `Va
 
 Do not substitute a description of what changed for the reason it changed. If the original rationale or validation is unknown, record that explicitly rather than reconstructing it as fact.
 
+## [Phase1-Repo_Cleanup_Fix-028.5] - (2026-08-12)
+
+### Scope
+- Restored `pol_env/Tribes/src/core/levelgen/LevelGenerator.java` and `GenerateLevelCli.java`, which were incorrectly removed by `Phase1-Repo_Cleanup-028` even though the Java source tree still depends on the generator.
+- Re-established clean compilation of the complete Tribes Java engine, including both CSV-backed environment execution and the existing procedural new-game paths used by `Game`, `Play`, tournaments, elites, and the optional generation CLI.
+- Corrected current setup/troubleshooting documentation so it no longer describes the temporary missing-generator build failure as an active repository limitation.
+- Made no gameplay, generation-algorithm, map-pipeline, Python environment, PPO, reward, observation, or action-interface changes; the Java files were restored from commit `9039682`, immediately before the cleanup deletion, with only one trailing-whitespace line removed.
+
+### Rationale
+- `LevelGenerator.java` was not merely an obsolete synthetic-corpus utility. `core.game.GameState` imports and instantiates `LevelGenerator`, and the seed-based `Game.init(...)` overload remains reachable from standalone play, tournament, elite-search, and diagnostic viewer paths.
+- Deleting the class caused a clean compilation of all Java sources to fail with three errors: the missing `core.levelgen` package import and two unresolved `LevelGenerator` symbols in `GameState.java`. Existing compiled classes masked this source-level regression and allowed the CSV-backed Python environment to continue running.
+- `GenerateLevelCli.java` is not required by `GameState`, but it is a small supported front end for the same retained generator and remains listed in `pol_env/Tribes/sources.txt`. Restoring both files keeps that source manifest coherent and avoids leaving a partially deleted Java subsystem.
+- Exact restoration was preferred over altering `GameState` or removing procedural `Game.init(...)` overloads because this update repairs an accidental cleanup regression without changing behavior or deciding the future architecture of procedural generation.
+
+### Implemented
+- Recovered `LevelGenerator.java` and `GenerateLevelCli.java` from parent commit `9039682`; `GenerateLevelCli.java` is byte-identical, while `LevelGenerator.java` differs only by removal of one trailing-whitespace line so the re-addition passes repository diff checks.
+- Restored the `core.levelgen` package implementation expected by `GameState.java` and the paths already recorded in `pol_env/Tribes/sources.txt`.
+- Removed the temporary warning from `docs/getting-started.md` that a clean build required sources absent from the cleanup commit.
+- Replaced the corresponding active-failure paragraph in `docs/troubleshooting.md` with a recovery note explaining that cleanup commit `6814978` had the regression and this update restores the dependency.
+- Retained the cleanup of the obsolete Python synthetic-pool scripts and web generator helpers; restoring the engine dependency does not make those retired operational workflows current documentation.
+
+### Validation
+- Compared both restored files against `9039682`: `GenerateLevelCli.java` has the identical Git blob, and a whitespace-ignoring diff for `LevelGenerator.java` reports no source differences.
+- Compiled all 239 current Java source files into a new empty temporary output directory with `javac -cp pol_env/Tribes/lib/json.jar -sourcepath pol_env/Tribes/src`; compilation completed successfully with only the existing unchecked-operation notes.
+- Confirmed the clean output contains `core/game/PythonEnv.class`, `core/levelgen/LevelGenerator.class`, and `core/levelgen/GenerateLevelCli.class`, proving the result did not rely on stale classes under `pol_env/Tribes/out/`.
+
 ## [Phase1-Repo_Cleanup-028] - (2026-08-12)
 
 ### Scope

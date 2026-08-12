@@ -31,7 +31,7 @@ javac -cp "lib/json.jar" -d out -sourcepath src $sources
 Set-Location ../..
 ```
 
-Successful compilation creates `pol_env/Tribes/out/core/game/PythonEnv.class`. At the current cleanup boundary, a clean compile requires the tracked level-generator sources that other pending worktree changes have removed while `GameState.java` still references them; see [Troubleshooting](troubleshooting.md). Existing compiled classes can still run the documented contract validator, but they are not a substitute for a reproducible clean build.
+Successful compilation creates `pol_env/Tribes/out/core/game/PythonEnv.class`.
 
 ## Validate the current map contract
 
