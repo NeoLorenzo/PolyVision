@@ -3,6 +3,7 @@ runs/
 wandb/
 __pycache__/
 action_embeddings_cache/
+.cache/action_validator/
 *.py[cod]
 
 # OS/editor artifacts

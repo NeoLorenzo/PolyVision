@@ -20,11 +20,12 @@ except Exception:
     register_env = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(register_env)
 
+from pol_env.Tribes.py.environment_contract import observation_layout
+
 
 CAPTURE_TARGET_ACTIONS = 50
 MAX_EPISODES = 100
 MAX_STEPS_PER_EPISODE = 20
-EXPECTED_OBS_DIM = 597
 EXPECTED_FEAT_DIM = 42
 
 IDX_IS_CAPTURE_OLD = 13
@@ -32,7 +33,7 @@ APPENDED_RANGE = list(range(22, 42))
 
 
 def set_required_env():
-    os.environ["POLYVISION_LEVEL_POOL_GLOB"] = "levels/phase1_pool_bardur_solo/*.csv"
+    os.environ.setdefault("POLYVISION_LEVEL_POOL_GLOB", "levels/phase1_pool_bardur_solo/*.csv")
     os.environ["POLYVISION_LEVEL_SELECTION_MODE"] = "round_robin"
     os.environ["POLYVISION_INFO_MODE"] = "fast"
     os.environ["POLYVISION_SOLO_NO_OPPONENT_MODE"] = "1"
@@ -207,10 +208,15 @@ class CaptureValidator:
                 self.episodes_run += 1
                 obs, info = env.reset(seed=1000 + ep)
                 uw = env.unwrapped
-
-                self.check(tuple(np.asarray(obs).shape) == (EXPECTED_OBS_DIM,),
+                try:
+                    layout = observation_layout(int(info["map_width"]), int(info["map_height"]))
+                    expected_obs_dim = int(layout.expected_obs_dim)
+                except Exception as exc:
+                    self.fail("could not derive observation dimensions from reset metadata", {"ep": ep, "error": str(exc)})
+                    break
+                self.check(tuple(np.asarray(obs).shape) == (expected_obs_dim,),
                            "obs dim mismatch at reset",
-                           {"ep": ep, "shape": tuple(np.asarray(obs).shape)})
+                           {"ep": ep, "shape": tuple(np.asarray(obs).shape), "expected": expected_obs_dim})
 
                 for step in range(MAX_STEPS_PER_EPISODE):
                     raw_obs = uw.tribes_env._last_obs
@@ -323,4 +329,3 @@ if __name__ == "__main__":
     else:
         print("capture_validation_result: PASS")
     raise SystemExit(rc)
-

@@ -1,0 +1,4 @@
+github.com/pierrec/lz4/v4 v4.1.22 h1:cKFw6uJDK+/gfw5BcDL0JL5aBsAFdsIT18eRtLj7VIU=
+github.com/pierrec/lz4/v4 v4.1.22/go.mod h1:gZWDp/Ze/IJXGXf23ltt2EXimqmTUXEy0GFuRQyBid4=
+github.com/samuelyuan/polytopiamapmodelgo v0.0.0-20250928064600-d09f4e08b66d h1:K63aMiV+wqTQTGBRYE/RVLwIzxmAY4q8p1tWsdSkoPg=
+github.com/samuelyuan/polytopiamapmodelgo v0.0.0-20250928064600-d09f4e08b66d/go.mod h1:Qtj153LGxD7knRy8QatffCjz2NUyX38jJlU2HwI3JGo=

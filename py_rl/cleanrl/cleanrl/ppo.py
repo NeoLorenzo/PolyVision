@@ -35,6 +35,10 @@ except Exception:
     spec.loader.exec_module(register_env)
 
 from pol_env.Tribes.py.register_env import TribesGymWrapper  # adjust if folder name differs
+from pol_env.Tribes.py.environment_contract import (
+    compute_level_pool_identity,
+    environment_compatibility_metadata,
+)
 
 
 def _format_duration(seconds: float) -> str:
@@ -965,6 +969,9 @@ def _build_action_validator_fingerprint(
     actor_mode: str,
     max_legal_actions: int,
     legal_action_feature_dim: int,
+    environment_metadata: dict,
+    pool_identity: str,
+    pool_files: list | None = None,
 ):
     tracked_files = []
     tracked_files.append(os.path.abspath(__file__))
@@ -988,13 +995,22 @@ def _build_action_validator_fingerprint(
             file_hashes[rel] = f"ERROR:{e}"
 
     payload = {
-        "validator_version": "action_validator_cache_v1",
+        "validator_version": "action_validator_cache_v2",
         "env_id": str(env_id),
         "states": int(states),
         "seed": int(seed),
         "actor_mode": str(actor_mode),
         "max_legal_actions": int(max_legal_actions),
         "legal_action_feature_dim": int(legal_action_feature_dim),
+        "map_width": int(environment_metadata["map_width"]),
+        "map_height": int(environment_metadata["map_height"]),
+        "observation_dim": int(environment_metadata["observation_dim"]),
+        "action_space_n": int(environment_metadata["action_space_n"]),
+        "action_catalog_fingerprint": str(environment_metadata["action_catalog_fingerprint"]),
+        "legal_action_feature_version": str(environment_metadata["legal_action_feature_version"]),
+        "environment_legal_action_feature_dim": int(environment_metadata["legal_action_feature_dim"]),
+        "pool_identity": str(pool_identity),
+        "pool_files": list(pool_files or []),
         "file_hashes": file_hashes,
     }
     payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"))
@@ -1012,40 +1028,53 @@ def _validate_action_interface(
     cache_enabled: bool = True,
     force_revalidate: bool = False,
 ):
-    fingerprint, fingerprint_payload = _build_action_validator_fingerprint(
-        env_id=env_id,
-        states=states,
-        seed=seed,
-        actor_mode=actor_mode,
-        max_legal_actions=max_legal_actions,
-        legal_action_feature_dim=legal_action_feature_dim,
-    )
-    cache_dir = os.path.join(_repo_root, ".cache", "action_validator")
-    cache_path = os.path.join(cache_dir, f"{fingerprint}.json")
-    if bool(cache_enabled) and not bool(force_revalidate) and os.path.isfile(cache_path):
-        try:
-            with open(cache_path, "r", encoding="utf-8") as f:
-                cached = json.load(f)
-            if bool(cached.get("passed", False)):
-                print(
-                    f"[ACTION_VALIDATOR] Cache hit: reusing successful strict validation "
-                    f"over {int(cached.get('checked_states', 0))} decision states."
-                )
-                print(
-                    "[ACTION_VALIDATOR] Cached situation coverage seen:"
-                    f" spawn_warrior={bool(cached.get('saw_spawn_warrior', False))},"
-                    f" resource_animal={bool(cached.get('saw_resource_animal', False))},"
-                    f" capture_village={bool(cached.get('saw_capture_village', False))},"
-                    f" research_forestry={bool(cached.get('saw_research_forestry', False))},"
-                    f" clear_forest={bool(cached.get('saw_clear_forest', False))}"
-                )
-                return
-        except Exception:
-            pass
-
     env = gym.make(env_id)
     try:
         obs, info = env.reset(seed=seed)
+        wrapper = env.unwrapped
+        contract_meta = environment_compatibility_metadata(
+            wrapper,
+            actor_mode=actor_mode,
+            max_legal_actions=max_legal_actions,
+        )
+        level_paths = list(getattr(wrapper, "_level_pool", []))
+        pool_identity, pool_files = compute_level_pool_identity(
+            level_paths,
+            relative_to=_repo_root,
+        )
+        fingerprint, fingerprint_payload = _build_action_validator_fingerprint(
+            env_id=env_id,
+            states=states,
+            seed=seed,
+            actor_mode=actor_mode,
+            max_legal_actions=max_legal_actions,
+            legal_action_feature_dim=legal_action_feature_dim,
+            environment_metadata=contract_meta,
+            pool_identity=pool_identity,
+            pool_files=pool_files,
+        )
+        cache_dir = os.path.join(_repo_root, ".cache", "action_validator")
+        cache_path = os.path.join(cache_dir, f"{fingerprint}.json")
+        if bool(cache_enabled) and not bool(force_revalidate) and os.path.isfile(cache_path):
+            try:
+                with open(cache_path, "r", encoding="utf-8") as f:
+                    cached = json.load(f)
+                if bool(cached.get("passed", False)):
+                    print(
+                        f"[ACTION_VALIDATOR] Cache hit: reusing successful strict validation "
+                        f"over {int(cached.get('checked_states', 0))} decision states."
+                    )
+                    print(
+                        "[ACTION_VALIDATOR] Cached situation coverage seen:"
+                        f" spawn_warrior={bool(cached.get('saw_spawn_warrior', False))},"
+                        f" resource_animal={bool(cached.get('saw_resource_animal', False))},"
+                        f" capture_village={bool(cached.get('saw_capture_village', False))},"
+                        f" research_forestry={bool(cached.get('saw_research_forestry', False))},"
+                        f" clear_forest={bool(cached.get('saw_clear_forest', False))}"
+                    )
+                    return
+            except Exception:
+                pass
         checked = 0
         saw_spawn_warrior = False
         saw_resource_animal = False
@@ -1432,6 +1461,9 @@ if __name__ == "__main__":
         "canonicalizer_version": None,
         "map_width": None,
         "map_height": None,
+        "observation_dim": int(np.prod(envs.single_observation_space.shape)),
+        "action_space_n": int(envs.single_action_space.n),
+        "action_catalog_fingerprint": None,
         "global_action_space_n": int(envs.single_action_space.n),
         "action_offset_table_hash": None,
         "max_legal_actions": int(args.max_legal_actions),
@@ -1443,6 +1475,9 @@ if __name__ == "__main__":
         "canonicalizer_version",
         "map_width",
         "map_height",
+        "observation_dim",
+        "action_space_n",
+        "action_catalog_fingerprint",
         "global_action_space_n",
         "action_offset_table_hash",
         "max_legal_actions",

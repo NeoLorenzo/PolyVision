@@ -24,6 +24,11 @@ except Exception:
     pass
 
 from py_rl.cleanrl.cleanrl.ppo import Agent
+from pol_env.Tribes.py.environment_contract import (
+    environment_compatibility_metadata,
+    read_checkpoint_metadata,
+    validate_checkpoint_compatibility,
+)
 
 
 # Legal-action feature indices (from TribesGymWrapper.LEGAL_ACTION_FEATURE_NAMES)
@@ -70,29 +75,6 @@ def _find_latest_model(explicit_path: Optional[str]) -> str:
         raise FileNotFoundError("No .cleanrl_model files found under runs/**")
     candidates.sort(key=lambda p: os.path.getmtime(p), reverse=True)
     return candidates[0]
-
-
-def _load_action_interface_meta(model_path: str) -> Dict[str, Any]:
-    meta_path = model_path + ".action_interface.json"
-    if not os.path.isfile(meta_path):
-        return {}
-    try:
-        with open(meta_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def _infer_actor_mode_from_state_dict(state_dict: Dict[str, Any]) -> str:
-    keys = [str(k) for k in state_dict.keys()]
-    has_dense_actor = any(k.startswith("actor.") for k in keys)
-    has_feature_path = any(k.startswith("action_feature_encoder.") or k.startswith("action_scorer.") for k in keys)
-    if has_dense_actor:
-        return "dense_debug"
-    if has_feature_path:
-        return "legal_features"
-    return "legal_only"
 
 
 def _extract_single_legal_tensors(info: Dict[str, Any]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -761,17 +743,20 @@ def main() -> None:
     print(f"Using latest PPO checkpoint: {model_path}")
     print(f"Checkpoint mtime: {model_mtime}")
 
-    meta = _load_action_interface_meta(model_path)
-    state_dict = torch.load(model_path, map_location="cpu")
+    meta = read_checkpoint_metadata(model_path)
     actor_mode = str(meta.get("actor_mode", "")).strip().lower()
-    if actor_mode not in ("legal_only", "legal_features", "dense_debug"):
-        actor_mode = _infer_actor_mode_from_state_dict(state_dict)
     max_legal_actions = int(meta.get("max_legal_actions", 1024))
-    legal_action_feature_dim = int(meta.get("legal_action_feature_dim", 22))
+    legal_action_feature_dim = int(meta.get("legal_action_feature_dim"))
     os.environ["POLYVISION_MAX_LEGAL_ACTIONS"] = str(max_legal_actions)
 
     device = torch.device(args.device if (args.device == "cpu" or torch.cuda.is_available()) else "cpu")
     env = gym.make("Tribes-v0")
+    environment_meta = environment_compatibility_metadata(
+        env.unwrapped,
+        actor_mode=actor_mode,
+        max_legal_actions=max_legal_actions,
+    )
+    validate_checkpoint_compatibility(meta, environment_meta)
     env_adapter = SimpleNamespace(
         single_observation_space=env.observation_space,
         single_action_space=env.action_space,
@@ -782,7 +767,7 @@ def main() -> None:
         max_legal_actions=max_legal_actions,
         legal_action_feature_dim=legal_action_feature_dim,
     ).to(device)
-    ppo_agent.load_state_dict(torch.load(model_path, map_location=device), strict=False)
+    ppo_agent.load_state_dict(torch.load(model_path, map_location=device))
     ppo_agent.eval()
 
     print(

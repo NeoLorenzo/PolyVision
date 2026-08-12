@@ -9,6 +9,7 @@ import re
 import time
 from gymnasium.envs.registration import register
 from .gym_env import TribesGymEnv, make_default_env
+from .environment_contract import MapGeometryError, validate_fixed_square_geometry
 
 
 class GlobalActionCatalog:
@@ -392,11 +393,14 @@ class TribesGymWrapper(gym.Env):
             bootstrap_level, bootstrap_idx = self._select_level_for_reset(bootstrap_seed)
             self._current_level_file = bootstrap_level
             self._current_level_index = bootstrap_idx
+            self._validate_level_file_is_square(self._current_level_file)
             obs = self.tribes_env.reset(self._current_level_file, bootstrap_seed)
             dims = self._board_dimensions_from_obs(obs)
             if dims is None:
                 raise RuntimeError("Cannot infer board dimensions for action catalog.")
-            width, height = dims
+            width, height = validate_fixed_square_geometry(
+                dims[0], dims[1], level_path=self._current_level_file
+            )
             vocab = self._load_action_vocab()
             self._catalog = GlobalActionCatalog(
                 width=width,
@@ -431,6 +435,8 @@ class TribesGymWrapper(gym.Env):
                 shape=obs_array.shape, 
                 dtype=np.float32
             )
+        except MapGeometryError:
+            raise
         except Exception as e:
             # Fallback to placeholders if initialization fails
             print(f"Warning: Could not initialize environment properly: {e}")
@@ -457,10 +463,23 @@ class TribesGymWrapper(gym.Env):
         self._current_level_file = level_file
         self._current_level_index = int(level_index)
         self._last_reset_seed = int(episode_seed)
+        self._validate_level_file_is_square(self._current_level_file)
         t_java0 = time.perf_counter() if self._profile_sps_enabled else None
         obs = self.tribes_env.reset(self._current_level_file, self._last_reset_seed)
         if self._profile_sps_enabled:
             t_reset_java += time.perf_counter() - t_java0
+        loaded_dims = self._board_dimensions_from_obs(obs)
+        if loaded_dims is None:
+            raise MapGeometryError(
+                f"Cannot infer loaded map geometry: {self._current_level_file}"
+            )
+        loaded_width, loaded_height = validate_fixed_square_geometry(
+            loaded_dims[0],
+            loaded_dims[1],
+            self._catalog.width,
+            self._catalog.height,
+            level_path=self._current_level_file,
+        )
         self._episode_index += 1
         self._turn_count = 0
         self._unit_previous_tiles = {}
@@ -514,10 +533,13 @@ class TribesGymWrapper(gym.Env):
             "info_mode": self._info_mode,
             "catalog_version": self.CATALOG_VERSION,
             "canonicalizer_version": self.CANONICALIZER_VERSION,
-            "map_width": int(self._catalog.width) if self._catalog is not None else None,
-            "map_height": int(self._catalog.height) if self._catalog is not None else None,
+            "map_width": int(loaded_width),
+            "map_height": int(loaded_height),
+            "observation_dim": int(self.observation_space.shape[0]),
             "global_action_space_n": int(self.action_space.n),
+            "action_space_n": int(self.action_space.n),
             "action_offset_table_hash": self._catalog_fingerprint,
+            "action_catalog_fingerprint": self._catalog_fingerprint,
             "max_legal_actions": int(self._max_legal_actions),
         }
         t_slot0 = time.perf_counter() if self._profile_sps_enabled else None
@@ -567,6 +589,13 @@ class TribesGymWrapper(gym.Env):
             info["profile_env_reset_total_s"] = float(time.perf_counter() - t_reset_start)
         t_obs0 = time.perf_counter() if self._profile_sps_enabled else None
         obs_arr = self._dict_to_array(obs)
+        if tuple(obs_arr.shape) != tuple(self.observation_space.shape):
+            raise RuntimeError(
+                "Observation contract mismatch after validated map reset:\n"
+                f"  declared observation shape: {self.observation_space.shape}\n"
+                f"  loaded observation shape: {obs_arr.shape}\n"
+                f"  loaded map geometry: {loaded_width}x{loaded_height}"
+            )
         if self._profile_sps_enabled:
             t_reset_obs_flatten += time.perf_counter() - t_obs0
             info["profile_env_reset_obs_flatten_s"] = float(t_reset_obs_flatten)
@@ -2514,7 +2543,8 @@ class TribesGymWrapper(gym.Env):
         if not os.path.exists(path):
             return []
         try:
-            lines = open(path, "r", encoding="utf-8").read().splitlines()
+            with open(path, "r", encoding="utf-8") as f:
+                lines = f.read().splitlines()
         except Exception:
             return []
         start = None
@@ -2566,6 +2596,27 @@ class TribesGymWrapper(gym.Env):
         if os.path.isabs(fallback_level):
             return [fallback_level]
         return [os.path.join(root, fallback_level)]
+
+    def _validate_level_file_is_square(self, level_path):
+        """Reject malformed/rectangular CSVs before the square-only Java loader runs."""
+        try:
+            with open(level_path, "r", encoding="utf-8-sig") as f:
+                lines = [line.strip() for line in f.read().splitlines() if line.strip()]
+        except OSError as exc:
+            raise MapGeometryError(f"Could not inspect level geometry: {level_path}: {exc}") from exc
+        if not lines:
+            raise MapGeometryError(f"Invalid map geometry: empty level file: {level_path}")
+        row_widths = [len(line.split(",")) for line in lines]
+        if len(set(row_widths)) != 1:
+            raise MapGeometryError(
+                "Malformed map geometry: rows have different column counts.\n"
+                f"  row widths: {row_widths}\n"
+                f"  level: {level_path}\n\n"
+                "Use a square, dimension-homogeneous level pool."
+            )
+        validate_fixed_square_geometry(
+            row_widths[0], len(lines), level_path=level_path
+        )
 
     def _ensure_seed_stream_initialized(self, seed):
         seed_i = int(seed)
@@ -4703,7 +4754,7 @@ class TribesGymWrapper(gym.Env):
             )
     
     def _dict_to_array(self, obs_dict):
-        # Keep the original 438-entry observation prefix unchanged for compatibility.
+        # Preserve the legacy field ordering; its length is 3*n_tiles + 6.
         features = []
         board = obs_dict.get("board", {})
 

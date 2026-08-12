@@ -20,6 +20,27 @@ except Exception:
     pass
 
 from py_rl.cleanrl.cleanrl.ppo import Agent, _extract_vector_legal_feature_tensors, _extract_vector_legal_tensors
+from pol_env.Tribes.py.environment_contract import (
+    environment_compatibility_metadata,
+    read_checkpoint_metadata,
+    validate_checkpoint_compatibility,
+)
+
+
+def _checkpoint_contract_for_env(model_path, envs, expected_actor_mode):
+    meta = read_checkpoint_metadata(model_path)
+    actor_mode = str(meta.get("actor_mode", "")).strip().lower()
+    if actor_mode != str(expected_actor_mode):
+        # The centralized validator will format the authoritative mismatch.
+        actor_mode = str(expected_actor_mode)
+    max_legal_actions = int(meta.get("max_legal_actions", 1024))
+    environment_meta = environment_compatibility_metadata(
+        envs.envs[0].unwrapped,
+        actor_mode=actor_mode,
+        max_legal_actions=max_legal_actions,
+    )
+    validate_checkpoint_compatibility(meta, environment_meta)
+    return meta
 
 
 @dataclass
@@ -188,16 +209,18 @@ def test_actor_uses_features(envs, obs, infos, model_path=None, seed=1):
     ids_t, valid_t, feats_t = _extract_tensors(infos, envs, device, feature_dim=feature_dim)
     obs_t = torch.tensor(obs, dtype=torch.float32, device=device)
 
+    checkpoint_meta = _checkpoint_contract_for_env(model_path, envs, "legal_features") if model_path else {}
+    max_legal_actions = int(checkpoint_meta.get("max_legal_actions", 1024))
     agent = Agent(
         envs,
         actor_mode="legal_features",
-        max_legal_actions=1024,
+        max_legal_actions=max_legal_actions,
         legal_action_feature_dim=int(feature_dim),
     ).to(device)
     loaded = False
     if model_path:
         sd = torch.load(model_path, map_location=device)
-        agent.load_state_dict(sd, strict=False)
+        agent.load_state_dict(sd)
         loaded = True
 
     logits_base = _slot_logits(agent, obs_t, ids_t, valid_t, feats_t)
@@ -247,16 +270,18 @@ def test_selected_vs_average_move_features(model_path=None, steps=400, seed=7):
         ids_t, valid_t, feats_t = _extract_tensors(infos, envs, device, feature_dim=feature_dim)
         obs_t = torch.tensor(obs, dtype=torch.float32, device=device)
 
+        checkpoint_meta = _checkpoint_contract_for_env(model_path, envs, "legal_features") if model_path else {}
+        max_legal_actions = int(checkpoint_meta.get("max_legal_actions", 1024))
         agent = Agent(
             envs,
             actor_mode="legal_features",
-            max_legal_actions=1024,
+            max_legal_actions=max_legal_actions,
             legal_action_feature_dim=int(feature_dim),
         ).to(device)
         loaded = False
         if model_path:
             sd = torch.load(model_path, map_location=device)
-            agent.load_state_dict(sd, strict=False)
+            agent.load_state_dict(sd)
             loaded = True
 
         stats = MoveQualityStats()

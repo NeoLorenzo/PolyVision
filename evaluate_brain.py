@@ -11,6 +11,12 @@ import torch
 from torch.distributions.categorical import Categorical
 
 from pol_env.Tribes.py.register_env import TribesGymWrapper
+from pol_env.Tribes.py.environment_contract import (
+    environment_compatibility_metadata,
+    read_checkpoint_metadata,
+    validate_checkpoint_compatibility,
+    validate_fixed_square_geometry,
+)
 from py_rl.cleanrl.cleanrl.ppo import Agent
 
 
@@ -25,25 +31,6 @@ def find_latest_model(explicit_path: str | None) -> str:
         raise FileNotFoundError("No .cleanrl_model files found under runs/**")
     candidates.sort(key=lambda p: os.path.getmtime(p), reverse=True)
     return candidates[0]
-
-
-def load_action_interface_meta(model_path: str) -> dict:
-    meta_path = model_path + ".action_interface.json"
-    if not os.path.isfile(meta_path):
-        return {}
-    try:
-        with open(meta_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def infer_actor_mode_from_state_dict(state_dict: dict) -> str:
-    if not isinstance(state_dict, dict):
-        return "legal_only"
-    has_dense_actor = any(str(k).startswith("actor.") for k in state_dict.keys())
-    return "dense_debug" if has_dense_actor else "legal_only"
 
 
 def safe_array_mask(mask, action_n: int) -> np.ndarray:
@@ -374,24 +361,34 @@ def main() -> None:
         os.environ["POLYVISION_BASE_SEED"] = str(int(args.base_seed))
 
     model_path = find_latest_model(args.model_path)
-    meta = load_action_interface_meta(model_path)
-    meta_actor_mode = str(meta.get("actor_mode", "")).strip().lower()
-    state_dict = torch.load(model_path, map_location="cpu")
-    actor_mode = meta_actor_mode if meta_actor_mode in ("legal_only", "dense_debug") else infer_actor_mode_from_state_dict(state_dict)
-    max_legal_actions = max(int(meta.get("max_legal_actions", 256)), 256)
+    meta = read_checkpoint_metadata(model_path)
+    actor_mode = str(meta.get("actor_mode", "")).strip().lower()
+    max_legal_actions = int(meta.get("max_legal_actions", 256))
+    legal_action_feature_dim = int(meta.get("legal_action_feature_dim"))
     os.environ["POLYVISION_MAX_LEGAL_ACTIONS"] = str(max(1, max_legal_actions))
     device = torch.device(args.device if torch.cuda.is_available() or args.device == "cpu" else "cpu")
 
     env = TribesGymWrapper()
     try:
+        environment_meta = environment_compatibility_metadata(
+            env,
+            actor_mode=actor_mode,
+            max_legal_actions=max_legal_actions,
+        )
+        validate_checkpoint_compatibility(meta, environment_meta)
         env_adapter = SimpleNamespace(
             single_observation_space=env.observation_space,
             single_action_space=env.action_space,
         )
-        agent = Agent(env_adapter, actor_mode=actor_mode, max_legal_actions=max_legal_actions).to(device)
+        agent = Agent(
+            env_adapter,
+            actor_mode=actor_mode,
+            max_legal_actions=max_legal_actions,
+            legal_action_feature_dim=legal_action_feature_dim,
+        ).to(device)
 
         state_dict = torch.load(model_path, map_location=device)
-        agent.load_state_dict(state_dict, strict=False)
+        agent.load_state_dict(state_dict)
         agent.eval()
 
         print("=" * 100)
@@ -410,7 +407,15 @@ def main() -> None:
             env._current_level_index = int(level_index)
             env._last_reset_seed = int(episode_seed)
             env._episode_index += 1
+            env._validate_level_file_is_square(level_file)
             obs = env.tribes_env.reset(level_file, episode_seed)
+            loaded_dims = env._board_dimensions_from_obs(obs)
+            if loaded_dims is None:
+                raise RuntimeError(f"Cannot infer loaded map geometry: {level_file}")
+            validate_fixed_square_geometry(
+                loaded_dims[0], loaded_dims[1], env._catalog.width, env._catalog.height,
+                level_path=level_file,
+            )
             env._turn_count = 0
             print(f"Map: {os.path.basename(level_file)} | pool_index={level_index} | episode_seed={episode_seed}")
 

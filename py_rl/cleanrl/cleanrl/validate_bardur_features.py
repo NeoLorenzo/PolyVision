@@ -21,10 +21,9 @@ except Exception:
     register_env = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(register_env)
 
+from pol_env.Tribes.py.environment_contract import observation_layout
 
-LEGACY_OBS_DIM = 438
-RESOURCE_BLOCK_DIM = 144
-EXPECTED_OBS_DIM = 597
+
 EXPECTED_LEGAL_FEATURE_DIM = 42
 UNKNOWN_RESOURCE_NORM = 0.0  # clip((-1 + 1) / 8, 0, 1)
 
@@ -78,25 +77,26 @@ IDX = {
 }
 
 
-OBS_IDX = {
-    "resource_start": LEGACY_OBS_DIM,
-    "resource_end": LEGACY_OBS_DIM + RESOURCE_BLOCK_DIM,
-    "current_stars_norm": LEGACY_OBS_DIM + RESOURCE_BLOCK_DIM + 0,
-    "current_spt_norm": LEGACY_OBS_DIM + RESOURCE_BLOCK_DIM + 1,
-    "turn_count_norm": LEGACY_OBS_DIM + RESOURCE_BLOCK_DIM + 2,
-    "turns_remaining_after_current_norm": LEGACY_OBS_DIM + RESOURCE_BLOCK_DIM + 3,
-    "turns_remaining_including_current_norm": LEGACY_OBS_DIM + RESOURCE_BLOCK_DIM + 4,
-    "tech_has_organization": LEGACY_OBS_DIM + RESOURCE_BLOCK_DIM + 5,
-    "tech_has_forestry": LEGACY_OBS_DIM + RESOURCE_BLOCK_DIM + 6,
-    "tech_researched_count_norm": LEGACY_OBS_DIM + RESOURCE_BLOCK_DIM + 7,
-    "city_count_norm": LEGACY_OBS_DIM + RESOURCE_BLOCK_DIM + 8,
-    "avg_city_level_norm": LEGACY_OBS_DIM + RESOURCE_BLOCK_DIM + 9,
-    "max_city_level_norm": LEGACY_OBS_DIM + RESOURCE_BLOCK_DIM + 10,
-    "mean_upgrade_progress_norm": LEGACY_OBS_DIM + RESOURCE_BLOCK_DIM + 11,
-    "max_upgrade_progress_norm": LEGACY_OBS_DIM + RESOURCE_BLOCK_DIM + 12,
-    "upgrade_ready_frac": LEGACY_OBS_DIM + RESOURCE_BLOCK_DIM + 13,
-    "any_level_up_available": LEGACY_OBS_DIM + RESOURCE_BLOCK_DIM + 14,
-}
+def observation_indices(layout):
+    return {
+        "resource_start": layout.resource_start,
+        "resource_end": layout.resource_end,
+        "current_stars_norm": layout.scalar_start + 0,
+        "current_spt_norm": layout.scalar_start + 1,
+        "turn_count_norm": layout.scalar_start + 2,
+        "turns_remaining_after_current_norm": layout.scalar_start + 3,
+        "turns_remaining_including_current_norm": layout.scalar_start + 4,
+        "tech_has_organization": layout.scalar_start + 5,
+        "tech_has_forestry": layout.scalar_start + 6,
+        "tech_researched_count_norm": layout.scalar_start + 7,
+        "city_count_norm": layout.scalar_start + 8,
+        "avg_city_level_norm": layout.scalar_start + 9,
+        "max_city_level_norm": layout.scalar_start + 10,
+        "mean_upgrade_progress_norm": layout.scalar_start + 11,
+        "max_upgrade_progress_norm": layout.scalar_start + 12,
+        "upgrade_ready_frac": layout.scalar_start + 13,
+        "any_level_up_available": layout.scalar_start + 14,
+    }
 
 
 CATEGORIES = [
@@ -116,7 +116,7 @@ CATEGORIES = [
 
 
 def set_required_env():
-    os.environ["POLYVISION_LEVEL_POOL_GLOB"] = "levels/phase1_pool_bardur_solo/*.csv"
+    os.environ.setdefault("POLYVISION_LEVEL_POOL_GLOB", "levels/phase1_pool_bardur_solo/*.csv")
     os.environ["POLYVISION_LEVEL_SELECTION_MODE"] = "round_robin"
     os.environ["POLYVISION_INFO_MODE"] = "fast"
     os.environ["POLYVISION_SOLO_NO_OPPONENT_MODE"] = "1"
@@ -139,6 +139,8 @@ class Validator:
         self.levelup_counts = Counter()
 
         self.delta_abs_err_by_type = defaultdict(lambda: {"pop": [], "spt": []})
+        self.obs_layout = None
+        self.obs_idx = None
 
         self.coverage_seen = {
             "RESEARCH_TECH": False,
@@ -199,10 +201,17 @@ class Validator:
     def validate_state(self, obs, info, uw, episode_idx, step_idx):
         category = "1_shape_checks"
         obs_arr = np.asarray(obs, dtype=np.float32).reshape(-1)
+        try:
+            layout = observation_layout(int(info["map_width"]), int(info["map_height"]))
+            self.obs_layout = layout
+            self.obs_idx = observation_indices(layout)
+        except Exception as exc:
+            self.fail(category, f"could not derive observation layout from reset metadata: {exc}")
+            return
         self.check(
-            tuple(obs_arr.shape) == (EXPECTED_OBS_DIM,),
+            tuple(obs_arr.shape) == (layout.expected_obs_dim,),
             category,
-            f"obs shape mismatch: got={obs_arr.shape}, expected={(EXPECTED_OBS_DIM,)}",
+            f"obs shape mismatch: got={obs_arr.shape}, expected={(layout.expected_obs_dim,)}",
             {"episode": episode_idx, "step": step_idx},
         )
 
@@ -378,7 +387,7 @@ class Validator:
 
         # Category 9: fog-safe resource observation block
         category = "9_fog_safe_resource_obs"
-        resource_slice = obs_arr[OBS_IDX["resource_start"] : OBS_IDX["resource_end"]]
+        resource_slice = obs_arr[self.obs_idx["resource_start"] : self.obs_idx["resource_end"]]
         dims = uw._board_dimensions_from_obs(raw_obs)
         if dims is not None:
             width, height = int(dims[0]), int(dims[1])
@@ -519,11 +528,13 @@ def run_validation(num_episodes=100, max_steps_per_episode=20, seed=1234):
             obs, info = env.reset(seed=seed + ep)
             uw = env.unwrapped
             validator.lifecycle["reset_checks"] += 1
+            validator.obs_layout = observation_layout(int(info["map_width"]), int(info["map_height"]))
+            validator.obs_idx = observation_indices(validator.obs_layout)
 
             # Lifecycle checks at reset.
             techs = set(uw._researched_techs_t10)
-            org_flag = float(np.asarray(obs)[OBS_IDX["tech_has_organization"]]) > 0.5
-            forestry_flag = float(np.asarray(obs)[OBS_IDX["tech_has_forestry"]]) > 0.5
+            org_flag = float(np.asarray(obs)[validator.obs_idx["tech_has_organization"]]) > 0.5
+            forestry_flag = float(np.asarray(obs)[validator.obs_idx["tech_has_forestry"]]) > 0.5
             validator.check("HUNTING" in techs, "10_tech_state_lifecycle", "Bardur starting tech HUNTING missing after reset", {"episode": ep, "techs": sorted(list(techs))})
             validator.check(not org_flag, "10_tech_state_lifecycle", "Organization flag unexpectedly on at reset", {"episode": ep})
             validator.check(not forestry_flag, "10_tech_state_lifecycle", "Forestry flag unexpectedly on at reset", {"episode": ep})
@@ -565,8 +576,8 @@ def run_validation(num_episodes=100, max_steps_per_episode=20, seed=1234):
                     validator.fail("12_sampling_coverage", "no valid action available", {"episode": ep, "step": step})
                     break
 
-                prev_org = float(np.asarray(obs)[OBS_IDX["tech_has_organization"]]) > 0.5
-                prev_forestry = float(np.asarray(obs)[OBS_IDX["tech_has_forestry"]]) > 0.5
+                prev_org = float(np.asarray(obs)[validator.obs_idx["tech_has_organization"]]) > 0.5
+                prev_forestry = float(np.asarray(obs)[validator.obs_idx["tech_has_forestry"]]) > 0.5
 
                 # Identify selected action semantics from pre-step slot alignment.
                 pre_ids = np.asarray(info["legal_global_ids_padded"], dtype=np.int64).reshape(-1)
@@ -598,8 +609,8 @@ def run_validation(num_episodes=100, max_steps_per_episode=20, seed=1234):
                 validator.selected_action_type_counts[selected_type_post] += 1
 
                 # Category 10: tech lifecycle transitions only after successful matching research action.
-                post_org = float(np.asarray(obs_next)[OBS_IDX["tech_has_organization"]]) > 0.5
-                post_forestry = float(np.asarray(obs_next)[OBS_IDX["tech_has_forestry"]]) > 0.5
+                post_org = float(np.asarray(obs_next)[validator.obs_idx["tech_has_organization"]]) > 0.5
+                post_forestry = float(np.asarray(obs_next)[validator.obs_idx["tech_has_forestry"]]) > 0.5
                 if (not prev_org) and post_org:
                     validator.lifecycle["org_toggled_on_steps"] += 1
                     validator.check(
@@ -634,8 +645,8 @@ def run_validation(num_episodes=100, max_steps_per_episode=20, seed=1234):
                     break
 
             # Track whether techs were learned in this episode for next reset-cleanliness check.
-            prev_episode_had_org = bool(float(np.asarray(obs)[OBS_IDX["tech_has_organization"]]) > 0.5)
-            prev_episode_had_forestry = bool(float(np.asarray(obs)[OBS_IDX["tech_has_forestry"]]) > 0.5)
+            prev_episode_had_org = bool(float(np.asarray(obs)[validator.obs_idx["tech_has_organization"]]) > 0.5)
+            prev_episode_had_forestry = bool(float(np.asarray(obs)[validator.obs_idx["tech_has_forestry"]]) > 0.5)
 
     finally:
         env.close()

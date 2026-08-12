@@ -66,6 +66,28 @@ $env:POLYVISION_SOLO_NO_OPPONENT_MODE='1'
 
 `round_robin` is deterministic and cycles through the pool. `seeded_random` uses a separate seeded random stream for map choice. `POLYVISION_BASE_SEED` controls the wrapper's default episode-seed stream when callers do not pass a seed to `reset()`.
 
+### Map geometry and checkpoint compatibility
+
+One `TribesGymWrapper` instance requires a dimension-homogeneous level pool. The wrapper fixes its observation space and global action catalog from its bootstrap map, validates every later reset against that geometry, and rejects rectangular or mixed-dimension pools before returning an incompatible observation.
+
+The synthetic Phase-1 pools are currently 12x12. Genuine maps under `levels/phase1_pool_bardur_real/` are 11x11 and remain inactive by default. Their interface sizes differ:
+
+| Pool geometry | Observation dimension | Global action-space size |
+|---|---:|---:|
+| 12x12 | 597 | 89,305 |
+| 11x11 | 505 | 63,913 |
+
+PPO checkpoints are geometry- and action-interface-specific. Metadata validation checks map dimensions, observation dimension, action-space size, action-catalog fingerprint, actor mode, and legal-action feature version/dimension before loading model tensors. A 12x12 checkpoint cannot be loaded into an 11x11 environment, and checkpoints without sufficient compatibility metadata are rejected. Action-validator caches are likewise keyed by geometry, interface metadata, and a content hash of the resolved map pool.
+
+Run the reset-only genuine-pool contract check with:
+
+```powershell
+python tools/validate_environment_contract.py `
+    --level-pool-glob 'levels/phase1_pool_bardur_real/*.csv' `
+    --expected-width 11 `
+    --expected-height 11
+```
+
 ### Scripted opening and turn handling
 
 `TribesGymWrapper.reset()` loads the selected map and seed, executes the scripted Bardur opening, initializes economy/research counters, builds the legal action set, and then returns policy control. The opening advances the underlying game before the learned policy acts; wrapper turn accounting therefore deliberately differs from a raw engine reset.

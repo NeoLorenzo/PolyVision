@@ -14,7 +14,7 @@ The tables below therefore preserve evidence; they do not assert that every row 
 
 ## Data Sources and Interpretation
 
-- W&B source export: [`wandb_export_2026-08-12T14_08_14.427+01_00.csv`](wandb_export_2026-08-12T14_08_14.427+01_00.csv), exported on 2026-08-12. It contains exactly the 27 registered runs below.
+- W&B source export: [`wandb_export_2026-08-12T22_17_35.485+01_00.csv`](wandb_export_2026-08-12T22_17_35.485+01_00.csv), exported on 2026-08-12. It contains exactly the 28 registered runs below.
 - Changelog identity mapping: the plain-English label to W&B/run-folder mapping has been preserved verbatim from the previous version of this file and the changelog history.
 - Dedicated evaluation artifacts: [`outputs/org_only_oracle_vs_ppo/`](outputs/org_only_oracle_vs_ppo/) contains the only tracked multi-episode policy evaluation currently linked to one of these checkpoints.
 - Local `runs/` and `wandb/` directories are gitignored. Their event files and checkpoints are not durable repository evidence unless separately archived.
@@ -60,6 +60,7 @@ This mapping is deliberately kept separate and explicit because the run-folder i
 | `Phase1-Data-021 (2M)` | `Tribes-v0__ppo__1__1778358997` |
 | `Phase1-Data-022 (1M)` | `Tribes-v0__ppo__1__1778673883` |
 | `Phase1-Data-023 (6M)` | `Tribes-v0__ppo__1__1778695665` |
+| `Phase1-Map_Gen-027 (500K genuine-map validation)` | `Tribes-v0__ppo__1__1786565606` |
 
 ## Exported Run Configuration and Completion
 
@@ -94,6 +95,7 @@ This mapping is deliberately kept separate and explicit because the run-folder i
 | `Phase1-Data-021 (2M)` | finished | 2026-05-09 | 1,999,360 / 2,000,000 (100.0%) | `legal_features` | 1024/22 | 20×128 | 92 |
 | `Phase1-Data-022 (1M)` | finished | 2026-05-13 | 998,400 / 1,000,000 (99.8%) | `legal_features` | 1024/22 | 20×128 | 156 |
 | `Phase1-Data-023 (6M)` | finished | 2026-05-14 | 5,998,080 / 6,000,000 (100.0%) | `legal_features` | 1024/42 | 20×128 | 164 |
+| `Phase1-Map_Gen-027 (500K genuine-map validation)` | finished | 2026-08-12 | 499,200 / 500,000 (99.8%) | `legal_features` | 256/42 | 20×128 | 291 |
 
 ## Final W&B Training Summary Snapshots
 
@@ -128,6 +130,13 @@ These are evidence-class 2 snapshots, **not standardized evaluation results**. `
 | `Phase1-Data-021 (2M)` | 6.0 | 6.0 | 2.0 | 2.00 | 30.0 | 50.0% | 1.5 | 0.733 |
 | `Phase1-Data-022 (1M)` | 10.0 | 10.0 | 3.0 | 2.33 | 62.0 | 100.0% | 1.0 | 0.614 |
 | `Phase1-Data-023 (6M)` | 14.0 | 14.0 | 4.0 | 2.25 | 51.0 | 100.0% | 2.0 | 0.817 |
+| `Phase1-Map_Gen-027 (500K genuine-map validation)` | 14.0 | 14.0 | 4.0 | 2.25 | 50.0 | 100.0% | 3.5 | 0.446 |
+
+### Phase1-Map_Gen-027 genuine-map training validation
+
+The latest export records `Tribes-v0__ppo__1__1786565606` as a finished 500K validation run for the genuine-map update. It reached global step 499,200 of 500,000 in 1,811 seconds with 20 environments, 128 rollout steps, the `legal_features` actor, 256 legal-action slots, and 42 legal-action features. The final W&B summary retained 291 SPS, T10 SPT 14, four villages, average city level 2.25, 50 fog tiles cleared, 100% Organization research, 3.5 researched technologies, average second-city capture turn 6.5, and 62.5% village capture.
+
+These values establish that the new 11×11 genuine-map contract completed a substantial PPO validation run with the 256-slot interface. They remain final training-summary snapshots rather than a held-out, multi-episode evaluation and should not be interpreted as a controlled improvement over historical models. The failed earlier 128-slot attempt is intentionally not registered as a benchmark row for this update.
 
 ## Dedicated Multi-Episode Evaluation Evidence
 
