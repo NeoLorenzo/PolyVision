@@ -13,3 +13,7 @@ pol_env/Tribes/img_step_*.png
 pol_env/Tribes/game_recording_*.mp4
 pol_env/Tribes/py/polytopia_simulator.log
 pol_env/Tribes/game_moves_*.json
+
+# Local Polytopia harvesting calibration and genuine raw-save datasets
+tools/polytopia_harvester/harvester_config.json
+data/polytopia_maps/
