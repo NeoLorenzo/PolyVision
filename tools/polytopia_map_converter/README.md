@@ -10,7 +10,7 @@ compressed Polytopia .state
     -> validated PolyVision/Tribes CSV
 ```
 
-It does not parse `.state` files, alter map geometry, generate synthetic maps, or change training configuration. The current real output pool is separate from the existing synthetic pool.
+It does not parse `.state` files, alter map geometry, or change training configuration. Its validated CSV output is the active PolyVision map corpus.
 
 ## Requirements
 
@@ -148,4 +148,4 @@ Tests cover schema rejection, every mapping, precedence, unsupported IDs, capita
 
 The current 256 version-122 maps contain only Field, Mountain, Forest, Game, Metal, Fruit, cities/villages, ruins, and corner lighthouses. Coast/Ocean/Crop/Fish/Whale mappings are implemented and tested but not exercised by this Drylands corpus. Unknown IDs always fail.
 
-The genuine pool is 11×11 while existing synthetic Phase-1 maps and models are 12×12. This converter does not change the default pool or solve observation/action/checkpoint compatibility. Existing 12×12 models must not be assumed compatible with these maps; that belongs to the next stage.
+The active genuine pool is 11×11. The current environment derives a 505-value observation and 63,913-ID global action catalog from that geometry, and checkpoint sidecars enforce geometry/interface compatibility. Select the pool explicitly with `POLYVISION_LEVEL_POOL_GLOB=levels/phase1_pool_bardur_real/*.csv` until the wrapper's legacy fallback constant is corrected.

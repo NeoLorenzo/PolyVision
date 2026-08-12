@@ -12,6 +12,70 @@ Every new change entry must include `Scope`, `Rationale`, `Implemented`, and `Va
 
 Do not substitute a description of what changed for the reason it changed. If the original rationale or validation is unknown, record that explicitly rather than reconstructing it as fact.
 
+## [Phase1-Repo_Cleanup-028] - (2026-08-12)
+
+### Scope
+- Consolidated the repository around the current genuine-map Phase 1 research path: validated 11x11 Bardur CSV maps, the Java/Py4J/Gymnasium environment, stable global action IDs, legality-aware PPO in `py_rl/cleanrl/cleanrl/ppo.py`, and current evaluation/diagnostic tooling.
+- Replaced the accumulated root and `docs/` documentation with one concise project landing page and a topic-oriented current manual covering setup, architecture, environment behavior, actions, observations, rewards, training, evaluation, maps, reproducibility, and troubleshooting.
+- Removed obsolete documentation, duplicated CleanRL code, abandoned semantic-action/evaluator experiments, legacy synthetic-map generation utilities, old manual test scripts, superseded GUI/video helpers, and committed runtime/debug output that no longer belongs in the source tree.
+- Preserved the benchmark registry only as an explicitly historical research record under `docs/history/`; historical interface values remain evidence rather than current instructions.
+- Made no changes to the active Gym wrapper, Py4J bridge, PPO trainer, reward values, observation construction, action filtering, checkpoint format, map conversion semantics, or Java gameplay behavior in this update. The non-documentation changes are deletions of obsolete or generated content.
+
+### Rationale
+- Current documentation mixed several incompatible generations of PolyVision: retired synthetic 12x12 pools, removed files and scripts, obsolete action/feature dimensions, old evaluator commands, and historical experiments were presented beside the genuine 11x11 system. A new developer could not determine one authoritative map pool, trainer, observation/action contract, reward, or evaluation path.
+- Git history already preserves superseded operational documents and experiments. Rewriting useful topics and deleting the rest provides a clearer current contract than retaining stale files with warnings or duplicating the same guidance across root-level documents.
+- The repository contained a second, partial CleanRL tree at `py_rl/clean_rl_nc/` in addition to the active `py_rl/cleanrl/` tree. Retaining the unused copy, its generic utilities/evaluators, and the separate semantic requirements file made the training entrypoint and dependency surface ambiguous.
+- `evaluate_models.py`, `quick_eval.py`, the deleted semantic-action tests, and related experimental scripts were designed around abandoned baseline/action-quality/text-semantic comparisons and old state-local or semantic interfaces. Their outputs would not be valid evidence for the current stable-global-ID contract.
+- The Java/Python procedural map-generation tools represented the retired synthetic-map workflow. The genuine Polytopia `.state -> canonical JSON -> validated CSV` pipeline is now authoritative, so current setup and map documentation no longer teaches local synthetic pool generation.
+- Committed frame/run histories, JVM crash output, SPS profiling dumps, and a statistically weak eight-episode comparison were local diagnostics rather than durable source or benchmark evidence. The retained 500-episode historical comparison has substantially greater methodological value and is clearly contextualized.
+- Cleanup has an important source-build trade-off: `core.game.GameState` still imports and instantiates the deleted `core.levelgen.LevelGenerator`. Existing compiled classes continue to run the CSV-backed environment, but a clean compile of every Java source now fails. This update records that mismatch rather than silently changing Java behavior or restoring a generator whose intended long-term status needs a separate code decision.
+- The wrapper also still contains fallback constants for removed synthetic level files, and the historical oracle evaluator hard-codes the removed pool. Current commands therefore select `levels/phase1_pool_bardur_real/*.csv` explicitly. Correcting those runtime defaults is intentionally outside this documentation/cleanup update.
+
+### Implemented
+
+#### Current documentation system
+- Rewrote `README.md` as a 1,176-word landing page describing the constrained Phase 1 task, implemented capabilities, architecture, quick start, representative PPO command, evidence boundaries, repository structure, current limitations, roadmap, and attribution without duplicating the detailed API/configuration manual.
+- Added `docs/getting-started.md`, `architecture.md`, `environment.md`, `actions.md`, `observations.md`, `rewards.md`, `evaluation.md`, `maps.md`, and `reproducibility.md`.
+- Replaced the former uppercase `docs/TRAINING.md` and `docs/TROUBLESHOOTING.md` with current lowercase `docs/training.md` and `docs/troubleshooting.md`, matching the new cross-linked structure.
+- Documented the verified current contract: 256 genuine 11x11 Bardur maps, 505 observation values, 63,913 stable global action IDs, 256 legal-action slots, 42 action features at `v1_3_move_focus_plus_semantic_econ`, actor modes `legal_only`/`legal_features`/`dense_debug`, the scripted Bardur opening, Turn-10 truncation, Phase 1 action filters, excluded `ATTACK`, shaped reward, validator cache, checkpoint sidecars, and JVM lifecycle.
+- Documented the genuine map ingestion path, canonical/source hashes, manifest placement, Java validation, held-out-map principles, checkpoint/pool identity requirements, current baseline visibility distinctions, conservative interpretation of training summaries, and the absence of trainer resume/optimizer-state support.
+- Rewrote `pol_env/Tribes/README.md` as a small engine-specific compilation/attribution page pointing to canonical project docs, and corrected `tools/polytopia_map_converter/README.md` so the genuine output is described as the active corpus rather than a future pool beside synthetic maps.
+- Moved `model_run_benchmark_log.md` to `docs/history/model-run-benchmark-log.md`, added a prominent historical/non-normative notice, repaired paths after the move, and removed its reference to the deleted eight-episode output while retaining the meaningful 500-episode milestone and cross-version compatibility cautions.
+
+#### Obsolete documentation removal
+- Deleted the root `MapGen.md` procedural-generation reference and `EFFICIENT_TRAINING_RUN.md` operating guide after incorporating relevant current material into the maps, training, and troubleshooting pages.
+- Deleted `docs/ENVIRONMENT_API.md`, `HARDWARE_TRAINING_PROFILE.md`, `MVP_PHASE1_SPEC.md`, `PLAIN_ENGLISH_GUIDE.md`, and `TESTING.md`; their useful current concepts were rewritten into the new manual while stale dimensions, setup paths, roadmap claims, hardware-specific recommendations, and historical Phase 1 assumptions were discarded.
+- Removed current-doc references to deleted synthetic pools and generators, `SampleLevel.csv`, old 128/1024-slot interfaces, the old 22-feature representation, `clean_rl_nc`, `requirements_semantic.txt`, `quick_eval.py`, and `evaluate_models.py`. Historical values remain only where explicitly contextualized in `CHANGELOG.md` or `docs/history/`.
+
+#### Training and experiment cleanup
+- Deleted the entire 29-file `py_rl/clean_rl_nc/` duplicate/partial CleanRL tree, including its standalone PPO, Atari LSTM, generic buffers/wrappers, benchmark/plot/reproduce/resume/tuner utilities, Docker helpers, Hugging Face helper, and algorithm-specific evaluation modules. `py_rl/cleanrl/cleanrl/ppo.py` remains the sole current PolyVision PPO entrypoint.
+- Deleted `py_rl/requirements_semantic.txt`, which existed for the abandoned semantic-action experiment rather than the current 42-feature legality-aware actor.
+- Deleted root `evaluate_models.py` and `quick_eval.py`, which compared obsolete baseline, action-quality, semantic, and text-semantic approaches and mixed short training summaries with evaluation claims.
+- Deleted the obsolete root scripts `test_action_structure.py`, `test_compare_actions.py`, `test_env.py`, `test_episode.py`, `test_phase1_constraints.py`, `test_semantic_actions.py`, and `test_simple.py`. Current contract and converter tests remain under their maintained package/tool locations, and live pool validation remains in `tools/validate_environment_contract.py`.
+
+#### Retired map/UI utility cleanup
+- Deleted the synthetic map commands `pol_env/Tribes/py/generate_fixed_map.py` and `generate_phase1_map_pool.py`, the old Python `py/levelgen/` web tool and helpers, and Java `core/levelgen/GenerateLevelCli.java` and `LevelGenerator.java`.
+- Deleted `pol_env/Tribes/py/simple_web_gui_old.py` and `create_video_from_frames.py`; the non-`_old` GUI/visualization code and active render paths remain in place.
+- Deleted the stale generated `game_state.txt`, three timestamped `pol_env/Tribes/game_moves_*.json` histories, and the committed JVM fatal-error log `pol_env/Tribes/hs_err_pid67336.log`.
+
+#### Generated evaluation/profile artifact cleanup
+- Deleted two committed `outputs/human_wrapper_runs/human_run_*.json` recordings.
+- Deleted the three files from `outputs/org_only_oracle_vs_ppo/run_20260509_101915/` (per-episode CSV, report, and summary) because the eight-episode smoke comparison was too small to retain as benchmark evidence. The 500-episode `run_20260509_104703` evidence remains.
+- Deleted 24 committed `outputs/sps_profiles/sps_profile_*.json` diagnostic dumps. Profiling infrastructure remains active and writes new local reports to its configured output path as described in current documentation.
+
+### Validation
+- Inspected the complete staged change set across 107 paths and classified every deletion by documentation, duplicate training code, abandoned experiment, retired generator/UI utility, or generated runtime artifact; no active environment/trainer/map-conversion source was edited by this update.
+- Ran `python tools/validate_environment_contract.py --expected-width 11 --expected-height 11` successfully across all 256 genuine maps: geometry was 11x11, observation shape `(505,)`, action space 63,913, catalog fingerprint `c849a4abf7b0bee073ccc56b63ae65917ea30e77068ad648c472130693dfe6e4`, reset legal-action counts ranged from 1 to 20, and contract failures were zero.
+- Ran all 15 `tools/polytopia_map_converter` unit/integration tests successfully, including the available real-map fixture.
+- Ran the 14 environment-contract tests: 11 fixture-independent tests passed and the three mixed/rectangular live tests skipped because their deleted synthetic 12x12 fixtures are intentionally absent.
+- Ran a 128-step `legal_only` PPO smoke training with one environment and strict validation over 20 decision states. The validator passed, the live interface reported `flat-v1`, 63,913 action IDs, and 256 legal slots, and training completed 128/128 scheduled steps.
+- Verified the actual `ppo.py` and `evaluate_brain.py` generated `--help` output and corrected commands to the accepted underscore actor values and current checkpoint/map arguments.
+- Checked all relative Markdown links in the current README, `docs/`, Tribes README, and converter/harvester manuals; no broken current links remained. Searched deleted documentation filenames and required stale terms; current docs contained no stale matches, while old dimensions remain only in explicitly historical changelog/benchmark context.
+- Ran `git diff --check` successfully after the documentation rewrite.
+- Could not rerun the Go state-converter tests because `go` is not installed on the active `PATH`; this is an environment limitation, not a reported test pass.
+- Attempted the documented full Java compilation. It failed with three errors because `GameState.java` still imports/constructs the deleted `core.levelgen.LevelGenerator`. The pre-existing compiled `out/core/game/PythonEnv.class` allowed all live CSV-backed environment validation and PPO smoke execution to pass, but a clean source build remains broken and is documented in getting-started/troubleshooting. No behavioral Java fix was made in this cleanup.
+
+
 ## [Phase1-Map_Gen-027] - (2026-08-12)
 
 ### Scope
