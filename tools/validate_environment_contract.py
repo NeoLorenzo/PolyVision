@@ -18,11 +18,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--level-pool-glob",
-        default="levels/phase1_pool_bardur_real/*.csv",
+        default="levels/phase1_pool_bardur_real/train/*.csv",
         help="Pool glob relative to pol_env/Tribes, or an absolute glob.",
     )
     parser.add_argument("--expected-width", type=int, required=True)
     parser.add_argument("--expected-height", type=int, required=True)
+    parser.add_argument(
+        "--max-maps",
+        type=int,
+        default=None,
+        help="Optionally limit live resets for a quick smoke check; omit for the full selected pool.",
+    )
     args = parser.parse_args()
 
     os.environ["POLYVISION_LEVEL_POOL_GLOB"] = args.level_pool_glob
@@ -32,12 +38,13 @@ def main() -> int:
 
     env = TribesGymWrapper()
     pool_size = len(env._level_pool)
+    maps_to_test = pool_size if args.max_maps is None else min(pool_size, max(1, int(args.max_maps)))
     expected_obs_dim = 4 * args.expected_width * args.expected_height + 21
     fingerprints = Counter()
     action_sizes = Counter()
     legal_counts = []
     try:
-        for index in range(pool_size):
+        for index in range(maps_to_test):
             obs, info = env.reset(seed=0 if index == 0 else None)
             actual = env._board_dimensions_from_obs(env.tribes_env._last_obs)
             if actual != (args.expected_width, args.expected_height):
@@ -69,7 +76,7 @@ def main() -> int:
         raise RuntimeError(
             f"Pool contract varied: fingerprints={dict(fingerprints)}, action_sizes={dict(action_sizes)}"
         )
-    print(f"Maps tested:          {pool_size}")
+    print(f"Maps tested:          {maps_to_test}/{pool_size}")
     print(f"Geometry:             {args.expected_width}x{args.expected_height}")
     print(f"Observation shape:    ({expected_obs_dim},)")
     print(f"Action space:         {next(iter(action_sizes))}")

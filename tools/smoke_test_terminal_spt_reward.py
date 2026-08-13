@@ -103,7 +103,7 @@ def _run_episode(env, seed: int) -> EpisodeTrace:
 
 
 def _set_common_env_vars() -> None:
-    os.environ["POLYVISION_LEVEL_POOL_GLOB"] = "levels/phase1_pool/*.csv"
+    os.environ["POLYVISION_LEVEL_POOL_GLOB"] = "levels/phase1_pool_bardur_real/train/*.csv"
     os.environ["POLYVISION_LEVEL_SELECTION_MODE"] = "round_robin"
     os.environ["POLYVISION_INFO_MODE"] = "fast"
     os.environ["POLYVISION_STRICT_COORD_ASSERT"] = "0"

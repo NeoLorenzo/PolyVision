@@ -56,3 +56,7 @@ Features are derived from policy-visible state plus the legal action's structure
 - feature/catalog versions and fingerprints.
 
 Checkpoint loading validates geometry, observation/action dimensions, actor mode, catalog fingerprint, canonicalizer/catalog versions, feature version/dimension, and legal-slot capacity before model tensors are used.
+
+## Human benchmark presentation
+
+Official human play does not construct or filter actions independently. `tools/human_policy_interface.py` reads the legal IDs from the same padded tensors used by PPO, decodes each stable ID into a neutral description using catalog offsets and vocabularies, and passes the selected ID to `env.step(global_id)`. It never offers raw Java actions excluded by the wrapper and never reads raw action dictionaries for labels. `tools/validate_human_benchmark_parity.py` checks this mapping on live benchmark states.

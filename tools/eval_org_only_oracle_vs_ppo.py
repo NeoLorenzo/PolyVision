@@ -730,9 +730,14 @@ def main() -> None:
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--progress-every", type=int, default=50)
     parser.add_argument("--ppo-stochastic", action="store_true", help="Sample PPO actions instead of argmax.")
+    parser.add_argument(
+        "--level-pool-glob",
+        default="levels/phase1_pool_bardur_real/validation/*.csv",
+        help="Evaluation pool relative to pol_env/Tribes (defaults to the development validation set).",
+    )
     args = parser.parse_args()
 
-    os.environ["POLYVISION_LEVEL_POOL_GLOB"] = "levels/phase1_pool/*.csv"
+    os.environ["POLYVISION_LEVEL_POOL_GLOB"] = str(args.level_pool_glob)
     os.environ["POLYVISION_LEVEL_SELECTION_MODE"] = "round_robin"
     os.environ["POLYVISION_INFO_MODE"] = "fast"
     os.environ["POLYVISION_STRICT_COORD_ASSERT"] = "0"
@@ -834,7 +839,7 @@ def main() -> None:
                     "actor_mode_requested": "legal_features",
                     "max_legal_actions_requested": 1024,
                     "env_overrides": {
-                        "POLYVISION_LEVEL_POOL_GLOB": "levels/phase1_pool/*.csv",
+                        "POLYVISION_LEVEL_POOL_GLOB": str(args.level_pool_glob),
                         "POLYVISION_LEVEL_SELECTION_MODE": "round_robin",
                         "POLYVISION_INFO_MODE": "fast",
                         "POLYVISION_STRICT_COORD_ASSERT": "0",

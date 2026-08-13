@@ -7,7 +7,7 @@ The primary trainer is `py_rl/cleanrl/cleanrl/ppo.py`. It is based on CleanRL PP
 From the repository root in an activated Python environment:
 
 ```powershell
-$env:POLYVISION_LEVEL_POOL_GLOB = 'levels/phase1_pool_bardur_real/*.csv'
+$env:POLYVISION_LEVEL_POOL_GLOB = 'levels/phase1_pool_bardur_real/train/*.csv'
 $env:POLYVISION_SOLO_NO_OPPONENT_MODE = '1'
 $env:POLYVISION_INFO_MODE = 'fast'
 python py_rl/cleanrl/cleanrl/ppo.py `
@@ -20,6 +20,8 @@ python py_rl/cleanrl/cleanrl/ppo.py `
 ```
 
 The trainer defaults to `legal_only`, 500,000 timesteps, 12 environments, 128 rollout steps, 256 legal slots, and strict 10,000-state preflight validation. `legal_features` uses the current 42-feature representation. `dense_debug` is available for equivalence/debug work but materializes logits over the full global action space.
+
+The wrapper also defaults to `levels/phase1_pool_bardur_real/train/*.csv` when the environment variable is absent. Training must never use `validation`, `test`, or `human_benchmark`; explicit pool overrides exist for evaluation, not PPO gradient runs. Record the training glob and aggregate pool identity with every experiment.
 
 ## Important arguments
 

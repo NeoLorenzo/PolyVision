@@ -2,14 +2,20 @@
 
 ## The environment cannot find a level file
 
-The current runtime wrapper still has legacy fallback constants for removed levels. Set the active pool before constructing `Tribes-v0`:
+The runtime wrapper defaults to the Phase 1 training pool. Set it explicitly when reproducing a run or diagnosing map selection:
 
 ```powershell
-$env:POLYVISION_LEVEL_POOL_GLOB = 'levels/phase1_pool_bardur_real/*.csv'
+$env:POLYVISION_LEVEL_POOL_GLOB = 'levels/phase1_pool_bardur_real/train/*.csv'
 $env:POLYVISION_SOLO_NO_OPPONENT_MODE = '1'
 ```
 
 The glob is resolved relative to `pol_env/Tribes/` unless absolute.
+
+## Human benchmark refuses to start
+
+`python tools/human_benchmark.py` fails closed if the benchmark directory is missing/empty, a CSV hash differs, or filesystem membership disagrees with `split_manifest.json`. Repair the dataset contract rather than pointing the official command at another pool. Use `python tools/human_benchmark.py --summary` to check registry state and `python tools/validate_human_benchmark_parity.py` after action/interface changes.
+
+Official benchmark mode intentionally has no Java/ANSI renderer or raw-action detail command. For ad hoc diagnostics only, `tools/play_human_t10_wrapper.py --unsafe-debug-ui --show-ansi-map` enables the old observation renderer; its output is not valid benchmark evidence.
 
 ## Py4J reports missing Java classes
 

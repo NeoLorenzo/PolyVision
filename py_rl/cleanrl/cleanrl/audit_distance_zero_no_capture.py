@@ -157,7 +157,7 @@ def _actions_reference_coord(uw, obs: Dict, actions: List[Dict], coord: Tuple[in
 
 
 def _run(args):
-    os.environ.setdefault("POLYVISION_LEVEL_POOL_GLOB", "levels/phase1_pool/*.csv")
+    os.environ.setdefault("POLYVISION_LEVEL_POOL_GLOB", "levels/phase1_pool_bardur_real/train/*.csv")
     os.environ.setdefault("POLYVISION_LEVEL_SELECTION_MODE", "round_robin")
     os.environ["POLYVISION_INFO_MODE"] = "debug"
 

@@ -9,7 +9,7 @@ import os
 import gymnasium as gym
 import pol_env.Tribes.py.register_env  # registers Tribes-v0
 
-os.environ["POLYVISION_LEVEL_POOL_GLOB"] = "levels/phase1_pool_bardur_real/*.csv"
+os.environ["POLYVISION_LEVEL_POOL_GLOB"] = "levels/phase1_pool_bardur_real/train/*.csv"
 os.environ["POLYVISION_SOLO_NO_OPPONENT_MODE"] = "1"
 
 env = gym.make("Tribes-v0")
@@ -32,11 +32,13 @@ The example's action `0` is the stable global `END_TURN` ID. In general, select 
 
 ## Map selection and seeds
 
-Set `POLYVISION_LEVEL_POOL_GLOB` relative to `pol_env/Tribes/` or as an absolute glob. The active pool is:
+Set `POLYVISION_LEVEL_POOL_GLOB` relative to `pol_env/Tribes/` or as an absolute glob. The default training pool is:
 
 ```text
-levels/phase1_pool_bardur_real/*.csv
+levels/phase1_pool_bardur_real/train/*.csv
 ```
+
+This is the only pool allowed for gradients. Explicit overrides select `validation`, `test`, or `human_benchmark` for their documented evaluation roles. An explicit glob that matches no maps raises an error rather than silently falling back to training, preventing an evaluation typo from producing training-pool results.
 
 `POLYVISION_LEVEL_SELECTION_MODE` accepts `round_robin` (default) or `seeded_random`. `POLYVISION_BASE_SEED` defaults to 42 for the internal episode-seed stream. Passing a seed to `reset()` reinitializes both the episode and map-selection streams.
 
@@ -47,6 +49,8 @@ All maps in one environment must be square and the same size. The first loaded m
 The default `POLYVISION_INFO_MODE=fast` includes the tensors and metadata required by PPO. `train` is also accepted. `debug` adds larger diagnostic payloads such as the dense action mask, map path/ID, pool index, seed, selection mode, and detailed reward/action telemetry. Use debug mode for audits, not routine throughput runs.
 
 Important always-available fields include legal slot IDs and mask, legal feature tensors, legal count, map geometry, observation dimension, action-space size, catalog fingerprints, interface versions, and episode-end economy metrics.
+
+The official [human benchmark](human-benchmark.md) consumes this same fast-mode policy interface. Its readable map is reconstructed from the flattened observation and its menu is exactly `legal_global_ids_padded[legal_action_valid_mask]`. It does not consume debug info, raw Java observation state, or a renderer.
 
 ## Validation guarantees
 

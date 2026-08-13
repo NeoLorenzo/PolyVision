@@ -12,6 +12,50 @@ Every new change entry must include `Scope`, `Rationale`, `Implemented`, and `Va
 
 Do not substitute a description of what changed for the reason it changed. If the original rationale or validation is unknown, record that explicitly rather than reconstructing it as fact.
 
+## [Phase1-Human_Benchmark-029] - (2026-08-13)
+
+### Scope
+- Replaced the flat 5,517-map genuine Bardur corpus with a frozen split of 5,000 training, 250 validation, 250 test, and 17 human-benchmark maps using split seed `20260813`.
+- Added an authoritative split manifest, deterministic establishment/verification tooling, training-only runtime defaults, explicit evaluation overrides, and current dataset-protocol documentation. Every map filename and byte was preserved.
+- Added a permanent first-attempt human benchmark workflow for the 17-map Phase 1 `human_benchmark` pool, including random unplayed-map selection, explicit replays, attempt lifecycle records, an append-only event index, and derived first/latest/best summaries.
+- Refactored human play around one shared policy-visible presentation module and added a live human/model parity validator. Official attempts use the existing `TribesGymWrapper` task unchanged; no PPO, reward, observation, filtering, opening, horizon, map assignment, or Java gameplay behavior changed.
+- Updated current project, dataset, training, evaluation, environment, action, reproducibility, setup, and troubleshooting guidance for the combined dataset and benchmark contract.
+
+### Rationale
+- A large 5,000-map training corpus reduces practical memorization risk relative to the former small corpus, but training performance remains in-sample evidence. A distinct development validation set supports model/configuration selection, while a pristine test set supports defensible final generalization claims.
+- Human-versus-agent evaluation may be inspected repeatedly and influence future development, so its maps must be permanently excluded from training and remain conceptually separate from the pristine scientific test set.
+- The former flat runtime directory and legacy fallback globs made leakage between training, validation, final testing, and human comparison too easy. Identity-based membership, an authoritative manifest, training-only defaults, and fail-closed explicit overrides make these roles reproducible and harder to confuse.
+- Established assignments remain frozen as the corpus grows. Newly harvested maps are staged outside the canonical pools because reshuffling old maps, relabeling training maps as held out, or promoting development-used validation maps to test would invalidate the evidence boundary.
+- A persistent human baseline makes future human-versus-agent comparisons possible without coupling human evidence to one checkpoint. Human challenge maps are separate from the scientific test set because repeated human/model inspection is expected and may influence future development.
+- The first completed attempt is preserved as the canonical score because replaying a map creates map-specific knowledge. Aborts and errors remain transparent but do not consume that first-completion opportunity; later replays are retained without overwriting history.
+- Meaningful comparison requires full decision-problem parity, not merely similar game rules. The wrapper must remain the single source of truth for the map, scripted opening, Bardur control, solo mode, legal filters, stable global IDs, Java execution, reward/task settings, and Turn-10 horizon.
+- The former ad hoc wrapper could display raw action dictionaries, `_last_obs`-derived state, and ANSI/Java renderers, and it hard-coded 1,024 legal slots. Those paths could disclose information outside the PPO-facing observation or silently drift from the current 256-slot contract. Official mode therefore fails closed and presents only the flattened policy observation plus legal-slot IDs.
+
+### Implemented
+- Added `tools/split_phase1_map_pool.py`, which deterministically ranks canonical `map_sha256` identities, applies the fixed counts, records exact CSV hashes and aggregate pool identities, and becomes verification-only after establishment. It rejects duplicates, malformed maps, manifest/filesystem drift, partial splits, and unexpected loose files, and rolls back failed initial moves.
+- Created `pol_env/Tribes/levels/phase1_pool_bardur_real/split_manifest.json` and moved every map without renaming into `train/`, `validation/`, `test/`, and `human_benchmark/`.
+- Changed the wrapper default and fallback map to the genuine training pool. Explicit empty override globs fail instead of falling back. Current audit/evaluation defaults, validators, and human tooling now select their intended pool explicitly.
+- Established `data/polytopia_maps/incoming_csv/` as the documented staging location for future converted maps pending identity review and deliberate dataset-contract assignment.
+- Added `tools/human_benchmark.py` as the ordinary one-command workflow. It validates split-manifest assignment and hashes, selects uniformly from maps lacking a human first completion, records starts/aborts/errors/completions, refuses to overwrite completed attempts, and requires a prior first completion before `--replay`.
+- Added `tools/human_policy_interface.py`. It reconstructs a fog-respecting terminal view from the 505-value flattened observation, derives the menu exactly from `legal_global_ids_padded[legal_action_valid_mask]`, decodes stable IDs through catalog offsets/vocabularies, and executes selections only with `env.step(global_id)`.
+- Replaced duplicated interactive logic in `tools/play_human_t10_wrapper.py` with the shared frontend. ANSI and Java renderers now require `--unsafe-debug-ui` and are explicitly non-benchmark paths; raw action detail display was removed.
+- Added `tools/validate_human_benchmark_parity.py`, paired-environment state/action/execution/horizon checks, and registry/interface unit tests. The official presentation source audit rejects direct Java/raw-action/full-observation/renderer access.
+- Established `outputs/human_benchmark/` for checkpoint-independent evidence: immutable completed attempt JSON, append-only `results.jsonl` lifecycle events, and a derived `summary.json` emphasizing first attempts. Synthetic smoke attempts require a non-canonical output root and are excluded from human statistics.
+- Added `docs/human-benchmark.md` and updated the root README, map/reproducibility/training/evaluation/getting-started/environment/architecture/troubleshooting docs, Tribes integration README, and converter manuals. Historical changelog and benchmark evidence retain their original paths and meanings.
+
+### Validation
+- Pre-split audit found 5,517 CSV files and conversion rows with zero duplicate filenames, canonical identities, or CSV hashes; zero missing/extra files; and zero conversion-manifest hash mismatches.
+- `python tools/split_phase1_map_pool.py --establish` completed and verified exact counts `5000/250/250/17`, total 5,517, zero duplicate/overlapping canonical or CSV identities, every manifest/file hash, static Phase 1 CSV structure, aggregate pool identities, and zero loose root CSVs. Independent `compute_level_pool_identity()` calls reproduced all four manifest hashes.
+- Split utility tests passed 4/4. Map-converter regression tests passed 15/15, and `go -C tools/polytopia_state_converter test ./...` passed.
+- Environment-contract tests passed 13 tests with 3 skips for the retired local 12x12 fixture. A live Java/Py4J reset passed on one map from each pool with 11x11 geometry, 505 observations, 63,913 actions, and the same catalog fingerprint.
+- A 16-step PPO smoke with the pool override unset completed 16/16 steps after strict validation over 100 decision states; default resolution returned exactly 5,000 paths, all under `train`.
+- `python -m unittest tools.tests.test_human_benchmark -v`: 4 passed, covering exact global-ID stepping, privileged-source rejection, aborted-attempt eligibility, immutable completion, replay separation, and synthetic-statistic exclusion.
+- `python tools/validate_human_benchmark_parity.py --maps 3 --states-per-map 5 --seed 42`: passed on 3 real benchmark maps and 19 paired states, including one complete Turn-10 path; observations, contracts, menu IDs, raw-action resolution, rewards, stable-ID execution, and horizon signals matched. Three sampled Java-legal actions were confirmed excluded by the shared policy interface.
+- A real CLI abort smoke recorded an aborted attempt without consuming the map. A real full synthetic smoke completed through Turn 10 in a non-canonical ignored output root and left human completion/statistics unchanged.
+- `python tools/human_benchmark.py --summary` verified the initial canonical registry state as 0/17 completed and 17 remaining.
+- `python -m unittest discover -s tools/tests -v`: 8 passed across the human benchmark and split utilities. Map-converter regression tests remained 15/15 passing; environment-contract tests remained 13 passing with the same 3 retired-12x12-fixture skips.
+- The full 5,517-map static split/hash verifier passed after the workflow changes. Python compilation and `git diff --check` also passed; diff checking emitted only the repository's Windows LF-to-CRLF warnings.
+
 ## [Phase1-Repo_Cleanup_Fix-028.5] - (2026-08-12)
 
 ### Scope

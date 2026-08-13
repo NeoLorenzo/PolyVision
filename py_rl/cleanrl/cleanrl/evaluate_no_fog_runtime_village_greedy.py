@@ -490,7 +490,7 @@ def _print_wait_trace_after(case_idx: int, event: Dict[str, Any], outcome: Dict[
 
 
 def evaluate(args):
-    os.environ.setdefault("POLYVISION_LEVEL_POOL_GLOB", "levels/phase1_pool/*.csv")
+    os.environ.setdefault("POLYVISION_LEVEL_POOL_GLOB", "levels/phase1_pool_bardur_real/train/*.csv")
     os.environ.setdefault("POLYVISION_LEVEL_SELECTION_MODE", "round_robin")
 
     env = gym.make("Tribes-v0")

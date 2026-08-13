@@ -166,8 +166,8 @@ class GlobalActionCatalog:
 
 # wrapper to make it gym-compatible
 class TribesGymWrapper(gym.Env):
-    PHASE1_LEVEL_FILE = "levels/phase1_12x12_2bardur.csv"
-    DEFAULT_LEVEL_POOL_GLOB = "levels/phase1_pool/*.csv"
+    PHASE1_LEVEL_FILE = "levels/phase1_pool_bardur_real/train/map_000001.csv"
+    DEFAULT_LEVEL_POOL_GLOB = "levels/phase1_pool_bardur_real/train/*.csv"
     MAX_TURNS = 10
     TERMINAL_SPT_REWARD_ENABLED_DEFAULT = False
     TERMINAL_SPT_BASE_WEIGHT_DEFAULT = 1.0
@@ -2589,6 +2589,12 @@ class TribesGymWrapper(gym.Env):
             if not os.path.isabs(pattern):
                 pattern = os.path.join(root, pattern)
             found = sorted(glob.glob(pattern))
+
+            if not found:
+                raise FileNotFoundError(
+                    "POLYVISION_LEVEL_POOL_GLOB matched no maps; refusing to fall back to a "
+                    f"different dataset pool: {pool_glob!r}"
+                )
 
         if found:
             return found

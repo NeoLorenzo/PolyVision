@@ -39,17 +39,17 @@ Compressed `.state` files are accepted directly. Decompression remains in memory
 From the repository root, single-file conversion:
 
 ```powershell
-go run ./tools/polytopia_state_converter `
-    --input data/polytopia_maps/raw_states/map_000001.state `
-    --output data/polytopia_maps/parsed/map_000001.json
+go -C tools/polytopia_state_converter run . `
+    --input ../../data/polytopia_maps/raw_states/map_000001.state `
+    --output ../../data/polytopia_maps/parsed/map_000001.json
 ```
 
 Batch conversion:
 
 ```powershell
-go run ./tools/polytopia_state_converter `
-    --input data/polytopia_maps/raw_states `
-    --output data/polytopia_maps/parsed
+go -C tools/polytopia_state_converter run . `
+    --input ../../data/polytopia_maps/raw_states `
+    --output ../../data/polytopia_maps/parsed
 ```
 
 Options:
@@ -153,7 +153,7 @@ Common errors include an unsupported/corrupt header, LZ4 decompression failure, 
 Run from the repository root:
 
 ```powershell
-go test ./tools/polytopia_state_converter/...
+go -C tools/polytopia_state_converter test ./...
 ```
 
 Tests cover initial-vs-current selection, dimensions, row-major ordering, coordinate validation, nullable/unknown resources, full improvement retention, raw SHA-256, map-hash equivalence and sensitivity, deterministic JSON, batch naming/order, resume/overwrite behavior, and a real parser integration check when `data/polytopia_maps/raw_states/map_000001.state` is locally available.

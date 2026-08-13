@@ -10,17 +10,28 @@ PolyVision has checkpoint introspection, scripted baselines, contract validators
 $env:POLYVISION_SOLO_NO_OPPONENT_MODE = '1'
 python evaluate_brain.py `
     --model-path runs/<run>/ppo.cleanrl_model `
-    --level-pool-glob 'levels/phase1_pool_bardur_real/*.csv' `
+    --level-pool-glob 'levels/phase1_pool_bardur_real/validation/*.csv' `
     --seed 42
 ```
 
-Add `--render-java` for the Swing viewer or `--manual-step` to pause between decisions. This is a one-episode introspection tool, not a statistical evaluator.
+Add `--render-java` for the Swing viewer or `--manual-step` to pause between decisions. This is a one-episode introspection tool, not a statistical evaluator. Use validation for development inspection; do not repeatedly inspect test maps.
+
+## Dataset roles
+
+- Use `validation/*.csv` for repeated model/configuration comparison and checkpoint selection.
+- Use `test/*.csv` only after selection for a final generalization claim. Test-informed changes contaminate that test result for the development cycle.
+- Use `human_benchmark/*.csv` for human-versus-agent challenge results under the same wrapper contract. This challenge set may influence future development and is not a substitute for pristine test evidence.
+- Never call a result held out merely because the same map bytes were copied or renamed elsewhere; separation is enforced by canonical/content identity.
+
+## Human benchmark workflow
+
+Run `python tools/human_benchmark.py` for a persistent first-attempt human challenge on the separate 17-map pool. Official runs use `TribesGymWrapper`, the flattened policy observation, the legal-slot tensors, stable global IDs, and `env.step(global_id)`; diagnostic renderers and raw action details are blocked. Replays remain separate from the canonical first completion. See [Human benchmark](human-benchmark.md) for commands, registry format, parity validation, and interpretation.
 
 ## Current baselines and audits
 
 - `py_rl/cleanrl/cleanrl/evaluate_visible_greedy_movement.py` evaluates a policy-visible greedy movement baseline over repeated episodes.
 - `py_rl/cleanrl/cleanrl/evaluate_no_fog_runtime_village_greedy.py` is explicitly a no-fog diagnostic; it is privileged and must not be presented as a fair policy baseline.
-- `py_rl/cleanrl/cleanrl/privileged_nearest_village_oracle.py` and `tools/eval_org_only_oracle_vs_ppo.py` are research/oracle infrastructure. The latter currently hard-codes a removed legacy pool and is retained only to reproduce its historical protocol; it is not a current-pool evaluator.
+- `py_rl/cleanrl/cleanrl/privileged_nearest_village_oracle.py` and `tools/eval_org_only_oracle_vs_ppo.py` are research/oracle infrastructure. The latter defaults to the development validation pool but remains a privileged diagnostic rather than a fair policy baseline.
 - `audit_*.py`, `validate_*features.py`, and `legal_features_diagnostics.py` under the active CleanRL directory target specific action and feature invariants.
 - `tools/validate_environment_contract.py` checks every map in a pool without evaluating policy quality.
 
@@ -30,7 +41,7 @@ Inspect each tool's `--help` and its visibility assumptions before using its out
 
 For a defensible current comparison:
 
-1. freeze a held-out genuine-map manifest that was not used to select checkpoints;
+1. select checkpoints and configurations only on validation, then evaluate the selected result on the pristine test pool;
 2. use identical ordered map IDs and episode seeds for every policy;
 3. record the commit SHA, dirty status, dependency environment, checkpoint hash, and action-interface sidecar;
 4. state whether actions are deterministic argmax or sampled;

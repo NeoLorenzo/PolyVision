@@ -10,7 +10,7 @@ compressed Polytopia .state
     -> validated PolyVision/Tribes CSV
 ```
 
-It does not parse `.state` files, alter map geometry, or change training configuration. Its validated CSV output is the active PolyVision map corpus.
+It does not parse `.state` files, alter map geometry, assign experimental dataset roles, or change training configuration. Its validated CSV output is staged for explicit uniqueness review and assignment.
 
 ## Requirements
 
@@ -78,7 +78,7 @@ Batch conversion from the repository root:
 ```powershell
 python tools/polytopia_map_converter/convert_maps.py `
     --input data/polytopia_maps/parsed `
-    --output pol_env/Tribes/levels/phase1_pool_bardur_real `
+    --output data/polytopia_maps/incoming_csv `
     --manifest data/polytopia_maps/conversion_manifest.csv `
     --java-validate
 ```
@@ -130,11 +130,13 @@ map_sha256, csv_filename, csv_sha256, width, height, game_version,
 seed, tribe, capital_x, capital_y, validation_status
 ```
 
-The local real-map dataset and manifest remain covered by the repository's existing `data/polytopia_maps/` ignore rule. Generated training CSVs are written to:
+The local real-map dataset and manifest remain covered by the repository's existing `data/polytopia_maps/` ignore rule. Newly converted CSVs should be staged outside the frozen runtime pools:
 
 ```text
-pol_env/Tribes/levels/phase1_pool_bardur_real/
+data/polytopia_maps/incoming_csv/
 ```
+
+Do not convert new maps directly into `train`, `validation`, `test`, or `human_benchmark`. See [Maps](../../docs/maps.md) for the frozen split and explicit future-assignment rules.
 
 ## Tests
 
@@ -146,6 +148,6 @@ Tests cover schema rejection, every mapping, precedence, unsupported IDs, capita
 
 ## Current corpus and limitations
 
-The current 256 version-122 maps contain only Field, Mountain, Forest, Game, Metal, Fruit, cities/villages, ruins, and corner lighthouses. Coast/Ocean/Crop/Fish/Whale mappings are implemented and tested but not exercised by this Drylands corpus. Unknown IDs always fail.
+The current 5,517 version-122 maps contain only Field, Mountain, Forest, Game, Metal, Fruit, cities/villages, ruins, and corner lighthouses. Coast/Ocean/Crop/Fish/Whale mappings are implemented and tested but not exercised by this Drylands corpus. Unknown IDs always fail.
 
-The active genuine pool is 11×11. The current environment derives a 505-value observation and 63,913-ID global action catalog from that geometry, and checkpoint sidecars enforce geometry/interface compatibility. Select the pool explicitly with `POLYVISION_LEVEL_POOL_GLOB=levels/phase1_pool_bardur_real/*.csv` until the wrapper's legacy fallback constant is corrected.
+The active genuine pools are 11×11. The current environment derives a 505-value observation and 63,913-ID global action catalog from that geometry, and checkpoint sidecars enforce geometry/interface compatibility. The wrapper defaults to `POLYVISION_LEVEL_POOL_GLOB=levels/phase1_pool_bardur_real/train/*.csv`; evaluation must select another canonical pool explicitly.

@@ -1,0 +1,204 @@
+{
+  "benchmark_schema_version": 1,
+  "generated_at_utc": "2026-08-13T11:53:27.953333Z",
+  "benchmark_map_count": 17,
+  "completed_first_attempt_maps": 0,
+  "remaining_first_attempt_maps": 17,
+  "human_attempt_status_counts": {},
+  "first_attempt": {
+    "count": 0,
+    "mean_spt": null,
+    "median_spt": null,
+    "stddev_spt": null,
+    "min_spt": null,
+    "max_spt": null
+  },
+  "latest_attempt": {
+    "count": 0,
+    "mean_spt": null,
+    "median_spt": null,
+    "stddev_spt": null,
+    "min_spt": null,
+    "max_spt": null
+  },
+  "best_attempt": {
+    "count": 0,
+    "mean_spt": null,
+    "median_spt": null,
+    "stddev_spt": null,
+    "min_spt": null,
+    "max_spt": null
+  },
+  "maps": [
+    {
+      "filename": "map_000354.csv",
+      "csv_sha256": "789b4992cdc30ef1f12574d08c66b7bb3eab41a3e1cef3bcbc56cb23bdea21e8",
+      "canonical_map_sha256": "fc9d3d78fcc01d72f9759c31bcb0cd6dec54f2951172935b741c6d2c7337d5af",
+      "completed_first_attempt": false,
+      "human_attempt_count": 0,
+      "first_attempt_spt": null,
+      "latest_attempt_spt": null,
+      "best_attempt_spt": null
+    },
+    {
+      "filename": "map_000747.csv",
+      "csv_sha256": "4436fbdd3128f7a33e3670bc1b765a07ec80748d3402bf61efba41053a9cd163",
+      "canonical_map_sha256": "515dd06d7e8e1510c1c81b5e6b6c60c9d367499559fbfeeefa01a48cfd529161",
+      "completed_first_attempt": false,
+      "human_attempt_count": 0,
+      "first_attempt_spt": null,
+      "latest_attempt_spt": null,
+      "best_attempt_spt": null
+    },
+    {
+      "filename": "map_001105.csv",
+      "csv_sha256": "c0ad6f001e98706cf931e61fa028fef9a9c9ac690589f971fc89ace817143e19",
+      "canonical_map_sha256": "6d7779e5c172a3cac65ce0bec50f7ed56d6d2bbbc1a5a87e70be0c9b925df96f",
+      "completed_first_attempt": false,
+      "human_attempt_count": 0,
+      "first_attempt_spt": null,
+      "latest_attempt_spt": null,
+      "best_attempt_spt": null
+    },
+    {
+      "filename": "map_001144.csv",
+      "csv_sha256": "101086cb10c6cd9df683152a1a6a7de59c92fbba50473d5a169f8bd96c6dd306",
+      "canonical_map_sha256": "2ac97062b0b789bb683680a51e60e5271bbf0dd13da09d0af706773fa2b88ad1",
+      "completed_first_attempt": false,
+      "human_attempt_count": 0,
+      "first_attempt_spt": null,
+      "latest_attempt_spt": null,
+      "best_attempt_spt": null
+    },
+    {
+      "filename": "map_001502.csv",
+      "csv_sha256": "5e6147234e65da58ac8e4cbab2d058daf7f585e7cc843017dc9d56f2358173ad",
+      "canonical_map_sha256": "b755c86f884bb68279cc7eb463728b0c88599662b26926edcef37733647c211d",
+      "completed_first_attempt": false,
+      "human_attempt_count": 0,
+      "first_attempt_spt": null,
+      "latest_attempt_spt": null,
+      "best_attempt_spt": null
+    },
+    {
+      "filename": "map_001694.csv",
+      "csv_sha256": "d4dc09c906f5ee7a9ef694ab423273743054121629de89e76ae01f878509abd6",
+      "canonical_map_sha256": "3bc5b846ab5da899f2b68034dbecc5aee38221bb5bf1ae50dd61e0b5c5de7658",
+      "completed_first_attempt": false,
+      "human_attempt_count": 0,
+      "first_attempt_spt": null,
+      "latest_attempt_spt": null,
+      "best_attempt_spt": null
+    },
+    {
+      "filename": "map_001793.csv",
+      "csv_sha256": "3d8b80055c21945581d48659a1364ec9ad8fd4ec168ceef3db37d9b94dd055c5",
+      "canonical_map_sha256": "945308b53d7b4f6b82c72674edd7be81e4ccfbd1db82e4fe523bdf90242bfd07",
+      "completed_first_attempt": false,
+      "human_attempt_count": 0,
+      "first_attempt_spt": null,
+      "latest_attempt_spt": null,
+      "best_attempt_spt": null
+    },
+    {
+      "filename": "map_001907.csv",
+      "csv_sha256": "5a6fdf730d7c0b18f8a7c4781002219e05b4ed6f50f95a0f32e6d0f908208337",
+      "canonical_map_sha256": "73d19c7e70eb9abe63604ddac847d660934623b1360ef31fa5e573d406f92da6",
+      "completed_first_attempt": false,
+      "human_attempt_count": 0,
+      "first_attempt_spt": null,
+      "latest_attempt_spt": null,
+      "best_attempt_spt": null
+    },
+    {
+      "filename": "map_002814.csv",
+      "csv_sha256": "ac9eb9658301b5d987d64ab367da5afbde053f6a67c9580e3436dfdbd65b8337",
+      "canonical_map_sha256": "02556e614537258b39ee6fb724ca0d5ce2304735cc0d32c2536411a0cacbdede",
+      "completed_first_attempt": false,
+      "human_attempt_count": 0,
+      "first_attempt_spt": null,
+      "latest_attempt_spt": null,
+      "best_attempt_spt": null
+    },
+    {
+      "filename": "map_003082.csv",
+      "csv_sha256": "dbde360be9f1088d3b87b61b1c78f060ed5a81d6cffd391cba4dd92101141394",
+      "canonical_map_sha256": "5f1161a5d56749e8eb211129f6196fd63d35eec22874ec8c4026f1984f53556d",
+      "completed_first_attempt": false,
+      "human_attempt_count": 0,
+      "first_attempt_spt": null,
+      "latest_attempt_spt": null,
+      "best_attempt_spt": null
+    },
+    {
+      "filename": "map_003632.csv",
+      "csv_sha256": "cbd784a586f76ae049bf5a96699c73750c2f33f652880455c6753e1ed576ebd9",
+      "canonical_map_sha256": "52d8067297b59b4fe1b44c64b9c429ce750d82ff4fc37b9c66f6ba18d7c837e4",
+      "completed_first_attempt": false,
+      "human_attempt_count": 0,
+      "first_attempt_spt": null,
+      "latest_attempt_spt": null,
+      "best_attempt_spt": null
+    },
+    {
+      "filename": "map_003696.csv",
+      "csv_sha256": "8ccb93e25180c2af6c965196657ad26334f9f1a7d6c7d8b35e8856cc22052172",
+      "canonical_map_sha256": "a4a911b08772635b67d85db70452cf0b9cb9673d85bca82b8bbec93a01e6438c",
+      "completed_first_attempt": false,
+      "human_attempt_count": 0,
+      "first_attempt_spt": null,
+      "latest_attempt_spt": null,
+      "best_attempt_spt": null
+    },
+    {
+      "filename": "map_003830.csv",
+      "csv_sha256": "467de907d6f6b1bb8486dd0936b0b89db26e7a960299d1c492663e2a484185b6",
+      "canonical_map_sha256": "2edabd3c22709fac639a112fd677102551c6446fe686ea970e4c98c8f7509f55",
+      "completed_first_attempt": false,
+      "human_attempt_count": 0,
+      "first_attempt_spt": null,
+      "latest_attempt_spt": null,
+      "best_attempt_spt": null
+    },
+    {
+      "filename": "map_004233.csv",
+      "csv_sha256": "4e965208490da94851b0b392d81b483a1acc8c9349c3d4848f7e2691aa570e52",
+      "canonical_map_sha256": "79ec60ba4a10f1a7521a4bfcce58d5bd7c55cd3cd14905454733dafa8dd6c794",
+      "completed_first_attempt": false,
+      "human_attempt_count": 0,
+      "first_attempt_spt": null,
+      "latest_attempt_spt": null,
+      "best_attempt_spt": null
+    },
+    {
+      "filename": "map_004393.csv",
+      "csv_sha256": "37c79d8cd877b603242c8d08de4f54b5e5a6baeaa0b037e6210863f07164b4f8",
+      "canonical_map_sha256": "8150bfe5b53f4775a967079c9870717ca6caba6842c76c8e6e670b2065370bec",
+      "completed_first_attempt": false,
+      "human_attempt_count": 0,
+      "first_attempt_spt": null,
+      "latest_attempt_spt": null,
+      "best_attempt_spt": null
+    },
+    {
+      "filename": "map_004555.csv",
+      "csv_sha256": "8e5c9522d3873f3a19fdb270248c5fbaf60c09aefae4881a65eed1ed7a397ed5",
+      "canonical_map_sha256": "bf1f14fd56badc7033c8cfc3d465d97441b82c10f42720d209c8fcd1002faffc",
+      "completed_first_attempt": false,
+      "human_attempt_count": 0,
+      "first_attempt_spt": null,
+      "latest_attempt_spt": null,
+      "best_attempt_spt": null
+    },
+    {
+      "filename": "map_004593.csv",
+      "csv_sha256": "079eb85daa9bda22a1e6fe5fcaa879fbf2ca2e2655f0e9f090b29fdbf716811c",
+      "canonical_map_sha256": "1c4b4c9df88cd424f4e49ff802bd8023585ea3547730a259b98914ef86e6ae44",
+      "completed_first_attempt": false,
+      "human_attempt_count": 0,
+      "first_attempt_spt": null,
+      "latest_attempt_spt": null,
+      "best_attempt_spt": null
+    }
+  ]
+}

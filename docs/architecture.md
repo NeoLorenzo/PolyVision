@@ -18,7 +18,7 @@ flowchart LR
 
 ### Map pipeline
 
-`tools/polytopia_state_converter` reads the generated initial state from compressed Polytopia saves and emits deterministic, schema-versioned JSON. `tools/polytopia_map_converter` maps supported Polytopia semantics to Tribes CSV tokens, validates geometry and contents, and can round-trip each result through the Java loader. The active training corpus is `pol_env/Tribes/levels/phase1_pool_bardur_real/`.
+`tools/polytopia_state_converter` reads the generated initial state from compressed Polytopia saves and emits deterministic, schema-versioned JSON. `tools/polytopia_map_converter` maps supported Polytopia semantics to Tribes CSV tokens, validates geometry and contents, and can round-trip each result through the Java loader. `tools/split_phase1_map_pool.py` verifies the frozen identity-based dataset contract; only `pol_env/Tribes/levels/phase1_pool_bardur_real/train/` is used for gradients.
 
 ### Java engine
 

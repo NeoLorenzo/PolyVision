@@ -362,7 +362,7 @@ def _print_case_trace(case_i: int, payload: Dict[str, Any]) -> None:
 
 
 def run(args):
-    os.environ.setdefault("POLYVISION_LEVEL_POOL_GLOB", "levels/phase1_pool/*.csv")
+    os.environ.setdefault("POLYVISION_LEVEL_POOL_GLOB", "levels/phase1_pool_bardur_real/train/*.csv")
     os.environ.setdefault("POLYVISION_LEVEL_SELECTION_MODE", "round_robin")
 
     env = gym.make("Tribes-v0")

@@ -35,15 +35,16 @@ Successful compilation creates `pol_env/Tribes/out/core/game/PythonEnv.class`.
 
 ## Validate the current map contract
 
-The runtime wrapper still contains a legacy fallback path that names removed levels. Until that implementation default is corrected, select the genuine pool explicitly in every shell that creates `Tribes-v0`:
+First verify the complete frozen split cheaply, then optionally run the live Java contract over the training pool:
 
 ```powershell
-$env:POLYVISION_LEVEL_POOL_GLOB = 'levels/phase1_pool_bardur_real/*.csv'
+python tools/split_phase1_map_pool.py
+$env:POLYVISION_LEVEL_POOL_GLOB = 'levels/phase1_pool_bardur_real/train/*.csv'
 $env:POLYVISION_SOLO_NO_OPPONENT_MODE = '1'
 python tools/validate_environment_contract.py --expected-width 11 --expected-height 11
 ```
 
-This resets every map and verifies the pool-wide geometry, observation shape, action-space size, and catalog fingerprint. The current committed corpus contains 256 maps.
+The first command checks all 5,517 assignments and hashes. The second resets all 5,000 training maps and verifies pool-wide geometry, observation shape, action-space size, and catalog fingerprint. Add `--max-maps 1` for a quick live smoke test. The wrapper defaults safely to training when no pool override is supplied.
 
 For a smaller bridge smoke test:
 
@@ -58,9 +59,9 @@ Always call `close()` when directly constructing an environment. Training and va
 The trainer performs strict action-interface validation by default. A full first validation covers 10,000 decision states; for a quick installation check, use a small explicit validation budget:
 
 ```powershell
-$env:POLYVISION_LEVEL_POOL_GLOB = 'levels/phase1_pool_bardur_real/*.csv'
+$env:POLYVISION_LEVEL_POOL_GLOB = 'levels/phase1_pool_bardur_real/train/*.csv'
 $env:POLYVISION_SOLO_NO_OPPONENT_MODE = '1'
-python py_rl/cleanrl/cleanrl/ppo.py --total-timesteps 512 --num-envs 1 --num-steps 128 --validation-states 100 --actor-mode legal-only --no-cuda
+python py_rl/cleanrl/cleanrl/ppo.py --total-timesteps 512 --num-envs 1 --num-steps 128 --validation-states 100 --actor-mode legal_only --no-cuda
 ```
 
 Use the default validation budget for research runs. See [Training](training.md) for actor modes, checkpoints, tracking, and profiling.
@@ -70,4 +71,5 @@ Use the default validation budget for research runs. See [Training](training.md)
 - [Architecture](architecture.md) explains the Java-to-PPO control flow.
 - [Environment](environment.md), [Actions](actions.md), and [Observations](observations.md) define the active RL contract.
 - [Maps](maps.md) describes genuine map ingestion and validation.
+- [Human benchmark](human-benchmark.md) explains permanent first-attempt human challenge runs and parity safeguards.
 - [Troubleshooting](troubleshooting.md) covers JVM, Windows, geometry, and compatibility failures.

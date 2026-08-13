@@ -140,7 +140,7 @@ def _city_id_at(obs: Dict, x: int, y: int) -> int:
 
 
 def run_audit(args):
-    os.environ.setdefault("POLYVISION_LEVEL_POOL_GLOB", "levels/phase1_pool/*.csv")
+    os.environ.setdefault("POLYVISION_LEVEL_POOL_GLOB", "levels/phase1_pool_bardur_real/train/*.csv")
     os.environ.setdefault("POLYVISION_LEVEL_SELECTION_MODE", "round_robin")
 
     env = gym.make("Tribes-v0")

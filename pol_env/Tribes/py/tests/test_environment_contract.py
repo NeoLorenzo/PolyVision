@@ -149,10 +149,50 @@ class ValidatorFingerprintTests(unittest.TestCase):
             )
 
 
+class LevelPoolSelectionTests(unittest.TestCase):
+    def test_default_selects_training_pool_only_and_explicit_overrides_work(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            train = root / "levels" / "phase1_pool_bardur_real" / "train"
+            validation = root / "levels" / "phase1_pool_bardur_real" / "validation"
+            train.mkdir(parents=True)
+            validation.mkdir(parents=True)
+            (train / "train.csv").write_text(".:\n", encoding="utf-8")
+            (validation / "validation.csv").write_text(".:\n", encoding="utf-8")
+            wrapper = object.__new__(TribesGymWrapper)
+            with mock.patch.object(wrapper, "_tribes_root_dir", return_value=str(root)):
+                with mock.patch.dict(os.environ, {}, clear=True):
+                    self.assertEqual(
+                        [Path(path).resolve() for path in wrapper._resolve_level_pool(wrapper.PHASE1_LEVEL_FILE)],
+                        [(train / "train.csv").resolve()],
+                    )
+                with mock.patch.dict(
+                    os.environ,
+                    {"POLYVISION_LEVEL_POOL_GLOB": "levels/phase1_pool_bardur_real/validation/*.csv"},
+                    clear=True,
+                ):
+                    self.assertEqual(
+                        [Path(path).resolve() for path in wrapper._resolve_level_pool(wrapper.PHASE1_LEVEL_FILE)],
+                        [(validation / "validation.csv").resolve()],
+                    )
+
+    def test_explicit_empty_override_never_falls_back_to_training(self):
+        wrapper = object.__new__(TribesGymWrapper)
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(wrapper, "_tribes_root_dir", return_value=tmp):
+                with mock.patch.dict(
+                    os.environ,
+                    {"POLYVISION_LEVEL_POOL_GLOB": "levels/phase1_pool_bardur_real/test/*.csv"},
+                    clear=True,
+                ):
+                    with self.assertRaisesRegex(FileNotFoundError, "refusing to fall back"):
+                        wrapper._resolve_level_pool(wrapper.PHASE1_LEVEL_FILE)
+
+
 class LiveMixedPoolRegressionTests(unittest.TestCase):
     def _fixture_paths(self):
         synthetic = TRIBES_ROOT / "levels" / "phase1_pool_bardur_solo" / "phase1_12x12_pool_000.csv"
-        genuine = TRIBES_ROOT / "levels" / "phase1_pool_bardur_real" / "map_000001.csv"
+        genuine = TRIBES_ROOT / "levels" / "phase1_pool_bardur_real" / "train" / "map_000001.csv"
         if not synthetic.is_file() or not genuine.is_file():
             self.skipTest("Local 12x12 and 11x11 pool fixtures are required for the live regression test")
         return synthetic, genuine

@@ -24,7 +24,9 @@ PPO seeds Python, NumPy, and PyTorch and enables deterministic cuDNN behavior by
 
 `compute_level_pool_identity()` hashes each selected CSV and a deterministic list of its relative path, size, and SHA-256. The strict validator includes this identity in its cache fingerprint. For published evaluation, retain the manifest itself rather than relying only on an aggregate hash.
 
-Training and evaluation pools should be disjoint by map hash, not just filename. Canonical `map_sha256` identifies equivalent initial maps even when source save bytes or names differ.
+The authoritative `split_manifest.json` freezes 5,000 training, 250 validation, 250 test, and 17 human-benchmark assignments at split seed `20260813`. The split is disjoint by canonical `map_sha256` and exact CSV SHA-256, not just filename. Run `python tools/split_phase1_map_pool.py` before research runs to verify counts, hashes, aggregate pool identities, and filesystem agreement.
+
+Never reshuffle established assignments when new maps arrive. New converter output belongs in `data/polytopia_maps/incoming_csv/` until an explicit dataset-contract update assigns unique, previously unused maps. Training maps cannot later become honestly held-out; validation maps used for development cannot later become pristine test maps.
 
 ## Interface and checkpoints
 
@@ -46,6 +48,8 @@ Successful action-interface checks are cached under `.cache/action_validator/`. 
 
 ## Evaluation protocol
 
-Use multiple independent training seeds and a frozen held-out pool. Pair policies on identical map/episode seeds; choose deterministic or stochastic action selection in advance; report uncertainty and raw episode records. Separate visible-information baselines from full-visibility diagnostics and distinguish final training summaries from evaluation aggregates.
+Use multiple independent training seeds. Select models on validation, then evaluate the frozen test pool only after selection. Pair policies on identical map/episode seeds; choose deterministic or stochastic action selection in advance; report uncertainty and raw episode records. Separate visible-information baselines from full-visibility diagnostics and distinguish training summaries, development validation, pristine test, and human-challenge aggregates.
 
 The [evaluation guide](evaluation.md) lists recommended metrics. The [historical benchmark registry](history/model-run-benchmark-log.md) illustrates why interface and protocol metadata are necessary.
+
+Human benchmark attempt files additionally record stable map hashes, episode seed, interface contract, reward/filter settings, Git provenance, shaped return, curated terminal metrics, and every chosen stable global ID. Preserve the first completed attempt separately from later replays. `outputs/human_benchmark/summary.json` is derived evidence; individual attempt files and the append-only event index are the durable source. See [Human benchmark](human-benchmark.md).

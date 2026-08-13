@@ -6,7 +6,7 @@ The project does **not** currently solve the full game. Its active curriculum is
 
 ## Overview
 
-PolyVision runs on genuine Polytopia initial-map data. Compressed save states are converted into canonical, schema-versioned JSON and then into validated Tribes CSV maps. The current committed pool contains 256 genuine 11×11 Bardur Drylands maps.
+PolyVision runs on genuine Polytopia initial-map data. Compressed save states are converted into canonical, schema-versioned JSON and then into validated Tribes CSV maps. Phase 1 contains 5,517 genuine 11×11 Bardur Drylands maps in a frozen identity-based split: 5,000 train, 250 validation, 250 test, and 17 human benchmark maps.
 
 The policy interacts through stable global action IDs rather than state-local Java indices. Each state also carries the current legal IDs, a fixed-capacity validity mask, and optional semantic/economic action features. Strict validation checks that every policy-visible legal action has one collision-free global identity and that selected IDs execute the intended Java action.
 
@@ -14,7 +14,7 @@ The policy interacts through stable global action IDs rather than state-local Ja
 
 - Java Tribes engine controlled from Python through Py4J
 - Gymnasium `Tribes-v0` environment with deterministic reset and cleanup behavior
-- 11×11 genuine Bardur map corpus and reproducible map conversion pipeline
+- 11×11 genuine Bardur corpus with a reproducible, hash-verified experimental split
 - geometry-derived observations and global action catalog
 - legality-aware PPO actor modes: `legal_only`, `legal_features`, and `dense_debug`
 - 42-dimensional semantic/economic legal-action features
@@ -23,6 +23,7 @@ The policy interacts through stable global action IDs rather than state-local Ja
 - checkpoint sidecars that enforce environment/interface compatibility
 - asynchronous multi-JVM training, TensorBoard/W&B telemetry, diagnostics, and SPS profiling
 - checkpoint introspection, scripted baselines, feature audits, and controlled-evaluation infrastructure
+- persistent first-attempt human benchmarking with model-interface and information parity
 
 ## Architecture
 
@@ -63,15 +64,16 @@ javac -cp "lib/json.jar" -d out -sourcepath src $sources
 Set-Location ../..
 ```
 
-Select and validate the genuine pool:
+Verify the frozen split and live training-pool contract:
 
 ```powershell
-$env:POLYVISION_LEVEL_POOL_GLOB = 'levels/phase1_pool_bardur_real/*.csv'
+python tools/split_phase1_map_pool.py
+$env:POLYVISION_LEVEL_POOL_GLOB = 'levels/phase1_pool_bardur_real/train/*.csv'
 $env:POLYVISION_SOLO_NO_OPPONENT_MODE = '1'
 python tools/validate_environment_contract.py --expected-width 11 --expected-height 11
 ```
 
-The explicit pool setting is currently required because the wrapper's internal fallback still names removed legacy levels. The validator resets all 256 maps and checks geometry, observation, catalog, and pool-wide interface consistency. For detailed installation notes and a smaller smoke test, use [Getting started](docs/getting-started.md).
+The wrapper defaults to the training pool only; the explicit setting above makes the experimental role visible in commands and run records. Static split verification checks all 5,517 hashes and assignments, while the live validator resets the selected pool and checks geometry, observation, catalog, and interface consistency. For detailed installation notes and a smaller smoke test, use [Getting started](docs/getting-started.md).
 
 ## Training
 
@@ -84,7 +86,7 @@ py_rl/cleanrl/cleanrl/ppo.py
 A representative tracked-interface run is:
 
 ```powershell
-$env:POLYVISION_LEVEL_POOL_GLOB = 'levels/phase1_pool_bardur_real/*.csv'
+$env:POLYVISION_LEVEL_POOL_GLOB = 'levels/phase1_pool_bardur_real/train/*.csv'
 $env:POLYVISION_SOLO_NO_OPPONENT_MODE = '1'
 $env:POLYVISION_INFO_MODE = 'fast'
 python py_rl/cleanrl/cleanrl/ppo.py `
@@ -105,11 +107,19 @@ Use `evaluate_brain.py` for compatible one-episode policy inspection:
 ```powershell
 python evaluate_brain.py `
     --model-path runs/<run>/ppo.cleanrl_model `
-    --level-pool-glob 'levels/phase1_pool_bardur_real/*.csv' `
+    --level-pool-glob 'levels/phase1_pool_bardur_real/validation/*.csv' `
     --seed 42
 ```
 
 The repository also includes visible-information scripted baselines, privileged diagnostics, action/feature audits, and a pool contract validator. These tools have different visibility and protocol assumptions; [Evaluation](docs/evaluation.md) identifies their intended use.
+
+Run a permanent human challenge attempt with:
+
+```powershell
+python tools/human_benchmark.py
+```
+
+The command selects an unplayed human-benchmark map and presents exactly the wrapper-filtered stable global IDs available to PPO. Results remain separate from pristine test evidence; see [Human benchmark](docs/human-benchmark.md).
 
 The latest committed experiment evidence includes a completed 500K training validation on the current genuine-map, 256-slot, 42-feature interface. Its recorded metrics are training-summary snapshots, not a held-out multi-seed benchmark. The strongest committed repeated-episode comparison used an older interface and is preserved as historical evidence only. Definitive current-interface, held-out, multi-seed results remain an active research target.
 
@@ -119,7 +129,7 @@ The latest committed experiment evidence includes a completed 500K training vali
 |---|---|
 | `pol_env/Tribes/src/` | Java Tribes engine and Py4J-facing environment |
 | `pol_env/Tribes/py/` | Bridge, Gymnasium wrapper, validators, and utilities |
-| `pol_env/Tribes/levels/phase1_pool_bardur_real/` | Active genuine 11×11 Bardur maps |
+| `pol_env/Tribes/levels/phase1_pool_bardur_real/` | Frozen train/validation/test/human Phase 1 split and manifest |
 | `py_rl/cleanrl/cleanrl/ppo.py` | Primary PolyVision PPO trainer |
 | `tools/polytopia_state_converter/` | Compressed save to canonical JSON |
 | `tools/polytopia_map_converter/` | Canonical JSON to validated Tribes CSV |
@@ -136,6 +146,7 @@ The latest committed experiment evidence includes a completed 500K training vali
 - [Rewards](docs/rewards.md)
 - [Training](docs/training.md)
 - [Evaluation](docs/evaluation.md)
+- [Human benchmark](docs/human-benchmark.md)
 - [Maps](docs/maps.md)
 - [Reproducibility](docs/reproducibility.md)
 - [Troubleshooting](docs/troubleshooting.md)
@@ -151,11 +162,11 @@ Focused manuals remain beside the [state converter](tools/polytopia_state_conver
 - Reward and action filtering encode a Phase 1 curriculum and can bias learned behavior.
 - Checkpoints are tightly coupled to geometry and action-interface metadata.
 - The trainer saves weights and interface metadata, not full optimizer/RNG state for exact resume.
-- Current-interface held-out multi-seed benchmark results are not yet established.
+- Current-interface multi-seed validation/test benchmark results are not yet established.
 
 ## Roadmap
 
-Near-term work is to harden the genuine-map interface, freeze train/held-out manifests, and publish reproducible multi-seed baselines. Later phases can broaden map distributions and tribes, relax curriculum filters, add combat and opponents, extend observations and action semantics, and evaluate full-game policies. Those items are future work, not current capabilities.
+Near-term work is to run reproducible multi-seed validation and pristine-test baselines on the frozen split. Later phases can broaden map distributions and tribes, relax curriculum filters, add combat and opponents, extend observations and action semantics, and evaluate full-game policies. Those items are future work, not current capabilities.
 
 ## Attribution and licenses
 
