@@ -12,6 +12,66 @@ Every new change entry must include `Scope`, `Rationale`, `Implemented`, and `Va
 
 Do not substitute a description of what changed for the reason it changed. If the original rationale or validation is unknown, record that explicitly rather than reconstructing it as fact.
 
+## [Phase1-Opening_Fix-031] - (2026-08-14)
+
+### Scope
+- Closed the historical mixed-opening investigation, shelved Seed-1 before pristine capability test, corrected the scripted opening, versioned the contract, reconciled the research record, and proved the corrected handoff across the full 5,517-map corpus.
+
+### Rationale
+- Phase 1 intended two warriors at Turn-2 handoff, but historical `v1_mixed_capital_regression` produced one unit on 2,479/5,517 maps. Training and validation were closely matched, so Seed-1 remains meaningful evidence for that historical task; it cannot be the final candidate for the materially different guaranteed-two-unit task. Correcting and retraining before capability test protects the pristine protocol.
+- Root cause was deterministic action selection, not an exception: on 44.93% of maps the successful Turn-1 move returned the original warrior to capital, Java omitted spawn because the tile was occupied, and the script treated spawn as optional. The smallest correction excludes that destination only during Turn-1 opening selection and preserves the relative scorer for all remaining moves.
+
+### Historical findings
+- Train: 2,249 one-unit / 2,751 two-unit; validation: 109 / 141; test contract: 112 / 138; human benchmark: 9 / 8; total: 2,479 / 3,038. Both moves succeeded on 100%, spawn succeeded on 55.07%, and no swallowed exception occurred.
+- The canonical Seed-1 validation remains preserved at `outputs/evaluations/20260814T110912Z_validation_canonical`: PPO argmax mean 14.576, internally valid for v1. The checkpoint is historical/shelved and received no pristine model test.
+
+### Implemented
+- Added `PHASE1_OPENING_VERSION=v2_guaranteed_two_unit` to environment info, checkpoint/evaluation metadata, human provenance, and compatibility validation. Historical sidecars missing the version and explicit v1 checkpoints fail against v2 by default.
+- Removed own-capital destinations from the original warrior's Turn-1 scripted candidates, retained the existing scorer for remaining candidates, made spawn mandatory, removed swallowing around required moves, and made turn advancement fail closed.
+- Added a final invariant for Turn 2, 5 stars, 4 SPT, one city, exactly two in-bounds Bardur units, stable original identity away from capital, and one newly spawned warrior on capital. Added the exact `map_003696.csv` regression.
+- Rewrote the chronological Seed-1 reflection, marked the model shelved in the registry, reconciled environment/evaluation/human/map/action/reproducibility/setup/troubleshooting documentation, and preserved both historical and corrected audit artifacts.
+
+### Validation
+- Corrected audit: 5,517/5,517 two-unit handoffs—5,000/5,000 train, 250/250 validation, 250/250 test-contract, and 17/17 human benchmark. Turn-0 move, Turn-1 move, and spawn were each 100%; exceptions, unavailable spawns, original-on-capital handoffs, and other unit counts were all zero.
+- `map_003696.csv` retained `(3,5)→(2,4)` on Turn 0, selected `(2,4)→(1,3)` on Turn 1, spawned a warrior on `(3,5)`, and handed off two units at 5 stars / 4 SPT / one city.
+- No checkpoint was loaded on test maps and no post-opening policy action, capability score, or development feedback was produced. The human registry remained at zero completed first attempts.
+
+## [Phase1-First_Eval-030] - (2026-08-14)
+
+### Scope
+- Registered the overnight seed-1 10M training run as the first model candidate to be properly evaluated under the new update.
+- Advanced the canonical W&B evidence source to `wandb_export_2026-08-14T11_37_19.454+01_00.csv` and recorded its training configuration, completion, interface-validation settings, and final retained summary values in the historical model-run registry.
+- Added the canonical Phase 1 batch validation suite for deterministic PPO, sampled PPO, random-legal, and policy-visible greedy evaluation on the frozen validation split.
+- Made no model-quality claim from the export; the training and evaluation evidence produced during this session remains the priority.
+- Audited the existing scripted opening across all 5,517 manifest maps without changing its action selection or running PPO, after the official human UI exposed a one-unit Turn-2 handoff.
+
+### Rationale
+- The new run needs a durable identity and configuration record before the first evaluation so its checkpoint, training contract, and later results are not confused with earlier 256-slot validation work.
+- A W&B export preserves useful configuration and completion evidence, but its scalar values are one final retained snapshot rather than a representative multi-episode evaluation. They may be noisy or unrepresentative, so this session's explicitly recorded training/evaluation protocol and repeated outcomes must be treated as more important.
+- The project had strong training validation and one-episode inspection but no single held-out batch protocol that paired learned and non-learning policies on exact maps/seeds, treated stochastic repeats at map level, or retained complete machine-readable provenance. A shared runner and fail-closed schedule make model-quality claims auditable without changing the scientific task.
+- Historical training and validation could only be interpreted correctly after establishing whether the intended two-unit opening actually occurred. Repairing first would have erased evidence about the task the Seed-1 checkpoint learned, so opt-in observation of the unchanged wrapper was required before any correction.
+
+### Implemented
+- Mapped `Phase1-First_Eval-030 (10M, seed 1)` to W&B run `Tribes-v0__Phase1-Scientific-Train-Seed1__1__1786668037`.
+- Logged 9,999,360 of 10,000,000 planned steps, the 256-slot/42-feature legal-action interface, 20×128 rollout layout, PPO hyperparameters, deterministic CUDA settings, checkpoint cadence, and 10,000-state forced action-interface validation.
+- Recorded the final W&B summary in the snapshot table and added an explicit warning that it is neither a controlled comparison nor the result of the evaluation update.
+- Added `tools/evaluate_phase1.py` and `tools/phase1_eval_core.py` with one episode runner, manifest/hash-verified schedules, deterministic and seeded-sampled PPO, seeded uniform random legal, a raw-Java-free visible greedy policy, Turn-10/action/fallback invariants, map-level bootstrap statistics, paired comparisons, and JSON/JSONL/CSV outputs.
+- Exposed `Agent.get_action_distribution()` as the authoritative actor scoring path while preserving training sampling behavior, and changed the older visible-greedy evaluator's warrior selection to use the policy-visible `unit_type_warrior` feature.
+- Protected the pristine test pool with an explicit confirmation flag and documented validation as inspectable development evidence rather than final test evidence.
+- Added behavior-preserving opening trace hooks and `tools/audit_phase1_opening.py`. The audit records all eight scripted phases, raw selected actions, state transitions, capital occupancy, handoff state, skipped actions, and swallowed exceptions while leaving the normal recorder-free path unchanged.
+- Added durable full-dataset and focused suspected-map artifacts under `outputs/opening_audit/`; no model was loaded, no policy action was taken, and no test capability result was produced.
+
+### Validation
+- Parsed the 2026-08-14 export as 29 runs and matched the new row by its exact W&B name.
+- Cross-checked the recorded training fields directly against the exported configuration and summary columns; the later canonical evaluation result is recorded separately from those W&B snapshots.
+- Added evaluator tests covering valid deterministic selection, reproducible valid PPO/random sampling, policy-visible warrior selection, the exact 250-map/3,000-episode paired schedule, map aggregation, reproducible bootstrap intervals, paired deltas, and policy-seed provenance.
+- Completed an 18-episode validation-only smoke on three manifest-verified maps (1 argmax, 2 sampled, 1 greedy, and 2 random per map). Every episode completed the Turn-10 contract without invalid actions or fallbacks; the explicitly noncanonical smoke means were 15.67, 16.33, 8.33, and 5.33 T10 SPT respectively. No test map was evaluated.
+- Recorded the completed canonical 3,000-episode validation run `20260814T110912Z_validation_canonical`: PPO argmax mean T10 SPT 14.576, PPO sampled 13.678, visible greedy 7.128, and random legal 5.897 across 250 validation maps. PPO argmax beat visible greedy on 250/250 paired maps.
+- Added `docs/results/PolyVision_Phase1_Validation_Results.md` as the detailed result reflection and marked it explicitly as the first properly trained/evaluated Phase 1 model and first candidate—not the final Phase 1 model or a pristine-test result.
+- Reproduced `map_003696.csv` exactly: Turn 2, 5 stars, 4 SPT, one city, and one warrior on the capital. Both moves succeeded; the second returned to the capital, so spawn was unavailable and skipped without exception.
+- Audited all 5,517 maps: 3,038 two-unit and 2,479 one-unit handoffs. Training was 55.02%/44.98%; validation was 56.40%/43.60%. All moves, harvests, Workshops, and transitions succeeded; no swallowed exceptions occurred.
+- Confirmed identical outcomes for three successful and three failed maps across seeds 42/43, and for `map_003696.csv` across seeds 1/42/123. The human registry remained at 0 completed first attempts.
+
 ## [Phase1-Human_Benchmark-029] - (2026-08-13)
 
 ### Scope

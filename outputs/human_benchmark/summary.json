@@ -1,10 +1,12 @@
 {
   "benchmark_schema_version": 1,
-  "generated_at_utc": "2026-08-13T11:53:27.953333Z",
+  "generated_at_utc": "2026-08-14T13:04:36.134537Z",
   "benchmark_map_count": 17,
   "completed_first_attempt_maps": 0,
   "remaining_first_attempt_maps": 17,
-  "human_attempt_status_counts": {},
+  "human_attempt_status_counts": {
+    "aborted": 1
+  },
   "first_attempt": {
     "count": 0,
     "mean_spt": null,
@@ -145,7 +147,7 @@
       "csv_sha256": "8ccb93e25180c2af6c965196657ad26334f9f1a7d6c7d8b35e8856cc22052172",
       "canonical_map_sha256": "a4a911b08772635b67d85db70452cf0b9cb9673d85bca82b8bbec93a01e6438c",
       "completed_first_attempt": false,
-      "human_attempt_count": 0,
+      "human_attempt_count": 1,
       "first_attempt_spt": null,
       "latest_attempt_spt": null,
       "best_attempt_spt": null

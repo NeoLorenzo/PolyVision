@@ -23,6 +23,8 @@ The trainer defaults to `legal_only`, 500,000 timesteps, 12 environments, 128 ro
 
 The wrapper also defaults to `levels/phase1_pool_bardur_real/train/*.csv` when the environment variable is absent. Training must never use `validation`, `test`, or `human_benchmark`; explicit pool overrides exist for evaluation, not PPO gradient runs. Record the training glob and aggregate pool identity with every experiment.
 
+New checkpoints record `phase1_opening_version=v2_guaranteed_two_unit`. Do not resume the shelved Seed-1 checkpoint: it was trained under `v1_mixed_capital_regression`, materially differs on approximately 45% of starting states, and fails current compatibility by default. The next scientific model must start from scratch.
+
 ## Important arguments
 
 | Argument | Current default | Meaning |

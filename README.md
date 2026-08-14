@@ -22,7 +22,7 @@ The policy interacts through stable global action IDs rather than state-local Ja
 - strict pre-training action-interface validation with content-aware caching
 - checkpoint sidecars that enforce environment/interface compatibility
 - asynchronous multi-JVM training, TensorBoard/W&B telemetry, diagnostics, and SPS profiling
-- checkpoint introspection, scripted baselines, feature audits, and controlled-evaluation infrastructure
+- canonical deterministic/sampled validation evaluation with paired policy-visible baselines and machine-readable reports
 - persistent first-attempt human benchmarking with model-interface and information parity
 
 ## Architecture
@@ -42,7 +42,7 @@ The Java engine remains authoritative for game state and raw legal actions. The 
 
 ## Current Phase 1 task
 
-The policy controls Bardur after a deterministic opening that harvests the starting animals, takes the Workshop upgrade, and advances through the start of Turn 2. It then chooses economy, research, movement, capture, development, and turn-ending actions through Bardur Turn 10.
+The policy controls Bardur after the fail-closed `v2_guaranteed_two_unit` opening: two animals, Workshop, two original-warrior moves, a required second-warrior spawn, and handoff at Turn 2. Turn-1 opening selection alone excludes the capital; ordinary policy gameplay is unchanged. The corrected audit passed 5,517/5,517 maps. Historical Seed-1 used `v1_mixed_capital_regression` (55.07% two-unit) and is preserved but shelved before pristine capability test. See the [scripted-opening audit](docs/results/Phase1_Scripted_Opening_Audit.md) and [reflection](docs/results/Phase1_Seed1_Mixed_Opening_Validation_Reflection.md).
 
 `ATTACK` is deliberately unavailable to the Phase 1 policy. The environment prioritizes early village-expansion lines through active action filters and trains on shaped SPT, city capture, village discovery/progress, and fog-clearing signals. Final T10 SPT and other economy metrics are reported separately from shaped return.
 
@@ -113,6 +113,19 @@ python evaluate_brain.py `
 
 The repository also includes visible-information scripted baselines, privileged diagnostics, action/feature audits, and a pool contract validator. These tools have different visibility and protocol assumptions; [Evaluation](docs/evaluation.md) identifies their intended use.
 
+Run the canonical 3,000-episode Phase 1 validation suite with:
+
+```powershell
+python tools/evaluate_phase1.py `
+    --model-path runs/<run>/ppo.cleanrl_model `
+    --pool validation `
+    --suite full `
+    --repeats-per-map 5 `
+    --seed 42
+```
+
+This compares deterministic PPO, sampled PPO, visible greedy, and random legal on the same 250 validation maps. Final T10 SPT is primary; stochastic uncertainty is computed across per-map replicate means. Results and provenance are retained under `outputs/evaluations/`. Test evaluation is separately guarded and is not part of ordinary development evaluation.
+
 Run a permanent human challenge attempt with:
 
 ```powershell
@@ -121,7 +134,9 @@ python tools/human_benchmark.py
 
 The command selects an unplayed human-benchmark map and presents exactly the wrapper-filtered stable global IDs available to PPO. Results remain separate from pristine test evidence; see [Human benchmark](docs/human-benchmark.md).
 
-The latest committed experiment evidence includes a completed 500K training validation on the current genuine-map, 256-slot, 42-feature interface. Its recorded metrics are training-summary snapshots, not a held-out multi-seed benchmark. The strongest committed repeated-episode comparison used an older interface and is preserved as historical evidence only. Definitive current-interface, held-out, multi-seed results remain an active research target.
+The first complete canonical validation suite has now evaluated the first properly trained Phase 1 model over 3,000 episodes and all 250 validation maps. PPO argmax reached mean T10 SPT 14.576 and beat the visible-greedy baseline on every paired map. See [PolyVision Phase 1 Validation Results](docs/results/PolyVision_Phase1_Validation_Results.md) for the full reflection, uncertainty, failure cases, and limitations.
+
+This was the first long Phase 1 scientific model, but it is now **historical / shelved**, not the final candidate. Its validation informs development under the historical mixed-opening task; a fresh v2 model and new validation are required before pristine capability test.
 
 ## Repository structure
 
@@ -133,7 +148,8 @@ The latest committed experiment evidence includes a completed 500K training vali
 | `py_rl/cleanrl/cleanrl/ppo.py` | Primary PolyVision PPO trainer |
 | `tools/polytopia_state_converter/` | Compressed save to canonical JSON |
 | `tools/polytopia_map_converter/` | Canonical JSON to validated Tribes CSV |
-| `tools/` | Evaluation and environment-contract utilities |
+| `tools/evaluate_phase1.py` | Canonical Phase 1 validation evaluator |
+| `tools/` | Additional evaluation and environment-contract utilities |
 | `docs/` | Current project documentation |
 
 ## Documentation
@@ -146,6 +162,8 @@ The latest committed experiment evidence includes a completed 500K training vali
 - [Rewards](docs/rewards.md)
 - [Training](docs/training.md)
 - [Evaluation](docs/evaluation.md)
+- [First Phase 1 validation results](docs/results/PolyVision_Phase1_Validation_Results.md)
+- [Phase 1 scripted-opening audit](docs/results/Phase1_Scripted_Opening_Audit.md)
 - [Human benchmark](docs/human-benchmark.md)
 - [Maps](docs/maps.md)
 - [Reproducibility](docs/reproducibility.md)
@@ -162,7 +180,7 @@ Focused manuals remain beside the [state converter](tools/polytopia_state_conver
 - Reward and action filtering encode a Phase 1 curriculum and can bias learned behavior.
 - Checkpoints are tightly coupled to geometry and action-interface metadata.
 - The trainer saves weights and interface metadata, not full optimizer/RNG state for exact resume.
-- Current-interface multi-seed validation/test benchmark results are not yet established.
+- Current-interface multi-training-seed validation/test benchmark results are not yet established.
 
 ## Roadmap
 

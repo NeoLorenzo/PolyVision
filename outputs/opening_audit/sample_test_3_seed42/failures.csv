@@ -1,0 +1,2 @@
+pool,map_filename,canonical_map_sha256,episode_seed,opening_outcome,flags,owned_units,capital_occupied,reset_exception
+test,map_000543.csv,01151adb495aed6d8c2baa77bd452108e79ce7a3b381f685161ee23443dfc62f,42,ONE_UNIT_SPAWN_UNAVAILABLE,ONE_UNIT_SPAWN_UNAVAILABLE,1,True,

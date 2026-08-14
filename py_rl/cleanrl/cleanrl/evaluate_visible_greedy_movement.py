@@ -27,6 +27,7 @@ IDX_TARGET_VISIBLE_UNCAPTURED_VILLAGE = 5
 IDX_DIST_DELTA_VISIBLE_VILLAGE_NORM = 7
 IDX_IS_IMMEDIATE_BACKTRACK = 8
 IDX_TARGET_INSIDE_OWNED_CITY_BOUNDS = 9
+IDX_UNIT_TYPE_WARRIOR = 11
 IDX_IS_END_TURN = 12
 IDX_IS_CAPTURE = 13
 IDX_IS_TRAIN_OR_SPAWN = 14
@@ -119,22 +120,12 @@ def _choose_slot(
         return int(move_slots[int(np.argmax(scores))])
 
     # 4) Minimal economy fallback.
-    # Prefer warrior spawn/train when legal (stars gate is already encoded by legality).
-    uw = env.unwrapped
-    legal_actions = getattr(uw, "_current_legal_actions", [])
-    legal_id_to_raw = getattr(uw, "_current_legal_id_to_raw_index", {})
+    # Prefer warrior spawn/train using the policy-visible unit-type feature.
     train_slots = valid_slots[feats[valid_slots, IDX_IS_TRAIN_OR_SPAWN] > 0.5]
     if train_slots.size > 0 and int(stars) > 0:
-        for slot in train_slots:
-            gid = int(ids[int(slot)])
-            raw_idx = legal_id_to_raw.get(gid, None)
-            if raw_idx is None or raw_idx < 0 or raw_idx >= len(legal_actions):
-                continue
-            action = legal_actions[int(raw_idx)]
-            unit_type = str(action.get("unit_type", "")).upper()
-            repr_s = str(action.get("repr", "")).upper()
-            if unit_type == "WARRIOR" or "WARRIOR" in repr_s:
-                return int(slot)
+        warrior_slots = train_slots[feats[train_slots, IDX_UNIT_TYPE_WARRIOR] > 0.5]
+        if warrior_slots.size > 0:
+            return int(warrior_slots[0])
 
     resource_slots = valid_slots[feats[valid_slots, IDX_IS_RESOURCE_GATHERING] > 0.5]
     if resource_slots.size > 0:

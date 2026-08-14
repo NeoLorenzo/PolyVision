@@ -1,5 +1,7 @@
 # Actions
 
+The `v2_guaranteed_two_unit` opening applies one script-local mask: on Turn 1, moves by the original warrior whose destination is its own capital are excluded before the existing heuristic scores candidates. This does not change the stable action catalog, policy-visible legal mask, features, global IDs, or ordinary post-handoff ability to enter capitals.
+
 PolyVision separates the Java engine's state-local action indices from the policy's stable global action IDs. The policy never relies on “action 7” meaning the seventh legal Java action across states.
 
 ## Global catalog

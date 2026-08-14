@@ -1,0 +1,85 @@
+{
+  "benchmark_schema_version": 1,
+  "attempt_id": "map_003696-20260814T122249419451Z-39ae5a80",
+  "attempt_number": 1,
+  "participant_kind": "human",
+  "is_first_completed_attempt": false,
+  "status": "aborted",
+  "started_at_utc": "2026-08-14T12:22:49.419451Z",
+  "ended_at_utc": "2026-08-14T13:04:36.103004Z",
+  "map": {
+    "filename": "map_003696.csv",
+    "relative_path": "human_benchmark/map_003696.csv",
+    "csv_sha256": "8ccb93e25180c2af6c965196657ad26334f9f1a7d6c7d8b35e8856cc22052172",
+    "canonical_map_sha256": "a4a911b08772635b67d85db70452cf0b9cb9673d85bca82b8bbec93a01e6438c",
+    "split_dataset_contract": "phase1-bardur-real-v1",
+    "split_seed": 20260813,
+    "split_assignment": "human_benchmark",
+    "human_benchmark_pool_identity": "adbe5a707392aad15342f3c595a78abeeb85cb0ce77b91a8d9339276a2674a69"
+  },
+  "configuration": {
+    "episode_seed": 42,
+    "selection_mode": "random_unplayed_first_attempt",
+    "selection_seed": null,
+    "level_selection_mode": "single_exact_map",
+    "solo_no_opponent_mode": true
+  },
+  "git": {
+    "commit_sha": "63b540d55637c7ca62eacbe3acf9a6ba2fb2aef3",
+    "dirty_worktree": true
+  },
+  "result": {
+    "final_t10_spt": 4.0,
+    "shaped_return": 0.0,
+    "decision_count": 0,
+    "final_visible_metrics": {
+      "turn": 2,
+      "stars": 5,
+      "spt": 4,
+      "city_count": 1,
+      "visible_unit_count": 1,
+      "tech_count": 1,
+      "tech_organization": false,
+      "tech_forestry": false,
+      "avg_city_level": 2.0000000298023224,
+      "max_city_level": 2.0000000298023224
+    },
+    "final_info_metrics": {},
+    "environment_contract": {
+      "wrapper_class": "pol_env.Tribes.py.register_env.TribesGymWrapper",
+      "map_width": 11,
+      "map_height": 11,
+      "observation_dim": 505,
+      "global_action_space_n": 63913,
+      "max_legal_actions": 256,
+      "catalog_version": "flat-v1",
+      "catalog_fingerprint": "c849a4abf7b0bee073ccc56b63ae65917ea30e77068ad648c472130693dfe6e4",
+      "canonicalizer_version": "flat-v1-structured",
+      "legal_action_feature_version": "v1_3_move_focus_plus_semantic_econ",
+      "legal_action_feature_dim": 42,
+      "max_turns": 10,
+      "controlled_tribe_id": 0,
+      "solo_no_opponent_mode": true,
+      "info_mode": "fast",
+      "allowed_action_types": [
+        "BUILD",
+        "CAPTURE",
+        "CLEAR_FOREST",
+        "END_TURN",
+        "EXAMINE",
+        "GROW_FOREST",
+        "LEVEL_UP",
+        "MOVE",
+        "RESEARCH_TECH",
+        "RESOURCE_GATHERING",
+        "SPAWN"
+      ],
+      "terminal_spt_reward_enabled": false,
+      "terminal_spt_base_weight": 1.0,
+      "terminal_spt_over_10_weight": 2.0,
+      "terminal_spt_over_15_weight": 3.0,
+      "resource_gather_upgrade_filter_enabled": false
+    },
+    "action_history": []
+  }
+}

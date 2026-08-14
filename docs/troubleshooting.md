@@ -1,5 +1,11 @@
 # Troubleshooting
 
+## Phase 1 opening invariant failed
+
+Reset now fails closed if a required harvest, Workshop, move, spawn, turn transition, or final Turn-2 invariant fails. The exception includes map, seed, phase, capital, owned units, and available action types. Do not suppress it or continue training; reproduce the map with `python tools/audit_phase1_opening.py --pool <pool> --map <file> --print-trace`.
+
+A historical checkpoint rejected for missing or mismatched `phase1_opening_version` was trained under `v1_mixed_capital_regression`. This is intentional. Train a new v2 model rather than treating the contracts as equivalent.
+
 ## The environment cannot find a level file
 
 The runtime wrapper defaults to the Phase 1 training pool. Set it explicitly when reproducing a run or diagnosing map selection:

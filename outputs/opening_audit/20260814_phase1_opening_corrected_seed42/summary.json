@@ -1,0 +1,138 @@
+{
+  "audit_id": "20260814_phase1_opening_corrected_seed42",
+  "audit_schema_version": "polyvision-phase1-opening-audit-v1",
+  "by_pool": {
+    "human_benchmark": {
+      "both_moves_worked_spawn_failed_rate": 0.0,
+      "capital_free_before_spawn_but_spawn_failed_rate": 0.0,
+      "expected_two_unit_rate": 1.0,
+      "maps": 17,
+      "outcome_distribution": {
+        "EXPECTED_TWO_UNIT_OPENING": 17
+      },
+      "spawn_success_rate": 1.0,
+      "starting_warrior_on_capital_handoff_rate": 0.0,
+      "swallowed_move_exception_rate": 0.0,
+      "turn0_move_success_rate": 1.0,
+      "turn0_move_worked_turn1_failed_rate": 0.0,
+      "turn1_move_success_rate": 1.0,
+      "unit_count_distribution": {
+        "2": 17
+      }
+    },
+    "test": {
+      "both_moves_worked_spawn_failed_rate": 0.0,
+      "capital_free_before_spawn_but_spawn_failed_rate": 0.0,
+      "expected_two_unit_rate": 1.0,
+      "maps": 250,
+      "outcome_distribution": {
+        "EXPECTED_TWO_UNIT_OPENING": 250
+      },
+      "spawn_success_rate": 1.0,
+      "starting_warrior_on_capital_handoff_rate": 0.0,
+      "swallowed_move_exception_rate": 0.0,
+      "turn0_move_success_rate": 1.0,
+      "turn0_move_worked_turn1_failed_rate": 0.0,
+      "turn1_move_success_rate": 1.0,
+      "unit_count_distribution": {
+        "2": 250
+      }
+    },
+    "train": {
+      "both_moves_worked_spawn_failed_rate": 0.0,
+      "capital_free_before_spawn_but_spawn_failed_rate": 0.0,
+      "expected_two_unit_rate": 1.0,
+      "maps": 5000,
+      "outcome_distribution": {
+        "EXPECTED_TWO_UNIT_OPENING": 5000
+      },
+      "spawn_success_rate": 1.0,
+      "starting_warrior_on_capital_handoff_rate": 0.0,
+      "swallowed_move_exception_rate": 0.0,
+      "turn0_move_success_rate": 1.0,
+      "turn0_move_worked_turn1_failed_rate": 0.0,
+      "turn1_move_success_rate": 1.0,
+      "unit_count_distribution": {
+        "2": 5000
+      }
+    },
+    "validation": {
+      "both_moves_worked_spawn_failed_rate": 0.0,
+      "capital_free_before_spawn_but_spawn_failed_rate": 0.0,
+      "expected_two_unit_rate": 1.0,
+      "maps": 250,
+      "outcome_distribution": {
+        "EXPECTED_TWO_UNIT_OPENING": 250
+      },
+      "spawn_success_rate": 1.0,
+      "starting_warrior_on_capital_handoff_rate": 0.0,
+      "swallowed_move_exception_rate": 0.0,
+      "turn0_move_success_rate": 1.0,
+      "turn0_move_worked_turn1_failed_rate": 0.0,
+      "turn1_move_success_rate": 1.0,
+      "unit_count_distribution": {
+        "2": 250
+      }
+    }
+  },
+  "completed_utc": "2026-08-14T13:09:59.948202Z",
+  "exception_distribution": {},
+  "overall": {
+    "both_moves_worked_spawn_failed_rate": 0.0,
+    "capital_free_before_spawn_but_spawn_failed_rate": 0.0,
+    "expected_two_unit_rate": 1.0,
+    "maps": 5517,
+    "outcome_distribution": {
+      "EXPECTED_TWO_UNIT_OPENING": 5517
+    },
+    "spawn_success_rate": 1.0,
+    "starting_warrior_on_capital_handoff_rate": 0.0,
+    "swallowed_move_exception_rate": 0.0,
+    "turn0_move_success_rate": 1.0,
+    "turn0_move_worked_turn1_failed_rate": 0.0,
+    "turn1_move_success_rate": 1.0,
+    "unit_count_distribution": {
+      "2": 5517
+    }
+  },
+  "phase1_opening_version": "v2_guaranteed_two_unit",
+  "total_maps": 5517,
+  "train_vs_validation": {
+    "train": {
+      "both_moves_worked_spawn_failed_rate": 0.0,
+      "capital_free_before_spawn_but_spawn_failed_rate": 0.0,
+      "expected_two_unit_rate": 1.0,
+      "maps": 5000,
+      "outcome_distribution": {
+        "EXPECTED_TWO_UNIT_OPENING": 5000
+      },
+      "spawn_success_rate": 1.0,
+      "starting_warrior_on_capital_handoff_rate": 0.0,
+      "swallowed_move_exception_rate": 0.0,
+      "turn0_move_success_rate": 1.0,
+      "turn0_move_worked_turn1_failed_rate": 0.0,
+      "turn1_move_success_rate": 1.0,
+      "unit_count_distribution": {
+        "2": 5000
+      }
+    },
+    "validation": {
+      "both_moves_worked_spawn_failed_rate": 0.0,
+      "capital_free_before_spawn_but_spawn_failed_rate": 0.0,
+      "expected_two_unit_rate": 1.0,
+      "maps": 250,
+      "outcome_distribution": {
+        "EXPECTED_TWO_UNIT_OPENING": 250
+      },
+      "spawn_success_rate": 1.0,
+      "starting_warrior_on_capital_handoff_rate": 0.0,
+      "swallowed_move_exception_rate": 0.0,
+      "turn0_move_success_rate": 1.0,
+      "turn0_move_worked_turn1_failed_rate": 0.0,
+      "turn1_move_success_rate": 1.0,
+      "unit_count_distribution": {
+        "2": 250
+      }
+    }
+  }
+}

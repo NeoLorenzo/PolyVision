@@ -210,6 +210,11 @@ def capture_environment_contract(env: Any, info: dict[str, Any]) -> dict[str, An
     canonicalizer_version = (
         info["canonicalizer_version"] if "canonicalizer_version" in info else wrapper.CANONICALIZER_VERSION
     )
+    opening_version = (
+        info["phase1_opening_version"]
+        if "phase1_opening_version" in info
+        else wrapper.PHASE1_OPENING_VERSION
+    )
     feature_version = (
         info["legal_action_feature_version"]
         if "legal_action_feature_version" in info
@@ -229,6 +234,7 @@ def capture_environment_contract(env: Any, info: dict[str, Any]) -> dict[str, An
         "catalog_version": str(catalog_version),
         "catalog_fingerprint": str(catalog_fingerprint),
         "canonicalizer_version": str(canonicalizer_version),
+        "phase1_opening_version": str(opening_version),
         "legal_action_feature_version": str(feature_version),
         "legal_action_feature_dim": int(feature_dim),
         "max_turns": int(wrapper.MAX_TURNS),

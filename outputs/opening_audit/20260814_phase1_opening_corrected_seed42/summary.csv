@@ -1,0 +1,6 @@
+pool,maps,expected_two_unit_rate,turn0_move_success_rate,turn1_move_success_rate,spawn_success_rate,swallowed_move_exception_rate,starting_warrior_on_capital_handoff_rate,capital_free_before_spawn_but_spawn_failed_rate,turn0_move_worked_turn1_failed_rate,both_moves_worked_spawn_failed_rate,unit_count_distribution,outcome_distribution
+all,5517,1.0,1.0,1.0,1.0,0.0,0.0,0.0,0.0,0.0,"{""2"": 5517}","{""EXPECTED_TWO_UNIT_OPENING"": 5517}"
+train,5000,1.0,1.0,1.0,1.0,0.0,0.0,0.0,0.0,0.0,"{""2"": 5000}","{""EXPECTED_TWO_UNIT_OPENING"": 5000}"
+validation,250,1.0,1.0,1.0,1.0,0.0,0.0,0.0,0.0,0.0,"{""2"": 250}","{""EXPECTED_TWO_UNIT_OPENING"": 250}"
+test,250,1.0,1.0,1.0,1.0,0.0,0.0,0.0,0.0,0.0,"{""2"": 250}","{""EXPECTED_TWO_UNIT_OPENING"": 250}"
+human_benchmark,17,1.0,1.0,1.0,1.0,0.0,0.0,0.0,0.0,0.0,"{""2"": 17}","{""EXPECTED_TWO_UNIT_OPENING"": 17}"

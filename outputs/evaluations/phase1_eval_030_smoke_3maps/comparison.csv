@@ -1,0 +1,4 @@
+map_identity,map_filename,ppo_argmax_spt,ppo_sampled_spt,visible_greedy_spt,random_legal_spt,ppo_argmax_minus_visible_greedy,ppo_sampled_minus_random_legal,ppo_argmax_minus_random_legal
+0146ca517ca5c4f74f672f18642bb2a5f49ee138d8e98f145a6b712925d73e0d,map_004262.csv,13.0,14.5,7.0,6.5,6.0,8.0,6.5
+0179e4c80d1eb550522eeaec9fd49be3c2ece4dfbedb8636e3a36b727ffb29b2,map_003722.csv,17.0,16.5,9.0,4.5,8.0,12.0,12.5
+03b3a7b13e817c19b01a0725b0f4c0a35a29964c6b5f5abf6d7c5e065feaefb6,map_001667.csv,17.0,18.0,9.0,5.0,8.0,13.0,12.0

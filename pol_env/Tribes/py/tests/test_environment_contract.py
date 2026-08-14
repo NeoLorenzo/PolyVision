@@ -33,6 +33,7 @@ def compatibility_metadata(width=11, height=11, **overrides):
         "legal_action_feature_dim": 42,
         "catalog_version": "flat-v1",
         "canonicalizer_version": "flat-v1-structured",
+        "phase1_opening_version": "v2_guaranteed_two_unit",
         "max_legal_actions": 128,
     }
     values.update(overrides)
@@ -101,6 +102,19 @@ class CheckpointCompatibilityTests(unittest.TestCase):
         checkpoint.pop("observation_dim")
         with self.assertRaisesRegex(CheckpointCompatibilityError, "metadata is insufficient"):
             validate_checkpoint_compatibility(checkpoint, compatibility_metadata())
+
+    def test_historical_checkpoint_without_opening_version_is_rejected(self):
+        checkpoint = compatibility_metadata()
+        checkpoint.pop("phase1_opening_version")
+        with self.assertRaisesRegex(CheckpointCompatibilityError, "phase1_opening_version"):
+            validate_checkpoint_compatibility(checkpoint, compatibility_metadata())
+
+    def test_opening_contract_mismatch_is_rejected(self):
+        with self.assertRaisesRegex(CheckpointCompatibilityError, "phase1_opening_version"):
+            validate_checkpoint_compatibility(
+                compatibility_metadata(phase1_opening_version="v1_mixed_capital_regression"),
+                compatibility_metadata(),
+            )
 
 
 class ValidatorFingerprintTests(unittest.TestCase):

@@ -1,5 +1,7 @@
 # Human benchmark
 
+> **Ready to resume under corrected v2:** the earlier `map_003696.csv` start exposed the historical opening bug; no canonical score was recorded and completed first attempts remain zero. The existing started event remains non-completed historical metadata. Future first attempts use the same `v2_guaranteed_two_unit` wrapper as PPO, which passed all 17/17 benchmark maps.
+
 The Phase 1 human benchmark is a persistent human-versus-agent challenge on the 17 maps in `levels/phase1_pool_bardur_real/human_benchmark/`. It measures decision quality inside PolyVision's constrained Bardur Turn-10 task. It is not the pristine scientific test set and does not measure unrestricted full-game Polytopia skill.
 
 Run the ordinary workflow from the repository root:
@@ -29,7 +31,7 @@ When all maps have a first completion, the ordinary command reports that the poo
 The official UI is a presentation layer over `TribesGymWrapper`, the same authoritative environment used by PPO. Both decision-makers share:
 
 - the identical CSV map and episode seed;
-- the deterministic scripted opening through the start of Turn 2;
+- the same corrected, fail-closed two-unit scripted opening through the start of Turn 2;
 - Bardur/tribe 0 control and solo/no-opponent mode;
 - Java/Py4J mechanics and the wrapper's Turn-10 truncation;
 - the same reward/filter configuration;

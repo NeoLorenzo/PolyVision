@@ -1,5 +1,7 @@
 # Getting started
 
+Current resets use `phase1_opening_version=v2_guaranteed_two_unit` and fail before training if the Turn-2 two-warrior invariant is not met. Historical Seed-1 is not compatible evidence for this corrected task; begin the next scientific run from scratch.
+
 This guide gets the current 11×11 genuine-map environment running from the repository root. PolyVision launches one Java Virtual Machine (JVM) per environment process through Py4J; no separately managed gateway is required.
 
 ## Prerequisites

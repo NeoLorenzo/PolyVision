@@ -1,0 +1,103 @@
+{
+  "canonical": false,
+  "checkpoint_metadata": {
+    "action_catalog_fingerprint": "c849a4abf7b0bee073ccc56b63ae65917ea30e77068ad648c472130693dfe6e4",
+    "action_offset_table_hash": "c849a4abf7b0bee073ccc56b63ae65917ea30e77068ad648c472130693dfe6e4",
+    "action_space_n": "63913",
+    "actor_mode": "legal_features",
+    "canonicalizer_version": "flat-v1-structured",
+    "catalog_version": "flat-v1",
+    "global_action_space_n": "63913",
+    "legal_action_feature_dim": 42,
+    "legal_action_feature_version": "v1_3_move_focus_plus_semantic_econ",
+    "map_height": "11",
+    "map_width": "11",
+    "max_legal_actions": "256",
+    "observation_dim": "505"
+  },
+  "checkpoint_sha256": "2c219d5288a63e2eb8472b90a050d7ba352d88bd78f02d50a28bee2bf6ef8e1c",
+  "classification": "partial-smoke-noncanonical",
+  "ended_utc": "2026-08-14T10:55:19.294247Z",
+  "environment_interface_metadata": {
+    "action_catalog_fingerprint": "c849a4abf7b0bee073ccc56b63ae65917ea30e77068ad648c472130693dfe6e4",
+    "action_space_n": 63913,
+    "actor_mode": "legal_features",
+    "canonicalizer_version": "flat-v1-structured",
+    "catalog_version": "flat-v1",
+    "legal_action_feature_dim": 42,
+    "legal_action_feature_version": "v1_3_move_focus_plus_semantic_econ",
+    "map_height": 11,
+    "map_width": 11,
+    "max_legal_actions": 256,
+    "observation_dim": 505
+  },
+  "evaluated_map_count": 3,
+  "evaluation_id": "phase1_eval_030_smoke_3maps",
+  "evaluation_schema_version": "polyvision-phase1-evaluation-v1",
+  "evaluation_seed": 42,
+  "expected_manifest_map_count": 250,
+  "model_path": "C:\\PolyVision\\runs\\Tribes-v0__Phase1-Scientific-Train-Seed1__1__1786668037\\Phase1-Scientific-Train-Seed1.cleanrl_model",
+  "ordered_maps": [
+    {
+      "canonical_map_sha256": "0146ca517ca5c4f74f672f18642bb2a5f49ee138d8e98f145a6b712925d73e0d",
+      "csv_sha256": "29a04ffa34e8feaef658b3539260a8ec0e7f321a91264efe18be5bb76c6d440e",
+      "filename": "map_004262.csv",
+      "path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\validation\\map_004262.csv",
+      "pool": "validation"
+    },
+    {
+      "canonical_map_sha256": "0179e4c80d1eb550522eeaec9fd49be3c2ece4dfbedb8636e3a36b727ffb29b2",
+      "csv_sha256": "3ef414b98522d2bb01ab94b4bf545c3debf9e7bd7b4cd56a4bb4549893b0cdb5",
+      "filename": "map_003722.csv",
+      "path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\validation\\map_003722.csv",
+      "pool": "validation"
+    },
+    {
+      "canonical_map_sha256": "03b3a7b13e817c19b01a0725b0f4c0a35a29964c6b5f5abf6d7c5e065feaefb6",
+      "csv_sha256": "e5e4c06285ea26e2a0e9917199bfce961c80eebee5b5bdbf782b16182e8175de",
+      "filename": "map_001667.csv",
+      "path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\validation\\map_001667.csv",
+      "pool": "validation"
+    }
+  ],
+  "policies": [
+    "ppo_argmax",
+    "ppo_sampled",
+    "visible_greedy",
+    "random_legal"
+  ],
+  "policy_semantics": {
+    "ppo_argmax": "highest-logit valid slot",
+    "ppo_sampled": "torch.multinomial over authoritative valid-slot probabilities with per-episode generator",
+    "random_legal": "uniform policy-visible valid slot",
+    "visible_greedy": "deterministic observation/legal-feature heuristic"
+  },
+  "polyvision_environment": {
+    "POLYVISION_INFO_MODE": "fast",
+    "POLYVISION_LEVEL_POOL_GLOB": "levels/phase1_pool_bardur_real/validation/*.csv",
+    "POLYVISION_LEVEL_SELECTION_MODE": "round_robin",
+    "POLYVISION_MAX_LEGAL_ACTIONS": "256",
+    "POLYVISION_SOLO_NO_OPPONENT_MODE": "1"
+  },
+  "pool": "validation",
+  "pool_glob": "levels/phase1_pool_bardur_real/validation/*.csv",
+  "pool_identity": "a56e74c952ad3b08d4645fc16d66ce0f17e0589fea2fe9042f7cd293669eac72",
+  "repeats_per_stochastic_map": 2,
+  "runtime": {
+    "git_commit": "63b540d55637c7ca62eacbe3acf9a6ba2fb2aef3",
+    "git_dirty": true,
+    "gymnasium": "1.3.0",
+    "java": "",
+    "platform": "Windows-10-10.0.22621-SP0",
+    "py4j": "0.10.9.9",
+    "python": "3.11.9",
+    "torch": "2.11.0+cpu"
+  },
+  "schedule_rules": "episode seed is shared by map+replicate across policies; policy seed is policy-specific; exact manifest map is runner-selected and verified",
+  "sidecar_path": "C:\\PolyVision\\runs\\Tribes-v0__Phase1-Scientific-Train-Seed1__1__1786668037\\Phase1-Scientific-Train-Seed1.cleanrl_model.action_interface.json",
+  "sidecar_sha256": "98a6b8245ec90433a6e6be9031f990bf4d84a769a404cb8cde32c1c58af43153",
+  "split_manifest_path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\split_manifest.json",
+  "split_manifest_sha256": "c8721cd0fcb636d9ddb483745585e5b69eca9ca501950a1ddec6a51d0c763690",
+  "started_utc": "2026-08-14T10:55:09.186545Z",
+  "status": "complete"
+}

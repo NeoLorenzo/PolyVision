@@ -23,7 +23,9 @@ The example's action `0` is the stable global `END_TURN` ID. In general, select 
 ## Phase 1 episode
 
 - The policy controls tribe ID 0, Bardur.
-- Reset executes a deterministic opening through the start of Turn 2: two animal harvests, a Workshop level-up, scripted exploratory movement, and the Turn 0/Turn 1 transitions.
+- Reset executes `v2_guaranteed_two_unit` through the start of Turn 2: two animal harvests, Workshop, two original-warrior moves, a required second-warrior spawn, and the Turn 0/Turn 1 transitions. Only the Turn-1 scripted move masks the own-capital destination; policy-controlled movement is unaffected.
+
+> **Historical distinction:** `v1_mixed_capital_regression`, used by Seed-1, produced 3,038/5,517 two-unit and 2,479/5,517 one-unit handoffs because Turn-1 could return to capital and spawn was optional. It is preserved as historical evidence. The corrected v2 audit passed 5,517/5,517 maps; required phases and final state now fail closed.
 - Policy control covers the remaining economy-first horizon through Bardur Turn 10.
 - Java terminal state is ignored for this curriculum. `terminated` is always false; `truncated` becomes true after completing Bardur Turn 10, when the wrapper's counter advances to 11.
 - Combat `ATTACK` actions are excluded. Capture, movement, research, resource gathering, building, training/spawning, level-up, forest actions, examine, and end-turn actions can be exposed subject to legality and Phase 1 filters.

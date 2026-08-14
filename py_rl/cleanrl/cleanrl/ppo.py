@@ -519,24 +519,20 @@ class Agent(nn.Module):
     def get_value(self, x):
         return self.critic(x)
 
-    def get_action_and_value(
+    def get_action_distribution(
         self,
         x,
-        action=None,
         action_mask=None,
         legal_global_ids=None,
         legal_action_valid_mask=None,
         legal_action_features=None,
-        selected_slot=None,
     ):
+        """Return the authoritative policy distribution used by training and evaluation."""
         if self.actor_mode == "dense_debug":
             logits = self.actor(x)
             if action_mask is not None:
                 logits = logits.masked_fill(action_mask <= 0, -1e8)
-            probs = Categorical(logits=logits)
-            if action is None:
-                action = probs.sample()
-            return action, None, probs.log_prob(action), probs.entropy(), self.critic(x)
+            return Categorical(logits=logits)
 
         if legal_global_ids is None or legal_action_valid_mask is None:
             raise RuntimeError("legal_only actor_mode requires legal_global_ids and legal_action_valid_mask.")
@@ -553,14 +549,13 @@ class Agent(nn.Module):
         valid = legal_action_valid_mask.bool()
         legal_emb = self.action_embedding(legal_ids)
         if self.actor_mode == "legal_only":
-            # Score only legal candidate IDs using state-action dot products.
             logits = torch.einsum("bd,bkd->bk", h, legal_emb)
         else:
             if legal_action_features is None:
                 raise RuntimeError("legal_features actor_mode requires legal_action_features.")
             if legal_action_features.ndim != 3:
                 raise RuntimeError("legal_action_features must be rank-3: [batch, max_legal_actions, feature_dim].")
-            if legal_action_features.shape[0] != legal_ids.shape[0] or legal_action_features.shape[1] != legal_ids.shape[1]:
+            if legal_action_features.shape[:2] != legal_ids.shape:
                 raise RuntimeError(
                     f"legal_action_features shape mismatch: got={tuple(legal_action_features.shape)} "
                     f"expected_prefix=({legal_ids.shape[0]}, {legal_ids.shape[1]})"
@@ -573,8 +568,42 @@ class Agent(nn.Module):
             feat_emb = self.action_feature_encoder(legal_action_features.float())
             repeated_state = h.unsqueeze(1).expand(-1, legal_ids.shape[1], -1)
             logits = self.action_scorer(torch.cat([repeated_state, legal_emb, feat_emb], dim=-1)).squeeze(-1)
-        logits = logits.masked_fill(~valid, -1e8)
-        probs = Categorical(logits=logits)
+        return Categorical(logits=logits.masked_fill(~valid, -1e8))
+
+    def get_action_and_value(
+        self,
+        x,
+        action=None,
+        action_mask=None,
+        legal_global_ids=None,
+        legal_action_valid_mask=None,
+        legal_action_features=None,
+        selected_slot=None,
+    ):
+        if self.actor_mode == "dense_debug":
+            probs = self.get_action_distribution(x, action_mask=action_mask)
+            if action is None:
+                action = probs.sample()
+            return action, None, probs.log_prob(action), probs.entropy(), self.critic(x)
+
+        if legal_global_ids is None or legal_action_valid_mask is None:
+            raise RuntimeError("legal_only actor_mode requires legal_global_ids and legal_action_valid_mask.")
+        if legal_global_ids.ndim != 2 or legal_action_valid_mask.ndim != 2:
+            raise RuntimeError("legal tensors must be rank-2: [batch, max_legal_actions].")
+        if legal_global_ids.shape != legal_action_valid_mask.shape:
+            raise RuntimeError(
+                f"legal tensor shape mismatch: ids={tuple(legal_global_ids.shape)} "
+                f"mask={tuple(legal_action_valid_mask.shape)}"
+            )
+
+        legal_ids = legal_global_ids.long()
+        valid = legal_action_valid_mask.bool()
+        probs = self.get_action_distribution(
+            x,
+            legal_global_ids=legal_global_ids,
+            legal_action_valid_mask=legal_action_valid_mask,
+            legal_action_features=legal_action_features,
+        )
 
         if selected_slot is None:
             selected_slot = probs.sample()
@@ -1458,6 +1487,7 @@ if __name__ == "__main__":
     action_interface_meta = {
         "actor_mode": args.actor_mode,
         "catalog_version": None,
+        "phase1_opening_version": None,
         "canonicalizer_version": None,
         "map_width": None,
         "map_height": None,
@@ -1472,6 +1502,7 @@ if __name__ == "__main__":
     }
     for k in [
         "catalog_version",
+        "phase1_opening_version",
         "canonicalizer_version",
         "map_width",
         "map_height",

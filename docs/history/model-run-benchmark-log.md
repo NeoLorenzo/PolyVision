@@ -4,7 +4,7 @@
 
 # PolyVision model run benchmark log
 
-Last updated: 2026-08-12
+Last updated: 2026-08-14
 
 This document is the canonical index of historical PolyVision model runs, their changelog names, recorded training configuration, and the performance evidence currently available in the repository.
 
@@ -18,9 +18,9 @@ The tables below therefore preserve evidence; they do not assert that every row 
 
 ## Data Sources and Interpretation
 
-- W&B source export: [`wandb_export_2026-08-12T22_17_35.485+01_00.csv`](../../wandb_export_2026-08-12T22_17_35.485+01_00.csv), exported on 2026-08-12. It contains exactly the 28 registered runs below.
+- W&B source export: [`wandb_export_2026-08-14T11_37_19.454+01_00.csv`](../../wandb_export_2026-08-14T11_37_19.454+01_00.csv), exported on 2026-08-14. It contains exactly the 29 registered runs below.
 - Changelog identity mapping: the plain-English label to W&B/run-folder mapping has been preserved verbatim from the previous version of this file and the changelog history.
-- Dedicated evaluation artifacts: [`outputs/org_only_oracle_vs_ppo/`](../../outputs/org_only_oracle_vs_ppo/) contains the only tracked multi-episode policy evaluation currently linked to one of these checkpoints.
+- Dedicated evaluation artifacts: [`outputs/evaluations/20260814T110912Z_validation_canonical/`](../../outputs/evaluations/20260814T110912Z_validation_canonical/) contains the current canonical 3,000-episode validation result, while [`outputs/org_only_oracle_vs_ppo/`](../../outputs/org_only_oracle_vs_ppo/) preserves an older-interface diagnostic comparison.
 - Local `runs/` and `wandb/` directories are gitignored. Their event files and checkpoints are not durable repository evidence unless separately archived.
 
 ### Evidence classes
@@ -65,6 +65,7 @@ This mapping is deliberately kept separate and explicit because the run-folder i
 | `Phase1-Data-022 (1M)` | `Tribes-v0__ppo__1__1778673883` |
 | `Phase1-Data-023 (6M)` | `Tribes-v0__ppo__1__1778695665` |
 | `Phase1-Map_Gen-027 (500K genuine-map validation)` | `Tribes-v0__ppo__1__1786565606` |
+| `Phase1-First_Eval-030 (10M, seed 1)` | `Tribes-v0__Phase1-Scientific-Train-Seed1__1__1786668037` |
 
 ## Exported Run Configuration and Completion
 
@@ -100,6 +101,7 @@ This mapping is deliberately kept separate and explicit because the run-folder i
 | `Phase1-Data-022 (1M)` | finished | 2026-05-13 | 998,400 / 1,000,000 (99.8%) | `legal_features` | 1024/22 | 20×128 | 156 |
 | `Phase1-Data-023 (6M)` | finished | 2026-05-14 | 5,998,080 / 6,000,000 (100.0%) | `legal_features` | 1024/42 | 20×128 | 164 |
 | `Phase1-Map_Gen-027 (500K genuine-map validation)` | finished | 2026-08-12 | 499,200 / 500,000 (99.8%) | `legal_features` | 256/42 | 20×128 | 291 |
+| `Phase1-First_Eval-030 (10M, seed 1)` | finished | 2026-08-14 | 9,999,360 / 10,000,000 (100.0%) | `legal_features` | 256/42 | 20×128 | 327 |
 
 ## Final W&B Training Summary Snapshots
 
@@ -135,6 +137,15 @@ These are evidence-class 2 snapshots, **not standardized evaluation results**. `
 | `Phase1-Data-022 (1M)` | 10.0 | 10.0 | 3.0 | 2.33 | 62.0 | 100.0% | 1.0 | 0.614 |
 | `Phase1-Data-023 (6M)` | 14.0 | 14.0 | 4.0 | 2.25 | 51.0 | 100.0% | 2.0 | 0.817 |
 | `Phase1-Map_Gen-027 (500K genuine-map validation)` | 14.0 | 14.0 | 4.0 | 2.25 | 50.0 | 100.0% | 3.5 | 0.446 |
+| `Phase1-First_Eval-030 (10M, seed 1)` | 10.0 | 10.0 | 3.0 | 2.00 | 35.0 | 100.0% | 2.5 | 0.848 |
+
+### Phase1-First_Eval-030 first evaluation candidate
+
+The new export records `Tribes-v0__Phase1-Scientific-Train-Seed1__1__1786668037` as the first model to be evaluated under `Phase1-First_Eval-030`. The seed-1 run finished after 30,604 seconds and logged global step 9,999,360 of a planned 10,000,000. It used the `legal_features` actor with 256 legal-action slots and 42 features per slot, 20 environments, 128 rollout steps, batch size 2,560, four 640-sample minibatches, and four update epochs. PPO used learning rate 0.00025 with linear annealing, gamma 0.99, GAE lambda 0.95, clip coefficient 0.2 with clipped value loss, entropy coefficient 0.01, value coefficient 0.5, maximum gradient norm 0.5, and normalized advantages. CUDA and deterministic PyTorch mode were enabled.
+
+The action interface was force-revalidated against 10,000 validation states using validation seed 12,345 with caching enabled. Step diagnostics were logged every three updates; the configured maximum fallback-end-turn and illegal-sample rates were both 0.0001. Models were configured to save every 500,000 steps.
+
+The final W&B summary retained 327 SPS, T10 SPT 10, three villages, average city level 2.0, 35 fog tiles cleared, 73.33% village capture, 100% Organization research, 2.5 researched technologies, average second-city capture turn 5.5, and critic explained variance 0.848. **These values are a single retained training-summary snapshot and may not accurately represent typical or held-out model performance.** They must not be treated as a controlled comparison or as the result of `Phase1-First_Eval-030`. The training and evaluation work performed in the current session, with its recorded protocol and repeated outcomes, is the more important evidence and should take precedence over this snapshot.
 
 ### Phase1-Map_Gen-027 genuine-map training validation
 
@@ -144,7 +155,28 @@ These values establish that the new 11×11 genuine-map contract completed a subs
 
 ## Dedicated Multi-Episode Evaluation Evidence
 
-The strongest tracked gameplay result is the 500-episode Organization-only oracle comparison for `Phase1-Data-019 (5M)` / `Tribes-v0__ppo__1__1778266653`:
+### Phase1-First_Eval-030 canonical validation
+
+The first properly trained Phase 1 model, `Phase1-First_Eval-030 (10M, seed 1)`, completed the full canonical validation suite under evaluation ID `20260814T110912Z_validation_canonical`: 250 PPO-argmax episodes, 1,250 PPO-sampled episodes, 250 visible-greedy episodes, and 1,250 random-legal episodes across all 250 manifest-verified validation maps.
+
+| Policy | Maps | Episodes | Mean T10 SPT | Median | Map-level 95% CI |
+|---|---:|---:|---:|---:|---:|
+| PPO argmax | 250 | 250 | 14.576 | 14.0 | [14.204, 14.948] |
+| PPO sampled | 250 | 1,250 | 13.678 | 13.4 | [13.416, 13.936] |
+| Visible greedy | 250 | 250 | 7.128 | 7.0 | [6.944, 7.320] |
+| Random legal | 250 | 1,250 | 5.897 | 5.8 | [5.811, 5.986] |
+
+PPO argmax beat visible greedy on all 250 paired maps with mean difference +7.448 SPT (95% CI [7.132, 7.780]). Sources: [`summary.json`](../../outputs/evaluations/20260814T110912Z_validation_canonical/summary.json), [`per_map.csv`](../../outputs/evaluations/20260814T110912Z_validation_canonical/per_map.csv), [`episodes.jsonl`](../../outputs/evaluations/20260814T110912Z_validation_canonical/episodes.jsonl), and the [detailed validation reflection](../results/PolyVision_Phase1_Validation_Results.md).
+
+This was the first long Phase 1 scientific model, **not the final Phase 1 model**. Its final disposition is **historical / shelved**: it will not proceed to pristine model-capability test or canonical human comparison.
+
+The later [scripted-opening audit](../results/Phase1_Scripted_Opening_Audit.md) established that this checkpoint was trained and evaluated under the historical mixed-opening contract: training maps were 55.02% two-unit / 44.98% one-unit handoffs, while validation maps were 56.40% / 43.60%. The validation comparison remains internally valid for that shared historical task, but it must not be described as a universal two-unit-opening result.
+
+The environment was subsequently corrected as `v2_guaranteed_two_unit` and passed all 5,517 maps. Because this changes approximately 45% of training initial states, the old checkpoint is preserved as a meaningful developmental experiment but a new model must be trained from scratch. Its historical sidecar lacks the v2 opening identity and therefore fails current compatibility by default.
+
+### Historical Organization-only oracle comparison
+
+The earlier 500-episode Organization-only oracle comparison evaluated `Phase1-Data-019 (5M)` / `Tribes-v0__ppo__1__1778266653`:
 
 | Metric | PPO | Organization-only oracle |
 |---|---:|---:|

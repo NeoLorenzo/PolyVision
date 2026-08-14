@@ -97,6 +97,7 @@ CHECKPOINT_REQUIRED_FIELDS = (
     "legal_action_feature_dim",
     "catalog_version",
     "canonicalizer_version",
+    "phase1_opening_version",
     "max_legal_actions",
 )
 
@@ -133,6 +134,7 @@ def environment_compatibility_metadata(
         "legal_action_feature_dim": int(wrapper.ACTION_FEATURE_DIM),
         "catalog_version": str(wrapper.CATALOG_VERSION),
         "canonicalizer_version": str(wrapper.CANONICALIZER_VERSION),
+        "phase1_opening_version": str(wrapper.PHASE1_OPENING_VERSION),
     }
     actual_max_legal_actions = getattr(wrapper, "_max_legal_actions", max_legal_actions)
     if actual_max_legal_actions is not None:

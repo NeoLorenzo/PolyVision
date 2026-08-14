@@ -1,0 +1,50 @@
+{
+  "audit_id": "corrected_map_003696_seed42",
+  "audit_schema_version": "polyvision-phase1-opening-audit-v1",
+  "by_pool": {
+    "human_benchmark": {
+      "both_moves_worked_spawn_failed_rate": 0.0,
+      "capital_free_before_spawn_but_spawn_failed_rate": 0.0,
+      "expected_two_unit_rate": 1.0,
+      "maps": 1,
+      "outcome_distribution": {
+        "EXPECTED_TWO_UNIT_OPENING": 1
+      },
+      "spawn_success_rate": 1.0,
+      "starting_warrior_on_capital_handoff_rate": 0.0,
+      "swallowed_move_exception_rate": 0.0,
+      "turn0_move_success_rate": 1.0,
+      "turn0_move_worked_turn1_failed_rate": 0.0,
+      "turn1_move_success_rate": 1.0,
+      "unit_count_distribution": {
+        "2": 1
+      }
+    }
+  },
+  "completed_utc": "2026-08-14T13:06:32.438937Z",
+  "exception_distribution": {},
+  "overall": {
+    "both_moves_worked_spawn_failed_rate": 0.0,
+    "capital_free_before_spawn_but_spawn_failed_rate": 0.0,
+    "expected_two_unit_rate": 1.0,
+    "maps": 1,
+    "outcome_distribution": {
+      "EXPECTED_TWO_UNIT_OPENING": 1
+    },
+    "spawn_success_rate": 1.0,
+    "starting_warrior_on_capital_handoff_rate": 0.0,
+    "swallowed_move_exception_rate": 0.0,
+    "turn0_move_success_rate": 1.0,
+    "turn0_move_worked_turn1_failed_rate": 0.0,
+    "turn1_move_success_rate": 1.0,
+    "unit_count_distribution": {
+      "2": 1
+    }
+  },
+  "phase1_opening_version": "v2_guaranteed_two_unit",
+  "total_maps": 1,
+  "train_vs_validation": {
+    "train": null,
+    "validation": null
+  }
+}

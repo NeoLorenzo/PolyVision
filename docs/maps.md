@@ -41,6 +41,8 @@ Held-out means held out by canonical map identity and exact CSV content hash, no
 
 `levels/phase1_pool_bardur_real/human_benchmark/*.csv` is a permanently non-training challenge set. Humans should play through the Phase 1 wrapper so human and agent receive the same map, scripted opening, fog, Turn-10 horizon, action interface and filters, restrictions, and scoring semantics. Future models may be evaluated repeatedly here and results may influence development, so this pool is conceptually separate from the scientific test set.
 
+All manifest identities and split counts are unchanged by the opening correction. The test pool was reset during historical and corrected opening-contract audits only; those resets ended before policy control and produced no capability result or development feedback.
+
 Run the human wrapper with its benchmark-safe default:
 
 ```powershell

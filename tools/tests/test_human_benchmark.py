@@ -37,6 +37,7 @@ class FakeEnv:
             "global_action_space_n": self._catalog.total_size,
             "max_legal_actions": 4,
             "catalog_version": "flat-v1",
+            "phase1_opening_version": "v2_guaranteed_two_unit",
             "action_catalog_fingerprint": "catalog",
             "canonicalizer_version": "flat-v1-structured",
             "legal_action_feature_version": "features",

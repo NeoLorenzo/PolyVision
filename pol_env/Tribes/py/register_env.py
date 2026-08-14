@@ -208,6 +208,7 @@ class TribesGymWrapper(gym.Env):
     }
     CATALOG_VERSION = "flat-v1"
     CANONICALIZER_VERSION = "flat-v1-structured"
+    PHASE1_OPENING_VERSION = "v2_guaranteed_two_unit"
     MAX_LEGAL_ACTIONS_DEFAULT = 256
     LEGAL_ACTION_FEATURE_VERSION = "v1_3_move_focus_plus_semantic_econ"
     REVEAL_CLIP = 12.0
@@ -484,7 +485,7 @@ class TribesGymWrapper(gym.Env):
         self._turn_count = 0
         self._unit_previous_tiles = {}
         t_opening0 = time.perf_counter() if self._profile_sps_enabled else None
-        obs = self._apply_bardur_opening(obs)
+        obs = self._apply_bardur_opening(obs, audit_recorder=getattr(self, "_opening_audit_recorder", None))
         if self._profile_sps_enabled:
             t_reset_opening += time.perf_counter() - t_opening0
         self._starting_city_count = self._get_city_count(obs)
@@ -533,6 +534,7 @@ class TribesGymWrapper(gym.Env):
             "info_mode": self._info_mode,
             "catalog_version": self.CATALOG_VERSION,
             "canonicalizer_version": self.CANONICALIZER_VERSION,
+            "phase1_opening_version": self.PHASE1_OPENING_VERSION,
             "map_width": int(loaded_width),
             "map_height": int(loaded_height),
             "observation_dim": int(self.observation_space.shape[0]),
@@ -1296,6 +1298,7 @@ class TribesGymWrapper(gym.Env):
         info["fallback_end_turn_rate"] = float(self._fallback_end_turn_count / max(1, self._total_action_decisions))
         info["catalog_version"] = self.CATALOG_VERSION
         info["canonicalizer_version"] = self.CANONICALIZER_VERSION
+        info["phase1_opening_version"] = self.PHASE1_OPENING_VERSION
         info["map_width"] = int(self._catalog.width) if self._catalog is not None else None
         info["map_height"] = int(self._catalog.height) if self._catalog is not None else None
         info["global_action_space_n"] = int(self.action_space.n)
@@ -3292,8 +3295,75 @@ class TribesGymWrapper(gym.Env):
 
         return None, f"unsupported_action_type:{a_type}"
 
-    def _apply_bardur_opening(self, obs):
-        """Force deterministic opening through the start of Turn 2."""
+    def _apply_bardur_opening(self, obs, audit_recorder=None):
+        """Apply the fail-closed v2 opening through the start of Turn 2."""
+        opening_map = os.path.basename(self._current_level_file or "<unknown>")
+        opening_seed = self._last_reset_seed
+
+        def opening_error(phase, message, local_obs, *, available_actions=None):
+            capital = get_capital_pos(local_obs)
+            owned = []
+            for key, unit in (local_obs.get("unit", {}) or {}).items():
+                if isinstance(unit, dict) and int(unit.get("tribeId", -1)) == 0:
+                    owned.append({
+                        "id": int(key), "type": unit.get("type"),
+                        "x": int(unit.get("x", -1)), "y": int(unit.get("y", -1)),
+                    })
+            action_types = available_actions
+            if action_types is None:
+                action_types = [str(a.get("type")) for a in self.tribes_env.list_actions()]
+            return RuntimeError(
+                "Phase 1 opening invariant failed:\n"
+                f"  phase: {phase}\n  reason: {message}\n"
+                f"  map: {opening_map}\n  seed: {opening_seed}\n"
+                f"  capital: {capital}\n  owned_units: {owned}\n"
+                f"  available_action_types: {action_types}"
+            )
+        def audit_snapshot(local_obs):
+            if audit_recorder is None:
+                return None
+            units = []
+            for key, unit in (local_obs.get("unit", {}) or {}).items():
+                if not isinstance(unit, dict) or int(unit.get("tribeId", -1)) != 0:
+                    continue
+                units.append({
+                    "unit_id": int(key), "unit_type": str(unit.get("type", "UNKNOWN")),
+                    "x": int(unit.get("x", -1)), "y": int(unit.get("y", -1)),
+                })
+            units.sort(key=lambda row: row["unit_id"])
+            capital = get_capital_pos(local_obs)
+            return {
+                "units": units,
+                "stars": int(self._get_tribe_stars(local_obs, tribe_id=0)),
+                "spt": float(self.tribes_env._compute_spt_from_obs(local_obs, tribe_id=0)),
+                "city_count": int(self._get_city_count(local_obs)),
+                "active_tribe_id": int(local_obs.get("activeTribeID", -1)),
+                "capital": list(capital) if capital is not None else None,
+            }
+
+        def audit_emit(name, *, attempted, success, idx=None, action=None, pre=None, post=None, exc=None, note=None):
+            if audit_recorder is None:
+                return
+            try:
+                row = {
+                    "step_name": name, "attempted": bool(attempted), "success": bool(success),
+                    "selected_raw_action_index": int(idx) if idx is not None else None,
+                    "selected_action_type": str(action.get("type")) if isinstance(action, dict) else None,
+                    "selected_action_repr": str(action.get("repr")) if isinstance(action, dict) else None,
+                    "pre": audit_snapshot(pre) if isinstance(pre, dict) else None,
+                    "post": audit_snapshot(post) if isinstance(post, dict) else None,
+                    "exception_type": type(exc).__name__ if exc is not None else None,
+                    "exception_message": str(exc) if exc is not None else None,
+                    "note": note,
+                }
+                if hasattr(audit_recorder, "record"):
+                    audit_recorder.record(row)
+                else:
+                    audit_recorder(row)
+            except Exception:
+                # Audit instrumentation must never change historical opening behavior.
+                pass
+
         def find_action_idx(predicate):
             legal = self.tribes_env.list_actions()
             for idx, act in enumerate(legal):
@@ -3387,22 +3457,24 @@ class TribesGymWrapper(gym.Env):
 
             return score
 
-        def ensure_bardur_turn(local_obs):
+        def ensure_bardur_turn(local_obs, phase):
             # Fast-forward non-Bardur turns with END_TURN so scripted actions always
             # execute for tribe 0. Defensive caps prevent infinite loops.
             for _ in range(6):
                 try:
                     if int(local_obs.get("activeTribeID", -1)) == 0:
                         return local_obs
-                except Exception:
-                    return local_obs
+                except Exception as exc:
+                    raise opening_error(phase, f"invalid activeTribeID: {exc}", local_obs) from exc
                 idx = find_action_idx(lambda a: a.get("type") == "END_TURN")
                 if idx is None:
-                    return local_obs
+                    raise opening_error(phase, "missing END_TURN while advancing to Bardur", local_obs)
                 local_obs, _, _, _ = self.tribes_env.step(idx)
-            return local_obs
+            raise opening_error(phase, "could not reach Bardur turn within defensive limit", local_obs)
 
-        def choose_and_execute_best_move(local_obs, target_unit_id=None, other_unit_pos=None):
+        def choose_and_execute_best_move(local_obs, target_unit_id=None, other_unit_pos=None,
+                                         audit_phase_name=None, excluded_destination=None):
+            pre_obs = local_obs
             legal = self.tribes_env.list_actions()
             move_candidates = []
             for idx, act in enumerate(legal):
@@ -3414,9 +3486,12 @@ class TribesGymWrapper(gym.Env):
                 unit_id = parsed[0]
                 if target_unit_id is not None and unit_id != target_unit_id:
                     continue
+                if excluded_destination is not None and tuple(parsed[-2:]) == tuple(excluded_destination):
+                    continue
                 move_candidates.append((idx, act, parsed))
             if not move_candidates:
-                return local_obs
+                audit_emit(audit_phase_name, attempted=False, success=False, pre=pre_obs, post=local_obs, note="no_matching_move_candidate")
+                raise opening_error(audit_phase_name, "no matching legal move candidate", local_obs)
 
             capital_pos = get_capital_pos(local_obs)
             if capital_pos is None:
@@ -3540,8 +3615,10 @@ class TribesGymWrapper(gym.Env):
                     print("OPENING_MOVE_GRID: unavailable (could not resolve unit origin).")
 
             if best is None:
-                return local_obs
+                audit_emit(audit_phase_name, attempted=False, success=False, pre=pre_obs, post=local_obs, note="no_scored_move_candidate")
+                raise opening_error(audit_phase_name, "no move candidate could be scored", local_obs)
             try:
+                selected_action = legal[int(best)] if 0 <= int(best) < len(legal) else None
                 chosen = next((m for m in scored_moves if m.get("idx", None) == best), None)
                 if isinstance(chosen, dict):
                     unit_id = chosen.get("unit_id", None)
@@ -3555,63 +3632,93 @@ class TribesGymWrapper(gym.Env):
                     if unit_id is not None and cur_x is not None and cur_y is not None:
                         self._unit_previous_tiles[int(unit_id)] = (int(cur_x), int(cur_y))
                 new_obs, _, _, _ = self.tribes_env.step(best)
+                audit_emit(audit_phase_name, attempted=True, success=True, idx=best, action=selected_action, pre=pre_obs, post=new_obs)
                 return new_obs
-            except Exception:
-                return local_obs
+            except Exception as exc:
+                audit_emit(audit_phase_name, attempted=True, success=False, idx=best, action=selected_action, pre=pre_obs, post=local_obs, exc=exc, note="exception_raised")
+                raise opening_error(audit_phase_name, f"selected move execution raised {type(exc).__name__}: {exc}", local_obs) from exc
+
+        initial_owned_ids = sorted(
+            int(key) for key, unit in (obs.get("unit", {}) or {}).items()
+            if isinstance(unit, dict) and int(unit.get("tribeId", -1)) == 0
+        )
+        if len(initial_owned_ids) != 1:
+            raise opening_error("initial_state", f"expected exactly one starting Bardur unit, got {len(initial_owned_ids)}", obs)
+        original_unit_id = initial_owned_ids[0]
+        opening_capital = get_capital_pos(obs)
+        if opening_capital is None:
+            raise opening_error("initial_state", "could not resolve Bardur capital", obs)
 
         # ---- Turn 0 ----
-        obs = ensure_bardur_turn(obs)
+        obs = ensure_bardur_turn(obs, "turn0_start")
 
         # Harvest 1
         idx = find_action_idx(lambda a: a.get("type") == "RESOURCE_GATHERING" and "ANIMAL" in a.get("repr", ""))
         if idx is None:
+            audit_emit("animal_harvest_1", attempted=False, success=False, pre=obs, post=obs, note="action_unavailable")
             raise RuntimeError("Bardur opening failed: missing first ANIMAL harvest action.")
-        obs, _, _, _ = self.tribes_env.step(idx)
+        pre_obs = obs; action = self.tribes_env.list_actions()[idx] if audit_recorder is not None else None
+        try:
+            obs, _, _, _ = self.tribes_env.step(idx)
+            audit_emit("animal_harvest_1", attempted=True, success=True, idx=idx, action=action, pre=pre_obs, post=obs)
+        except Exception as exc:
+            audit_emit("animal_harvest_1", attempted=True, success=False, idx=idx, action=action, pre=pre_obs, post=pre_obs, exc=exc)
+            raise
 
         # Harvest 2
         idx = find_action_idx(lambda a: a.get("type") == "RESOURCE_GATHERING" and "ANIMAL" in a.get("repr", ""))
         if idx is None:
+            audit_emit("animal_harvest_2", attempted=False, success=False, pre=obs, post=obs, note="action_unavailable")
             raise RuntimeError("Bardur opening failed: missing second ANIMAL harvest action.")
-        obs, _, _, _ = self.tribes_env.step(idx)
+        pre_obs = obs; action = self.tribes_env.list_actions()[idx] if audit_recorder is not None else None
+        try:
+            obs, _, _, _ = self.tribes_env.step(idx)
+            audit_emit("animal_harvest_2", attempted=True, success=True, idx=idx, action=action, pre=pre_obs, post=obs)
+        except Exception as exc:
+            audit_emit("animal_harvest_2", attempted=True, success=False, idx=idx, action=action, pre=pre_obs, post=pre_obs, exc=exc)
+            raise
 
         # Level-up workshop
         idx = find_action_idx(lambda a: a.get("type") == "LEVEL_UP" and "WORKSHOP" in a.get("repr", ""))
         if idx is None:
+            audit_emit("workshop_levelup", attempted=False, success=False, pre=obs, post=obs, note="action_unavailable")
             raise RuntimeError("Bardur opening failed: missing WORKSHOP level-up action.")
-        obs, _, _, _ = self.tribes_env.step(idx)
+        pre_obs = obs; action = self.tribes_env.list_actions()[idx] if audit_recorder is not None else None
+        try:
+            obs, _, _, _ = self.tribes_env.step(idx)
+            audit_emit("workshop_levelup", attempted=True, success=True, idx=idx, action=action, pre=pre_obs, post=obs)
+        except Exception as exc:
+            audit_emit("workshop_levelup", attempted=True, success=False, idx=idx, action=action, pre=pre_obs, post=pre_obs, exc=exc)
+            raise
 
         # Best move for starting warrior.
-        try:
-            obs = choose_and_execute_best_move(obs)
-        except Exception:
-            pass
+        obs = choose_and_execute_best_move(
+            obs, target_unit_id=original_unit_id,
+            audit_phase_name="turn0_starting_warrior_move",
+        )
 
         # End Turn 0.
         idx = find_action_idx(lambda a: a.get("type") == "END_TURN")
         if idx is None:
+            audit_emit("turn0_end_turn", attempted=False, success=False, pre=obs, post=obs, note="action_unavailable")
             raise RuntimeError("Bardur opening failed: missing END_TURN on Turn 0.")
-        obs, _, _, _ = self.tribes_env.step(idx)
+        pre_obs = obs; action = self.tribes_env.list_actions()[idx] if audit_recorder is not None else None
+        try:
+            obs, _, _, _ = self.tribes_env.step(idx)
+            audit_emit("turn0_end_turn", attempted=True, success=True, idx=idx, action=action, pre=pre_obs, post=obs)
+        except Exception as exc:
+            audit_emit("turn0_end_turn", attempted=True, success=False, idx=idx, action=action, pre=pre_obs, post=pre_obs, exc=exc)
+            raise
 
         # ---- Turn 1 ----
-        obs = ensure_bardur_turn(obs)
+        obs = ensure_bardur_turn(obs, "turn1_start")
 
         # Move first warrior again.
-        first_unit_id = None
-        try:
-            own_units = []
-            for key, unit in (obs.get("unit", {}) or {}).items():
-                if isinstance(unit, dict) and int(unit.get("tribeId", -1)) == 0:
-                    own_units.append((int(key), int(unit.get("x", -1)), int(unit.get("y", -1))))
-            own_units.sort(key=lambda t: t[0])
-            if own_units:
-                first_unit_id = own_units[0][0]
-        except Exception:
-            first_unit_id = None
-
-        try:
-            obs = choose_and_execute_best_move(obs, target_unit_id=first_unit_id)
-        except Exception:
-            pass
+        obs = choose_and_execute_best_move(
+            obs, target_unit_id=original_unit_id,
+            audit_phase_name="turn1_starting_warrior_move",
+            excluded_destination=opening_capital,
+        )
 
         # Train/spawn second warrior.
         idx = find_action_idx(
@@ -3624,17 +3731,67 @@ class TribesGymWrapper(gym.Env):
             # Fallback: any warrior spawn-like action.
             idx = find_action_idx(lambda a: "WARRIOR" in a.get("repr", ""))
         if idx is not None:
-            obs, _, _, _ = self.tribes_env.step(idx)
+            pre_obs = obs; action = self.tribes_env.list_actions()[idx] if audit_recorder is not None else None
+            try:
+                obs, _, _, _ = self.tribes_env.step(idx)
+                audit_emit("turn1_second_warrior_spawn", attempted=True, success=True, idx=idx, action=action, pre=pre_obs, post=obs)
+            except Exception as exc:
+                audit_emit("turn1_second_warrior_spawn", attempted=True, success=False, idx=idx, action=action, pre=pre_obs, post=pre_obs, exc=exc)
+                raise
+        else:
+            audit_emit("turn1_second_warrior_spawn", attempted=False, success=False, pre=obs, post=obs, note="action_unavailable_or_unmatched")
+            raise opening_error(
+                "turn1_second_warrior_spawn",
+                "expected legal second-warrior spawn after Turn-1 movement, but none was available",
+                obs,
+            )
 
         # End Turn 1.
         idx = find_action_idx(lambda a: a.get("type") == "END_TURN")
         if idx is None:
+            audit_emit("turn1_end_turn", attempted=False, success=False, pre=obs, post=obs, note="action_unavailable")
             raise RuntimeError("Bardur opening failed: missing END_TURN on Turn 1.")
-        obs, _, _, _ = self.tribes_env.step(idx)
+        pre_obs = obs; action = self.tribes_env.list_actions()[idx] if audit_recorder is not None else None
+        try:
+            obs, _, _, _ = self.tribes_env.step(idx)
+            audit_emit("turn1_end_turn", attempted=True, success=True, idx=idx, action=action, pre=pre_obs, post=obs)
+        except Exception as exc:
+            audit_emit("turn1_end_turn", attempted=True, success=False, idx=idx, action=action, pre=pre_obs, post=pre_obs, exc=exc)
+            raise
 
         # Bring environment to Bardur turn (start of Turn 2 for our side).
-        obs = ensure_bardur_turn(obs)
+        obs = ensure_bardur_turn(obs, "turn2_handoff")
         self._turn_count = 2
+
+        owned = {
+            int(key): unit for key, unit in (obs.get("unit", {}) or {}).items()
+            if isinstance(unit, dict) and int(unit.get("tribeId", -1)) == 0
+        }
+        capital = get_capital_pos(obs)
+        board = obs.get("board", {}) or {}
+        terrain = board.get("terrain", []) or []
+        map_size = len(terrain)
+        original = owned.get(original_unit_id)
+        spawned = [
+            (unit_id, unit) for unit_id, unit in owned.items()
+            if unit_id != original_unit_id and (int(unit.get("x", -1)), int(unit.get("y", -1))) == capital
+        ]
+        violations = []
+        if self._turn_count != 2: violations.append(f"turn_count={self._turn_count}")
+        if int(self._get_tribe_stars(obs, tribe_id=0)) != 5: violations.append(f"stars={self._get_tribe_stars(obs, tribe_id=0)}")
+        if float(self.tribes_env._compute_spt_from_obs(obs, tribe_id=0)) != 4.0: violations.append(f"spt={self.tribes_env._compute_spt_from_obs(obs, tribe_id=0)}")
+        if int(self._get_city_count(obs)) != 1: violations.append(f"city_count={self._get_city_count(obs)}")
+        if len(owned) != 2: violations.append(f"owned_unit_count={len(owned)}")
+        if original is None: violations.append("original warrior missing")
+        elif (int(original.get("x", -1)), int(original.get("y", -1))) == capital: violations.append("original warrior on capital")
+        if capital is None or not (0 <= capital[0] < map_size and 0 <= capital[1] < map_size): violations.append(f"invalid capital={capital}")
+        if len(spawned) != 1: violations.append(f"spawned warriors on capital={len(spawned)}")
+        elif str(spawned[0][1].get("type")) not in ("0", "WARRIOR"): violations.append(f"spawned unit type={spawned[0][1].get('type')}")
+        for unit_id, unit in owned.items():
+            x, y = int(unit.get("x", -1)), int(unit.get("y", -1))
+            if not (0 <= x < map_size and 0 <= y < map_size): violations.append(f"unit {unit_id} out of bounds at {(x, y)}")
+        if violations:
+            raise opening_error("turn2_handoff", "; ".join(violations), obs)
 
         return obs
 

@@ -1,0 +1,434 @@
+{
+  "audit_duration_seconds": 0.04558019997784868,
+  "audit_schema_version": "polyvision-phase1-opening-audit-v1",
+  "canonical_map_sha256": "000a31d6b8746a666a15af4785fb1a5173cfb5ce6d1734f6d7802899533f1139",
+  "csv_sha256": "cccff814319fe6cfd9e0bdbfefe25195c87ff5eca648e3bddc2c5bf52474ddc9",
+  "episode_seed": 42,
+  "expectations": {
+    "capital_free_before_spawn": false,
+    "capital_occupied_after_spawn": true,
+    "owned_units_at_handoff_eq_2": false,
+    "second_warrior_spawn_attempted": false,
+    "second_warrior_spawn_executed": false,
+    "turn0_end_turn_executed": true,
+    "turn0_move_executed": true,
+    "turn1_end_turn_executed": true,
+    "turn1_move_executed": true,
+    "two_animals_harvested": true,
+    "workshop_claimed": true
+  },
+  "handoff": {
+    "capital_coordinate": [
+      4,
+      5
+    ],
+    "capital_occupied": true,
+    "capital_occupying_unit_id": 2,
+    "capital_occupying_unit_type": "0",
+    "city_count": 1,
+    "java_active_tribe_id": 0,
+    "owned_unit_count": 1,
+    "owned_units": [
+      {
+        "believed_original_starting_unit": true,
+        "on_capital": true,
+        "unit_id": 2,
+        "unit_type": "0",
+        "x": 4,
+        "y": 5
+      }
+    ],
+    "spt": 4.0,
+    "stars": 5,
+    "visible_owned_unit_count": 1,
+    "wrapper_turn_count": 2
+  },
+  "map_filename": "map_000045.csv",
+  "map_path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\train\\map_000045.csv",
+  "opening_outcome": "ONE_UNIT_SPAWN_UNAVAILABLE",
+  "outcome_flags": [
+    "ONE_UNIT_SPAWN_UNAVAILABLE"
+  ],
+  "pool": "train",
+  "reset_exception_message": null,
+  "reset_exception_type": null,
+  "reset_success": true,
+  "trace": [
+    {
+      "attempted": true,
+      "exception_message": null,
+      "exception_type": null,
+      "note": null,
+      "post": {
+        "active_tribe_id": 0,
+        "capital": [
+          4,
+          5
+        ],
+        "city_count": 1,
+        "spt": 2.0,
+        "stars": 3,
+        "units": [
+          {
+            "unit_id": 2,
+            "unit_type": "0",
+            "x": 4,
+            "y": 5
+          }
+        ]
+      },
+      "pre": {
+        "active_tribe_id": 0,
+        "capital": [
+          4,
+          5
+        ],
+        "city_count": 1,
+        "spt": 2.0,
+        "stars": 5,
+        "units": [
+          {
+            "unit_id": 2,
+            "unit_type": "0",
+            "x": 4,
+            "y": 5
+          }
+        ]
+      },
+      "selected_action_repr": "RESOURCE_GATHERED by city 1 : ANIMAL",
+      "selected_action_type": "RESOURCE_GATHERING",
+      "selected_raw_action_index": 5,
+      "step_name": "animal_harvest_1",
+      "success": true
+    },
+    {
+      "attempted": true,
+      "exception_message": null,
+      "exception_type": null,
+      "note": null,
+      "post": {
+        "active_tribe_id": 0,
+        "capital": [
+          4,
+          5
+        ],
+        "city_count": 1,
+        "spt": 2.0,
+        "stars": 1,
+        "units": [
+          {
+            "unit_id": 2,
+            "unit_type": "0",
+            "x": 4,
+            "y": 5
+          }
+        ]
+      },
+      "pre": {
+        "active_tribe_id": 0,
+        "capital": [
+          4,
+          5
+        ],
+        "city_count": 1,
+        "spt": 2.0,
+        "stars": 3,
+        "units": [
+          {
+            "unit_id": 2,
+            "unit_type": "0",
+            "x": 4,
+            "y": 5
+          }
+        ]
+      },
+      "selected_action_repr": "RESOURCE_GATHERED by city 1 : ANIMAL",
+      "selected_action_type": "RESOURCE_GATHERING",
+      "selected_raw_action_index": 1,
+      "step_name": "animal_harvest_2",
+      "success": true
+    },
+    {
+      "attempted": true,
+      "exception_message": null,
+      "exception_type": null,
+      "note": null,
+      "post": {
+        "active_tribe_id": 0,
+        "capital": [
+          4,
+          5
+        ],
+        "city_count": 1,
+        "spt": 4.0,
+        "stars": 1,
+        "units": [
+          {
+            "unit_id": 2,
+            "unit_type": "0",
+            "x": 4,
+            "y": 5
+          }
+        ]
+      },
+      "pre": {
+        "active_tribe_id": 0,
+        "capital": [
+          4,
+          5
+        ],
+        "city_count": 1,
+        "spt": 2.0,
+        "stars": 1,
+        "units": [
+          {
+            "unit_id": 2,
+            "unit_type": "0",
+            "x": 4,
+            "y": 5
+          }
+        ]
+      },
+      "selected_action_repr": "LEVEL_UP by city 1 with bonus WORKSHOP",
+      "selected_action_type": "LEVEL_UP",
+      "selected_raw_action_index": 0,
+      "step_name": "workshop_levelup",
+      "success": true
+    },
+    {
+      "attempted": true,
+      "exception_message": null,
+      "exception_type": null,
+      "note": null,
+      "post": {
+        "active_tribe_id": 0,
+        "capital": [
+          4,
+          5
+        ],
+        "city_count": 1,
+        "spt": 4.0,
+        "stars": 1,
+        "units": [
+          {
+            "unit_id": 2,
+            "unit_type": "0",
+            "x": 3,
+            "y": 4
+          }
+        ]
+      },
+      "pre": {
+        "active_tribe_id": 0,
+        "capital": [
+          4,
+          5
+        ],
+        "city_count": 1,
+        "spt": 4.0,
+        "stars": 1,
+        "units": [
+          {
+            "unit_id": 2,
+            "unit_type": "0",
+            "x": 4,
+            "y": 5
+          }
+        ]
+      },
+      "selected_action_repr": "MOVE by unit 2 to 3 : 4",
+      "selected_action_type": "MOVE",
+      "selected_raw_action_index": 1,
+      "step_name": "turn0_starting_warrior_move",
+      "success": true
+    },
+    {
+      "attempted": true,
+      "exception_message": null,
+      "exception_type": null,
+      "note": null,
+      "post": {
+        "active_tribe_id": 0,
+        "capital": [
+          4,
+          5
+        ],
+        "city_count": 1,
+        "spt": 4.0,
+        "stars": 5,
+        "units": [
+          {
+            "unit_id": 2,
+            "unit_type": "0",
+            "x": 3,
+            "y": 4
+          }
+        ]
+      },
+      "pre": {
+        "active_tribe_id": 0,
+        "capital": [
+          4,
+          5
+        ],
+        "city_count": 1,
+        "spt": 4.0,
+        "stars": 1,
+        "units": [
+          {
+            "unit_id": 2,
+            "unit_type": "0",
+            "x": 3,
+            "y": 4
+          }
+        ]
+      },
+      "selected_action_repr": "END_TURN by tribe 0",
+      "selected_action_type": "END_TURN",
+      "selected_raw_action_index": 0,
+      "step_name": "turn0_end_turn",
+      "success": true
+    },
+    {
+      "attempted": true,
+      "exception_message": null,
+      "exception_type": null,
+      "note": null,
+      "post": {
+        "active_tribe_id": 0,
+        "capital": [
+          4,
+          5
+        ],
+        "city_count": 1,
+        "spt": 4.0,
+        "stars": 5,
+        "units": [
+          {
+            "unit_id": 2,
+            "unit_type": "0",
+            "x": 4,
+            "y": 5
+          }
+        ]
+      },
+      "pre": {
+        "active_tribe_id": 0,
+        "capital": [
+          4,
+          5
+        ],
+        "city_count": 1,
+        "spt": 4.0,
+        "stars": 5,
+        "units": [
+          {
+            "unit_id": 2,
+            "unit_type": "0",
+            "x": 3,
+            "y": 4
+          }
+        ]
+      },
+      "selected_action_repr": "MOVE by unit 2 to 4 : 5",
+      "selected_action_type": "MOVE",
+      "selected_raw_action_index": 7,
+      "step_name": "turn1_starting_warrior_move",
+      "success": true
+    },
+    {
+      "attempted": false,
+      "exception_message": null,
+      "exception_type": null,
+      "note": "action_unavailable_or_unmatched",
+      "post": {
+        "active_tribe_id": 0,
+        "capital": [
+          4,
+          5
+        ],
+        "city_count": 1,
+        "spt": 4.0,
+        "stars": 5,
+        "units": [
+          {
+            "unit_id": 2,
+            "unit_type": "0",
+            "x": 4,
+            "y": 5
+          }
+        ]
+      },
+      "pre": {
+        "active_tribe_id": 0,
+        "capital": [
+          4,
+          5
+        ],
+        "city_count": 1,
+        "spt": 4.0,
+        "stars": 5,
+        "units": [
+          {
+            "unit_id": 2,
+            "unit_type": "0",
+            "x": 4,
+            "y": 5
+          }
+        ]
+      },
+      "selected_action_repr": null,
+      "selected_action_type": null,
+      "selected_raw_action_index": null,
+      "step_name": "turn1_second_warrior_spawn",
+      "success": false
+    },
+    {
+      "attempted": true,
+      "exception_message": null,
+      "exception_type": null,
+      "note": null,
+      "post": {
+        "active_tribe_id": 0,
+        "capital": [
+          4,
+          5
+        ],
+        "city_count": 1,
+        "spt": 4.0,
+        "stars": 5,
+        "units": [
+          {
+            "unit_id": 2,
+            "unit_type": "0",
+            "x": 4,
+            "y": 5
+          }
+        ]
+      },
+      "pre": {
+        "active_tribe_id": 0,
+        "capital": [
+          4,
+          5
+        ],
+        "city_count": 1,
+        "spt": 4.0,
+        "stars": 5,
+        "units": [
+          {
+            "unit_id": 2,
+            "unit_type": "0",
+            "x": 4,
+            "y": 5
+          }
+        ]
+      },
+      "selected_action_repr": "END_TURN by tribe 0",
+      "selected_action_type": "END_TURN",
+      "selected_raw_action_index": 4,
+      "step_name": "turn1_end_turn",
+      "success": true
+    }
+  ]
+}

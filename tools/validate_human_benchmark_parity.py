@@ -81,7 +81,14 @@ def validate_map(record: dict, seed: int, max_states: int, require_horizon: bool
                 ids = assert_state_parity(human_env, model_env, human_obs, model_obs, human_info, model_info)
                 filtered_raw += max(0, int(human_env.unwrapped._current_raw_valid_actions) - len(ids))
                 selected = int(ids[0])
-                expected_raw = int(human_env.unwrapped._current_legal_id_to_raw_index[selected])
+                expected_human_raw = int(human_env.unwrapped._current_legal_id_to_raw_index[selected])
+                expected_model_raw = int(model_env.unwrapped._current_legal_id_to_raw_index[selected])
+                human_action = human_env.unwrapped._current_legal_actions[expected_human_raw]
+                model_action = model_env.unwrapped._current_legal_actions[expected_model_raw]
+                if (human_action.get("type"), human_action.get("repr")) != (
+                    model_action.get("type"), model_action.get("repr")
+                ):
+                    raise RuntimeError("human/model global ID resolved to different Java action semantics")
                 human_obs, human_reward, human_terminated, human_truncated, human_info = human_env.step(selected)
                 model_obs, model_reward, model_terminated, model_truncated, model_info = model_env.step(selected)
                 if float(human_reward) != float(model_reward):
@@ -92,9 +99,14 @@ def validate_map(record: dict, seed: int, max_states: int, require_horizon: bool
                     raise RuntimeError("human/model horizon signals differ")
                 if int(human_info.get("selected_global_id", -1)) != selected:
                     raise RuntimeError("human env did not execute the selected global ID")
-                if int(human_info.get("selected_raw_java_index", -1)) != expected_raw:
-                    raise RuntimeError("human env executed a different raw Java action")
-                if int(model_info.get("selected_raw_java_index", -1)) != expected_raw:
+                deferred_end_turn = human_action.get("type") == "END_TURN"
+                if not deferred_end_turn and int(human_info.get("selected_raw_java_index", -1)) != expected_human_raw:
+                    raise RuntimeError(
+                        "human env executed a different raw Java action: "
+                        f"gid={selected}, expected={expected_human_raw}, "
+                        f"actual={human_info.get('selected_raw_java_index')}, action={human_action}"
+                    )
+                if not deferred_end_turn and int(model_info.get("selected_raw_java_index", -1)) != expected_model_raw:
                     raise RuntimeError("model env raw-action resolution differs")
                 checked += 1
                 terminated, truncated = bool(human_terminated), bool(human_truncated)

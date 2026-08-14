@@ -1,0 +1,20 @@
+{
+  "audit_id": "sample_human_3_seed42",
+  "audit_schema_version": "polyvision-phase1-opening-audit-v1",
+  "classification": "environment_contract_audit_not_model_evaluation",
+  "manifest_path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\split_manifest.json",
+  "manifest_sha256": "c8721cd0fcb636d9ddb483745585e5b69eca9ca501950a1ddec6a51d0c763690",
+  "map_filter": null,
+  "pool": "human_benchmark",
+  "pool_counts": {
+    "human_benchmark": 17,
+    "test": 250,
+    "train": 5000,
+    "validation": 250
+  },
+  "requested_maps": 3,
+  "runs_policy": false,
+  "seed": 42,
+  "started_utc": "2026-08-14T12:35:58.476077Z",
+  "writes_model_scores": false
+}
