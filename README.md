@@ -4,6 +4,8 @@ PolyVision is a reinforcement-learning research environment for *The Battle of P
 
 The project does **not** currently solve the full game. Its active curriculum is an economy-first Bardur task ending after Turn 10, with combat attacks excluded from the policy interface. This narrower setting is used to study reliable action representation, exploration, city growth, research, and evaluation before expanding toward full-game play.
 
+PolyVision originated from [ClaireBookworm/polytopia_rl](https://github.com/ClaireBookworm/polytopia_rl) and has since been substantially extended with a new experimental curriculum, action representation, map corpus, training infrastructure, evaluation system, and research documentation. See [Attribution and licensing](#attribution-and-licensing).
+
 ## Overview
 
 PolyVision runs on genuine Polytopia initial-map data. Compressed save states are converted into canonical, schema-versioned JSON and then into validated Tribes CSV maps. Phase 1 contains 5,517 genuine 11×11 Bardur Drylands maps in a frozen identity-based split: 5,000 train, 250 validation, 250 test, and 17 human benchmark maps.
@@ -186,8 +188,28 @@ Focused manuals remain beside the [state converter](tools/polytopia_state_conver
 
 Near-term work is to run reproducible multi-seed validation and pristine-test baselines on the frozen split. Later phases can broaden map distributions and tribes, relax curriculum filters, add combat and opponents, extend observations and action semantics, and evaluate full-game policies. Those items are future work, not current capabilities.
 
-## Attribution and licenses
+## Attribution and licensing
 
-PolyVision is a fork and continuation of [ClaireBookworm/polytopia_rl](https://github.com/ClaireBookworm/polytopia_rl) and retains substantial upstream Tribes engine and bridge work. RL code under `py_rl/cleanrl` includes CleanRL-derived components; its license is in [`py_rl/cleanrl/LICENSE`](py_rl/cleanrl/LICENSE). The state converter vendors separately licensed dependencies with their notices. Preserve upstream attribution and applicable licenses when redistributing the project.
+PolyVision originated as a fork of [ClaireBookworm/polytopia_rl](https://github.com/ClaireBookworm/polytopia_rl) and has since developed into a substantially expanded research project.
 
-*The Battle of Polytopia* is the intellectual property of its respective owner. PolyVision is a research project and does not claim affiliation or endorsement.
+The repository retains and modifies upstream code from `polytopia_rl`, including portions of the Tribes game engine, Python/Java bridge, environment code, and related utilities. Credit for that upstream work belongs to its original authors and contributors. Git history is retained to preserve authorship and provenance.
+
+### License status
+
+PolyVision does **not currently have a repository-wide open-source license**.
+
+The upstream `ClaireBookworm/polytopia_rl` repository does not provide a root license covering the project as a whole. Because PolyVision contains substantial code derived from that repository, PolyVision cannot simply relicense the entire codebase under a new license without first resolving the licensing status of the inherited work.
+
+Some components within the repository are separately licensed:
+
+- RL code under [`py_rl/cleanrl`](py_rl/cleanrl/) contains code derived from [CleanRL](https://github.com/vwxyzjn/cleanrl) and other projects. The applicable notices and licenses are preserved in [`py_rl/cleanrl/LICENSE`](py_rl/cleanrl/LICENSE).
+- Vendored dependencies and third-party components retain their own license and attribution notices where applicable.
+- Third-party game assets, trademarks, and other intellectual property are not relicensed by PolyVision.
+
+Unless a file or component explicitly states otherwise, the presence of source code in this repository should not be interpreted as granting additional rights beyond those provided by the applicable copyright holders and licenses.
+
+I intend to clarify the licensing of PolyVision's original contributions once the licensing status of the inherited upstream code has been resolved.
+
+### Polytopia
+
+*The Battle of Polytopia* and related names, assets, and intellectual property belong to their respective rights holders. PolyVision is an independent research project and is not affiliated with or endorsed by Midjiwan AB.
