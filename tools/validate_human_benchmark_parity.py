@@ -26,9 +26,20 @@ FORBIDDEN_OFFICIAL_ATTRIBUTES = {
     "_last_obs",
     "_current_legal_actions",
     "_current_legal_id_to_raw_index",
+    "_current_action_mask",
+    "_current_diag",
+    "_current_raw_valid_actions",
     "get_observation",
     "render",
     "observationJsonFull",
+    "GameState",
+    "Board",
+    "_dict_to_array",
+    "_build_legal_action_features_padded",
+    "_build_action_mask_and_mapping",
+    "_build_feature_step_context",
+    "_compute_legal_action_feature_vector_reference",
+    "_compute_legal_action_feature_vector_cached",
 }
 
 
@@ -49,12 +60,67 @@ def assert_state_parity(human_env, model_env, human_obs, model_obs, human_info, 
     model_contract = capture_environment_contract(model_env, model_info)
     if human_contract != model_contract:
         raise RuntimeError("human/model environment contracts differ")
-    human_ids = [int(action["global_id"]) for action in policy_visible_actions(human_env, human_info)]
+
+    # 1. Check legal slot tensors equality between human and model environments
+    human_gids = np.asarray(human_info.get("legal_global_ids_padded", []))
+    model_gids = np.asarray(model_info.get("legal_global_ids_padded", []))
+    if not np.array_equal(human_gids, model_gids):
+        raise RuntimeError("human/model legal_global_ids_padded differ")
+
+    human_mask = np.asarray(human_info.get("legal_action_valid_mask", []))
+    model_mask = np.asarray(model_info.get("legal_action_valid_mask", []))
+    if not np.array_equal(human_mask, model_mask):
+        raise RuntimeError("human/model legal_action_valid_mask differ")
+
+    human_features = np.asarray(human_info.get("legal_action_features_padded", []))
+    model_features = np.asarray(model_info.get("legal_action_features_padded", []))
+    if not np.array_equal(human_features, model_features):
+        raise RuntimeError("human/model legal_action_features_padded differ")
+
+    # 2. Check feature tensor dimensions and metadata
+    wrapper = human_env.unwrapped
+    max_slots = int(wrapper.MAX_LEGAL_ACTIONS_DEFAULT)
+    expected_dim = int(wrapper.ACTION_FEATURE_DIM)
+    expected_names = wrapper.LEGAL_ACTION_FEATURE_NAMES
+
+    if human_features.shape != (max_slots, expected_dim):
+        raise RuntimeError(
+            f"legal_action_features_padded shape {human_features.shape} != expected ({max_slots}, {expected_dim})"
+        )
+    if len(expected_names) != expected_dim:
+        raise RuntimeError(
+            f"LEGAL_ACTION_FEATURE_NAMES count {len(expected_names)} != ACTION_FEATURE_DIM {expected_dim}"
+        )
+    if int(human_info.get("legal_action_feature_dim", -1)) != expected_dim:
+        raise RuntimeError(
+            f"legal_action_feature_dim in info ({human_info.get('legal_action_feature_dim')}) != {expected_dim}"
+        )
+
+    # 3. Check human menu actions and slot correspondence
+    human_actions = policy_visible_actions(human_env, human_info)
     model_ids = policy_visible_ids(model_info)
+    human_ids = [int(action["global_id"]) for action in human_actions]
     if human_ids != model_ids:
         raise RuntimeError("human menu differs from legal_global_ids_padded[legal_action_valid_mask]")
 
-    wrapper = human_env.unwrapped
+    valid_indices = np.nonzero(human_mask)[0]
+    if len(human_actions) != len(valid_indices):
+        raise RuntimeError(f"action count {len(human_actions)} != valid slot count {len(valid_indices)}")
+
+    for idx, action in enumerate(human_actions):
+        padded_slot = int(valid_indices[idx])
+        if int(action["slot"]) != idx:
+            raise RuntimeError(f"action logical slot {action['slot']} != {idx}")
+        if int(action["padded_slot"]) != padded_slot:
+            raise RuntimeError(f"action padded slot {action['padded_slot']} != {padded_slot}")
+        if int(action["global_id"]) != int(human_gids[padded_slot]):
+            raise RuntimeError(f"action global_id {action['global_id']} != slot gid {human_gids[padded_slot]}")
+        if not np.array_equal(action["features"], human_features[padded_slot]):
+            raise RuntimeError(f"action features for gid={action['global_id']} do not match slot {padded_slot}")
+        expected_annotations = human_policy_interface.action_feature_annotations(action["features"], action["type"])
+        if action["annotations"] != expected_annotations:
+            raise RuntimeError(f"action annotations differ from pure feature reconstruction for gid={action['global_id']}")
+
     for gid in human_ids:
         if gid not in wrapper._current_legal_id_to_raw_index:
             raise RuntimeError(f"human menu global ID {gid} has no wrapper raw-action mapping")

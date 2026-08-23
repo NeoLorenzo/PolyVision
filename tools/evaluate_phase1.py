@@ -205,7 +205,7 @@ def main():
     policies=tuple(dict.fromkeys(args.policy or ALL_POLICIES))
     if any(p.startswith("ppo_") for p in policies) and not args.model_path: raise SystemExit("--model-path is required for PPO policies")
     manifest,maps,manifest_path=load_verified_pool(REPO_ROOT,args.pool,args.max_maps)
-    canonical=(args.pool=="validation" and len(maps)==250 and args.max_maps is None and args.repeats_per_map==5 and set(policies)==set(ALL_POLICIES))
+    canonical=(args.pool in ("validation", "test") and len(maps)==250 and args.max_maps is None and args.repeats_per_map==5 and set(policies)==set(ALL_POLICIES))
     label="canonical" if canonical else "partial-smoke-noncanonical"
     evaluation_id=args.evaluation_id or f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_{args.pool}_{label}"
     out_dir=args.output_root/evaluation_id

@@ -34,6 +34,7 @@ def compatibility_metadata(width=11, height=11, **overrides):
         "catalog_version": "flat-v1",
         "canonicalizer_version": "flat-v1-structured",
         "phase1_opening_version": "v2_guaranteed_two_unit",
+        "phase1_environment_version": "v3_corrected_turn_economy",
         "max_legal_actions": 128,
     }
     values.update(overrides)
@@ -109,10 +110,23 @@ class CheckpointCompatibilityTests(unittest.TestCase):
         with self.assertRaisesRegex(CheckpointCompatibilityError, "phase1_opening_version"):
             validate_checkpoint_compatibility(checkpoint, compatibility_metadata())
 
+    def test_historical_checkpoint_without_environment_version_is_rejected(self):
+        checkpoint = compatibility_metadata()
+        checkpoint.pop("phase1_environment_version")
+        with self.assertRaisesRegex(CheckpointCompatibilityError, "phase1_environment_version"):
+            validate_checkpoint_compatibility(checkpoint, compatibility_metadata())
+
     def test_opening_contract_mismatch_is_rejected(self):
         with self.assertRaisesRegex(CheckpointCompatibilityError, "phase1_opening_version"):
             validate_checkpoint_compatibility(
                 compatibility_metadata(phase1_opening_version="v1_mixed_capital_regression"),
+                compatibility_metadata(),
+            )
+
+    def test_environment_version_mismatch_is_rejected(self):
+        with self.assertRaisesRegex(CheckpointCompatibilityError, "phase1_environment_version"):
+            validate_checkpoint_compatibility(
+                compatibility_metadata(phase1_environment_version="v2_broken_turn_economy"),
                 compatibility_metadata(),
             )
 

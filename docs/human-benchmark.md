@@ -37,10 +37,22 @@ The official UI is a presentation layer over `TribesGymWrapper`, the same author
 - the same reward/filter configuration;
 - the same current geometry, action catalog, canonicalizer, legal-slot capacity, and feature contract;
 - the exact legal global IDs in `legal_global_ids_padded[legal_action_valid_mask]`;
+- the corresponding row from `legal_action_features_padded` for each legal action;
 - every active Phase 1 action filter, because neither UI nor registry reimplements filtering;
 - execution through `env.step(global_id)` and the wrapper's maintained global-ID-to-Java-action mapping.
 
-The human does not need to inspect the 42-dimensional legal-action feature tensor. Stable IDs are decoded into neutral descriptions using public catalog structure: for example, `Move unit (x, y) -> (x, y)` or `Research ORGANIZATION`. The decoder never reads raw Java action dictionaries.
+For `actor_mode=legal_features` models (such as Phase 1 Seed2), the official interface translates both the flattened observation and each legal action's 42-dimensional feature row into concise, structured human-readable annotations.
+
+### Tactical Map and Movement Display
+
+The official terminal interface renders a high-legibility tactical map and source-grouped action menu:
+- **ANSI-colored tactical board**: Uses background colors for terrain (forest=green, mountain=gray, water=blue, city=cyan, village=yellow, fog=dark) and high-contrast foreground glyphs for occupants, terrain cues, and resources (`1`, `2`..=unit, `T`=forest, `C`=city, `V`=village, `A`=animal, `F`=fruit, `H`=fish, `W`=whale, `O`=ore, `P`=crops, `R`=ruin). Forests use green background with brown/tan text cues. Colors and glyphs are purely cosmetic presentation transforms of the PPO observation array.
+- **Monochrome fallback**: Automatically used when output is redirected, `isatty()` is False, or `NO_COLOR` is set. Renders clear textual cues (`T1`, `C2`, `Ta`, `Tf`, `T`, `F`, `M`, `~`, `?`) without ANSI escape codes, ensuring `T` unambiguously denotes forest and `F` denotes fruit.
+- **Visible unit numbering**: Numbered visible unit labels (`1`, `2`, `3`, ...) are assigned in deterministic `(x, y)` spatial tile order from the PPO observation. The same numbers identify source units on the board and in the movement menu.
+- **Movement grouping and directional arrows**: Movement actions are grouped under their source unit (`MOVES - UNIT 1 at (6, 4)`), displaying directional arrows (`↑`, `↓`, `←`, `→`, `↖`, `↗`, `↙`, `↘` with ASCII fallback `N`, `S`, `W`, `E`, `NW`, `NE`, `SW`, `SE`) derived deterministically from source/destination coordinates. Original legal-slot order is strictly preserved within each group without desirability ranking or recommendation.
+- **Compact annotations**: Model-visible feature rows from `legal_action_features_padded` are compressed into single-line semantic descriptors (e.g. `reveal +4 | adjacent fog 4 | away from capital` or `pop +1 | city progress 50% | level-up ready`).
+
+Informational parity is strictly preserved: no raw Java state, hidden fog information, full-visibility data, or policy logits/recommendations are ever consulted.
 
 Run the maintained parity validator after interface changes:
 
@@ -48,11 +60,18 @@ Run the maintained parity validator after interface changes:
 python tools/validate_human_benchmark_parity.py --maps 3 --states-per-map 5
 ```
 
-It creates paired wrappers for identical map/seed inputs, compares observations and interface contracts, proves that the human menu equals the legal-slot tensors, checks stable-ID/raw-Java-action resolution and execution, compares rewards and horizon signals, completes one Turn-10 path, and audits the official presentation module for forbidden APIs.
+It creates paired wrappers for identical map/seed inputs, compares observations and interface contracts, proves that the human menu equals the legal-slot tensors, checks feature tensor shape/metadata and slot associations, checks stable-ID/raw-Java-action resolution and execution, compares rewards and horizon signals, completes one Turn-10 path, and audits the official presentation module for forbidden APIs.
 
 ## Information boundary
 
-Official benchmark mode derives its state display only from the 505-value flattened policy observation. It shows fog-respecting terrain, resources, visible unit occupancy, and observation-derived economy scalars. Action descriptions come only from selectable stable global IDs and catalog metadata. It does not display recommendations, rankings, logits, values, oracle distances, predicted outcomes, or hidden-map facts.
+Official benchmark mode derives its state display solely from the 505-value flattened policy observation and the policy-visible legal action tensors (`legal_global_ids_padded`, `legal_action_valid_mask`, `legal_action_features_padded`).
+
+It shows:
+- fog-respecting terrain, visible resources, and unit occupancy reconstructed from the observation array;
+- complete model-visible economy/city scalars (stars, SPT, city levels, upgrade progress, upgrade-ready fraction, level-up availability, and researched technologies);
+- action annotations derived deterministically from that action's exact feature row in `legal_action_features_padded`.
+
+It does not display recommendations, rankings, logits, values, oracle distances, predicted rewards, or hidden-map facts. This is strict informational parity with the PPO actor, not ordinary unrestricted Polytopia play.
 
 The following paths are prohibited in official mode:
 

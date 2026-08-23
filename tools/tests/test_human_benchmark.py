@@ -8,14 +8,26 @@ import numpy as np
 
 from pol_env.Tribes.py.register_env import GlobalActionCatalog
 from tools import human_benchmark as benchmark
-from tools.human_policy_interface import EpisodeResult, run_policy_visible_episode
+from tools.human_policy_interface import (
+    EpisodeResult,
+    _print_actions,
+    action_feature_annotations,
+    extract_visible_units,
+    move_direction,
+    policy_visible_actions,
+    run_policy_visible_episode,
+    visible_map_lines,
+    visible_state,
+)
 from tools.validate_human_benchmark_parity import assert_information_safety
 
 
 class FakeEnv:
     MAX_TURNS = 10
     MAX_LEGAL_ACTIONS_DEFAULT = 4
-    ALLOWED_ACTION_TYPES = {"END_TURN"}
+    ALLOWED_ACTION_TYPES = {"END_TURN", "MOVE"}
+    ACTION_FEATURE_DIM = 42
+    LEGAL_ACTION_FEATURE_NAMES = tuple(f"feat_{i}" for i in range(42))
 
     def __init__(self):
         self.unwrapped = self
@@ -45,6 +57,7 @@ class FakeEnv:
             "info_mode": "fast",
             "legal_global_ids_padded": np.array([0, 0, 0, 0]),
             "legal_action_valid_mask": np.array([True, False, False, False]),
+            "legal_action_features_padded": np.zeros((4, 42), dtype=np.float32),
             "legal_action_count": 1,
             "turn_count": 1,
         }
@@ -98,6 +111,220 @@ class PolicyInterfaceTests(unittest.TestCase):
         self.assertEqual(result.status, "completed")
         self.assertEqual(result.action_history[0]["global_id"], 0)
         self.assertEqual(result.action_history[0]["description"], "End turn")
+
+    def test_action_feature_annotations_decoding(self):
+        # Test move features
+        feat_move = np.zeros((42,), dtype=np.float32)
+        feat_move[0] = 1.0  # is_move
+        feat_move[1] = 3.0 / 12.0  # newly revealed = 3
+        feat_move[2] = 2.0 / 8.0  # adj fog after = 2
+        feat_move[6] = 1.0  # has visible village
+        feat_move[7] = 0.5  # closer to village
+        feat_move[8] = 0.0  # no backtrack
+        feat_move[10] = 1.0  # away from capital
+        feat_move[11] = 1.0  # warrior
+        ann = action_feature_annotations(feat_move, "MOVE")
+        self.assertIn("reveal +3", ann)
+        self.assertIn("adjacent fog 2", ann)
+        self.assertIn("closer to village", ann)
+        self.assertIn("away from capital", ann)
+
+        # Test economy features
+        feat_eco = np.zeros((42,), dtype=np.float32)
+        feat_eco[16] = 1.0  # is_resource_gathering
+        feat_eco[26] = 1.0  # resource_is_animal
+        feat_eco[36] = 1.0 / 2.0  # pop_delta = +1
+        feat_eco[37] = 0.0  # spt_delta = 0
+        feat_eco[38] = 1.0  # makes_level_up_available = True
+        feat_eco[40] = 0.67  # progress_before = 67%
+        ann_eco = action_feature_annotations(feat_eco, "RESOURCE_GATHERING")
+        self.assertIn("pop +1", ann_eco)
+        self.assertIn("city progress 67%", ann_eco)
+        self.assertIn("makes level-up ready", ann_eco)
+        self.assertIn("resource: ANIMAL", ann_eco)
+
+    def test_visible_state_extended_economy_decoding(self):
+        obs = np.zeros((505,), dtype=np.float32)
+        obs[363] = 8.0  # legacy stars
+        obs[364] = 100.0  # score
+        obs[365] = 3.0  # city count
+        obs[490] = 8.0 / 50.0  # current stars norm
+        obs[491] = 11.0 / 30.0  # current spt norm -> 11
+        obs[492] = 6.0 / 10.0  # turn count norm -> 6
+        obs[495] = 1.0  # tech organization
+        obs[496] = 0.0  # tech forestry
+        obs[497] = 3.0 / 24.0  # tech count -> 3
+        obs[499] = 2.33 / 5.0  # avg city level -> 2.33
+        obs[500] = 3.0 / 5.0  # max city level -> 3.0
+        obs[501] = 0.58  # mean upgrade progress -> 0.58
+        obs[502] = 0.75  # max upgrade progress -> 0.75
+        obs[503] = 0.33  # upgrade ready frac -> 0.33
+        obs[504] = 1.0  # any level up available -> True
+
+        info = {"map_width": 11, "map_height": 11}
+        st = visible_state(obs, info)
+        self.assertEqual(st["turn"], 6)
+        self.assertEqual(st["stars"], 8)
+        self.assertEqual(st["spt"], 11)
+        self.assertEqual(st["city_count"], 3)
+        self.assertTrue(st["tech_organization"])
+        self.assertFalse(st["tech_forestry"])
+        self.assertEqual(st["tech_count"], 3)
+        self.assertAlmostEqual(st["avg_city_level"], 2.33, places=2)
+        self.assertAlmostEqual(st["max_city_level"], 3.0, places=1)
+        self.assertAlmostEqual(st["mean_upgrade_progress"], 0.58, places=2)
+        self.assertAlmostEqual(st["max_upgrade_progress"], 0.75, places=2)
+        self.assertAlmostEqual(st["upgrade_ready_frac"], 0.33, places=2)
+        self.assertTrue(st["any_level_up_available"])
+
+    def test_deterministic_unit_numbering(self):
+        st = {
+            "width": 11,
+            "height": 11,
+            "unit_ids": np.zeros((121,), dtype=np.int64),
+        }
+        # Place units at (6, 4) and (6, 6)
+        st["unit_ids"][6 * 11 + 4] = 101
+        st["unit_ids"][6 * 11 + 6] = 102
+        units = extract_visible_units(st)
+        self.assertEqual(len(units), 2)
+        self.assertEqual(units[0]["number"], 1)
+        self.assertEqual(units[0]["pos"], (6, 4))
+        self.assertEqual(units[1]["number"], 2)
+        self.assertEqual(units[1]["pos"], (6, 6))
+
+    def test_direction_arrows_and_ascii_derivation(self):
+        src = (5, 5)
+        # 8 cardinal and diagonal directions
+        cases = [
+            ((5, 4), "↑ ", "N "),
+            ((5, 6), "↓ ", "S "),
+            ((4, 5), "← ", "W "),
+            ((6, 5), "→ ", "E "),
+            ((4, 4), "↖", "NW"),
+            ((6, 4), "↗", "NE"),
+            ((4, 6), "↙", "SW"),
+            ((6, 6), "↘", "SE"),
+        ]
+        for dst, expected_unicode, expected_ascii in cases:
+            self.assertEqual(move_direction(src, dst, unicode_arrow=True), expected_unicode)
+            self.assertEqual(move_direction(src, dst, unicode_arrow=False), expected_ascii)
+
+    def test_movement_grouping_by_source_unit(self):
+        st = {
+            "width": 11,
+            "height": 11,
+            "unit_ids": np.zeros((121,), dtype=np.int64),
+            "terrain": np.zeros((121,), dtype=np.int16),
+            "city_ids": np.zeros((121,), dtype=np.int64),
+            "resources": np.full((121,), -1, dtype=np.int16),
+        }
+        st["unit_ids"][6 * 11 + 4] = 1
+        st["unit_ids"][6 * 11 + 6] = 2
+
+        actions = [
+            {
+                "slot": 0,
+                "padded_slot": 0,
+                "global_id": 100,
+                "type": "MOVE",
+                "description": "Move unit (6, 4) -> (5, 3)",
+                "src_xy": (6, 4),
+                "dst_xy": (5, 3),
+                "features": np.zeros((42,), dtype=np.float32),
+                "annotations": ["reveal +4", "away from capital"],
+            },
+            {
+                "slot": 1,
+                "padded_slot": 1,
+                "global_id": 101,
+                "type": "MOVE",
+                "description": "Move unit (6, 6) -> (5, 6)",
+                "src_xy": (6, 6),
+                "dst_xy": (5, 6),
+                "features": np.zeros((42,), dtype=np.float32),
+                "annotations": ["city bounds"],
+            },
+            {
+                "slot": 2,
+                "padded_slot": 2,
+                "global_id": 0,
+                "type": "END_TURN",
+                "description": "End turn",
+                "features": np.zeros((42,), dtype=np.float32),
+                "annotations": [],
+            },
+        ]
+
+        printed = []
+        _print_actions(actions, 0, 30, output=printed.append, state=st, unicode_arrows=True)
+        text = "\n".join(printed)
+
+        self.assertIn("MOVES - UNIT 1 at (6, 4)", text)
+        self.assertIn("MOVES - UNIT 2 at (6, 6)", text)
+        self.assertIn("[  0] ↖ (5, 3)   reveal +4 | away from capital  (gid=100)", text)
+        self.assertIn("[  1] ←  (5, 6)   city bounds  (gid=101)", text)
+        self.assertIn("[TURN]", text)
+        self.assertIn("[  2] End turn  (gid=0)", text)
+
+    def test_visible_map_lines_ansi_and_monochrome(self):
+        st = {
+            "width": 11,
+            "height": 11,
+            "terrain": np.full((121,), 7, dtype=np.int16),
+            "unit_ids": np.zeros((121,), dtype=np.int64),
+            "city_ids": np.zeros((121,), dtype=np.int64),
+            "resources": np.full((121,), -1, dtype=np.int16),
+        }
+        # Visible plain, forest, city, village, animal, fruit
+        st["terrain"][6 * 11 + 4] = 6  # Forest
+        st["terrain"][6 * 11 + 5] = 5  # City
+        st["terrain"][6 * 11 + 6] = 4  # Village
+        st["terrain"][5 * 11 + 4] = 0  # Plain
+        st["resources"][5 * 11 + 4] = 2  # Animal on plain
+        st["terrain"][5 * 11 + 5] = 0  # Plain
+        st["resources"][5 * 11 + 5] = 1  # Fruit on plain
+        st["terrain"][4 * 11 + 4] = 6  # Forest
+        st["resources"][4 * 11 + 4] = 1  # Fruit on forest
+        st["terrain"][4 * 11 + 5] = 6  # Forest (empty)
+        st["unit_ids"][6 * 11 + 4] = 1  # Unit 1 on forest
+
+        # ANSI mode
+        ansi_lines = visible_map_lines(st, use_ansi=True)
+        ansi_text = "\n".join(ansi_lines)
+        self.assertIn("\033[", ansi_text)
+        self.assertIn("Tactical Map (ANSI Color)", ansi_lines[0])
+        self.assertIn("Units: [1] Warrior at (6, 4)", ansi_text)
+        # Forest terrain cue in ANSI mode uses bold brown/tan text (33m) on green background (42m) with 'T'
+        self.assertIn("\033[1;33m\033[42m T \033[0m", ansi_text)
+
+        # Monochrome mode
+        mono_lines = visible_map_lines(st, use_ansi=False)
+        mono_text = "\n".join(mono_lines)
+        self.assertNotIn("\033[", mono_text)
+        self.assertIn("Tactical Map (Monochrome Fallback)", mono_lines[0])
+        self.assertIn("Units: [1] Warrior at (6, 4)", mono_text)
+        self.assertIn("T1 ", mono_text)  # Unit 1 on forest (T = forest)
+        self.assertIn(" C ", mono_text)   # City
+        self.assertIn(" V ", mono_text)   # Village
+        self.assertIn(" A ", mono_text)   # Animal on plain
+        self.assertIn(" F ", mono_text)   # Fruit on plain (F = fruit)
+        self.assertIn("Tf ", mono_text)  # Fruit on forest
+        self.assertIn(" T ", mono_text)   # Empty forest (T = forest)
+
+    def test_policy_visible_actions_fails_on_missing_or_bad_features(self):
+        env = FakeEnv()
+        # Missing features key
+        bad_info = dict(env.info)
+        del bad_info["legal_action_features_padded"]
+        with self.assertRaisesRegex(RuntimeError, "missing required info field"):
+            policy_visible_actions(env, bad_info)
+
+        # Mismatched dimension
+        bad_info2 = dict(env.info)
+        bad_info2["legal_action_features_padded"] = np.zeros((4, 20), dtype=np.float32)
+        with self.assertRaisesRegex(RuntimeError, "feature dim"):
+            policy_visible_actions(env, bad_info2)
 
     def test_official_presentation_source_has_no_privileged_api_references(self):
         assert_information_safety()

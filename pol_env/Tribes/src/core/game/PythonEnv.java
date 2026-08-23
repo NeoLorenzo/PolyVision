@@ -290,17 +290,22 @@ public class PythonEnv {
         ArrayList<Action> acts = gs.getAllAvailableActions();
         if (idx < 0 || idx >= acts.size()) throw new IllegalArgumentException("Invalid action index: " + idx);
         Action selected = acts.get(idx);
-        gs.advance(selected, true);
+
+        boolean singleTribe = gs.getTribes() != null && gs.getTribes().length == 1;
+        boolean selectedEndTurn = selected != null && selected.getActionType() == Types.ACTION.END_TURN;
+        boolean soloContinuation = soloNoOpponentMode && singleTribe && selectedEndTurn;
+
+        gs.advance(selected, !soloContinuation);
 
         // In pure single-tribe maps, SCORE mode ends immediately after END_TURN.
         // For wrapper-driven T10 training, keep turns progressing when explicitly requested.
-        boolean singleTribe = gs.getTribes() != null && gs.getTribes().length == 1;
-        boolean selectedEndTurn = selected != null && selected.getActionType() == Types.ACTION.END_TURN;
-        if (soloNoOpponentMode && singleTribe && selectedEndTurn) {
+        if (soloContinuation) {
+            gs.incTick();
             gs.setGameIsOver(false);
-            gs.invalidateComputedActions();
             Tribe active = gs.getActiveTribe();
             if (active != null) {
+                active.setWinner(Types.RESULT.INCOMPLETE);
+                gs.invalidateComputedActions();
                 gs.initTurn(active);
                 gs.computePlayerActions(active);
             }

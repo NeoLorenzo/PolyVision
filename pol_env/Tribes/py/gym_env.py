@@ -27,7 +27,7 @@ class TribesGymEnv:
         self._jvm = self._gateway.jvm
         self._env = self._jvm.core.game.PythonEnv()
         self._solo_no_opponent_mode = str(
-            os.environ.get("POLYVISION_SOLO_NO_OPPONENT_MODE", "0")
+            os.environ.get("POLYVISION_SOLO_NO_OPPONENT_MODE", "1")
         ).strip().lower() in ("1", "true", "yes", "on")
         try:
             self._env.setSoloNoOpponentMode(bool(self._solo_no_opponent_mode))

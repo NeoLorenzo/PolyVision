@@ -1275,6 +1275,7 @@ if __name__ == "__main__":
         raise RuntimeError("--legal-action-feature-dim must be > 0.")
     if int(args.step_diagnostics_log_every) <= 0:
         raise RuntimeError("--step-diagnostics-log-every must be > 0.")
+    os.environ.setdefault("POLYVISION_SOLO_NO_OPPONENT_MODE", "1")
     os.environ["POLYVISION_MAX_LEGAL_ACTIONS"] = str(int(args.max_legal_actions))
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
@@ -1488,6 +1489,7 @@ if __name__ == "__main__":
         "actor_mode": args.actor_mode,
         "catalog_version": None,
         "phase1_opening_version": None,
+        "phase1_environment_version": None,
         "canonicalizer_version": None,
         "map_width": None,
         "map_height": None,
@@ -1503,6 +1505,7 @@ if __name__ == "__main__":
     for k in [
         "catalog_version",
         "phase1_opening_version",
+        "phase1_environment_version",
         "canonicalizer_version",
         "map_width",
         "map_height",

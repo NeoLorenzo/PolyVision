@@ -86,6 +86,8 @@ def validate_fixed_square_geometry(
     return loaded_width, loaded_height
 
 
+PHASE1_ENVIRONMENT_VERSION = "v3_corrected_turn_economy"
+
 CHECKPOINT_REQUIRED_FIELDS = (
     "map_width",
     "map_height",
@@ -98,6 +100,7 @@ CHECKPOINT_REQUIRED_FIELDS = (
     "catalog_version",
     "canonicalizer_version",
     "phase1_opening_version",
+    "phase1_environment_version",
     "max_legal_actions",
 )
 
@@ -135,6 +138,7 @@ def environment_compatibility_metadata(
         "catalog_version": str(wrapper.CATALOG_VERSION),
         "canonicalizer_version": str(wrapper.CANONICALIZER_VERSION),
         "phase1_opening_version": str(wrapper.PHASE1_OPENING_VERSION),
+        "phase1_environment_version": str(getattr(wrapper, "PHASE1_ENVIRONMENT_VERSION", PHASE1_ENVIRONMENT_VERSION)),
     }
     actual_max_legal_actions = getattr(wrapper, "_max_legal_actions", max_legal_actions)
     if actual_max_legal_actions is not None:

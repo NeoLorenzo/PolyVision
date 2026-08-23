@@ -209,6 +209,7 @@ class TribesGymWrapper(gym.Env):
     CATALOG_VERSION = "flat-v1"
     CANONICALIZER_VERSION = "flat-v1-structured"
     PHASE1_OPENING_VERSION = "v2_guaranteed_two_unit"
+    PHASE1_ENVIRONMENT_VERSION = "v3_corrected_turn_economy"
     MAX_LEGAL_ACTIONS_DEFAULT = 256
     LEGAL_ACTION_FEATURE_VERSION = "v1_3_move_focus_plus_semantic_econ"
     REVEAL_CLIP = 12.0
@@ -273,9 +274,10 @@ class TribesGymWrapper(gym.Env):
         11: "ROADS",        # YADAKK
     }
 
-    def __init__(self, level_file=None):
+    def __init__(self, level_file=None, map_type=None):
         self.tribes_env = make_default_env()
         self.level_file = level_file or self.PHASE1_LEVEL_FILE
+        self._configured_map_type = str(map_type).strip().upper() if map_type is not None else None
         self._level_selection_mode = str(
             os.environ.get("POLYVISION_LEVEL_SELECTION_MODE", "round_robin")
         ).strip().lower()
@@ -288,12 +290,13 @@ class TribesGymWrapper(gym.Env):
         self._episode_index = 0
         self._current_level_file = self.level_file
         self._current_level_index = 0
+        self._current_map_type = self._resolve_map_profile(self._current_level_file)
         self._last_reset_seed = None
         self._seed_stream = None
         self._seed_stream_base = self._parse_int_env("POLYVISION_BASE_SEED", default=42)
         self.verbose_resets = os.environ.get("POLYVISION_VERBOSE_RESETS", "0").lower() in ("1", "true", "yes", "on")
         self.debug_opening_grid = os.environ.get("POLYVISION_OPENING_GRID_DEBUG", "0").lower() in ("1", "true", "yes", "on")
-        self.render_mode = "rgb_array"        # Initialize the environment to get the actual action space size
+        self.render_mode = "rgb_array"
         self._turn_count = 0
         self._starting_city_count = 1
         self._last_city_count = 1
@@ -463,6 +466,7 @@ class TribesGymWrapper(gym.Env):
         level_file, level_index = self._select_level_for_reset(episode_seed)
         self._current_level_file = level_file
         self._current_level_index = int(level_index)
+        self._current_map_type = self._resolve_map_profile(self._current_level_file)
         self._last_reset_seed = int(episode_seed)
         self._validate_level_file_is_square(self._current_level_file)
         t_java0 = time.perf_counter() if self._profile_sps_enabled else None
@@ -535,6 +539,8 @@ class TribesGymWrapper(gym.Env):
             "catalog_version": self.CATALOG_VERSION,
             "canonicalizer_version": self.CANONICALIZER_VERSION,
             "phase1_opening_version": self.PHASE1_OPENING_VERSION,
+            "phase1_environment_version": self.PHASE1_ENVIRONMENT_VERSION,
+            "map_type": self._current_map_type,
             "map_width": int(loaded_width),
             "map_height": int(loaded_height),
             "observation_dim": int(self.observation_space.shape[0]),
@@ -564,6 +570,10 @@ class TribesGymWrapper(gym.Env):
             t_reset_feature_build += time.perf_counter() - t_feat0
         info["legal_action_feature_dim"] = int(self.ACTION_FEATURE_DIM)
         info["legal_action_feature_version"] = str(self.LEGAL_ACTION_FEATURE_VERSION)
+        info["stars"] = int(self._get_tribe_stars(obs, tribe_id=0))
+        info["spt"] = float(self._compute_bardur_spt(obs))
+        info["city_count"] = int(self._get_city_count(obs))
+        info["unit_count"] = int(self._get_owned_unit_count(obs))
         info["animals_harvested_t10"] = int(self._animals_harvested_t10)
         info["fruit_harvested_t10"] = int(self._fruit_harvested_t10)
         info["lumber_huts_built_t10"] = int(self._lumber_huts_built_t10)
@@ -1299,6 +1309,8 @@ class TribesGymWrapper(gym.Env):
         info["catalog_version"] = self.CATALOG_VERSION
         info["canonicalizer_version"] = self.CANONICALIZER_VERSION
         info["phase1_opening_version"] = self.PHASE1_OPENING_VERSION
+        info["phase1_environment_version"] = self.PHASE1_ENVIRONMENT_VERSION
+        info["map_type"] = self._current_map_type
         info["map_width"] = int(self._catalog.width) if self._catalog is not None else None
         info["map_height"] = int(self._catalog.height) if self._catalog is not None else None
         info["global_action_space_n"] = int(self.action_space.n)
@@ -1422,6 +1434,10 @@ class TribesGymWrapper(gym.Env):
             t_info_ws = time.perf_counter()
         info["legal_action_feature_dim"] = int(self.ACTION_FEATURE_DIM)
         info["legal_action_feature_version"] = str(self.LEGAL_ACTION_FEATURE_VERSION)
+        info["stars"] = int(self._get_tribe_stars(obs, tribe_id=0))
+        info["spt"] = float(self._compute_bardur_spt(obs))
+        info["city_count"] = int(self._get_city_count(obs))
+        info["unit_count"] = int(self._get_owned_unit_count(obs))
         info["animals_harvested_t10"] = int(self._animals_harvested_t10)
         info["fruit_harvested_t10"] = int(self._fruit_harvested_t10)
         info["lumber_huts_built_t10"] = int(self._lumber_huts_built_t10)
@@ -2606,6 +2622,28 @@ class TribesGymWrapper(gym.Env):
             return [fallback_level]
         return [os.path.join(root, fallback_level)]
 
+    def _resolve_map_profile(self, level_file=None):
+        if getattr(self, "_configured_map_type", None):
+            return self._configured_map_type
+        env_map_type = os.environ.get("POLYVISION_MAP_TYPE") or os.environ.get("POLYVISION_MAP_PROFILE")
+        if env_map_type:
+            return str(env_map_type).strip().upper()
+        if level_file:
+            lf_str = str(level_file).replace("\\", "/").lower()
+            if "phase1_pool_bardur_real" in lf_str or "drylands" in lf_str:
+                return "DRYLANDS"
+            if "lakes" in lf_str:
+                return "LAKES"
+            if "continents" in lf_str:
+                return "CONTINENTS"
+            if "pangea" in lf_str:
+                return "PANGEA"
+            if "archipelago" in lf_str:
+                return "ARCHIPELAGO"
+            if "waterworld" in lf_str:
+                return "WATERWORLD"
+        return "DRYLANDS"
+
     def _validate_level_file_is_square(self, level_path):
         """Reject malformed/rectangular CSVs before the square-only Java loader runs."""
         try:
@@ -2701,6 +2739,11 @@ class TribesGymWrapper(gym.Env):
             if a_type == "LEVEL_UP":
                 levelup_choice = self._resolve_action_levelup_choice(a)
                 if levelup_choice == "CITY_WALL":
+                    continue
+            # Drylands-only Fishing research mask
+            if getattr(self, "_current_map_type", "DRYLANDS") == "DRYLANDS" and a_type == "RESEARCH_TECH":
+                tech_type = self._resolve_action_tech_type(a)
+                if tech_type == "FISHING":
                     continue
             t_oob0 = time.perf_counter() if use_profile else None
             if a_type == "MOVE" and not self._is_move_destination_within_board(a, obs):
@@ -3778,7 +3821,7 @@ class TribesGymWrapper(gym.Env):
         ]
         violations = []
         if self._turn_count != 2: violations.append(f"turn_count={self._turn_count}")
-        if int(self._get_tribe_stars(obs, tribe_id=0)) != 5: violations.append(f"stars={self._get_tribe_stars(obs, tribe_id=0)}")
+        if int(self._get_tribe_stars(obs, tribe_id=0)) != 7: violations.append(f"stars={self._get_tribe_stars(obs, tribe_id=0)}")
         if float(self.tribes_env._compute_spt_from_obs(obs, tribe_id=0)) != 4.0: violations.append(f"spt={self.tribes_env._compute_spt_from_obs(obs, tribe_id=0)}")
         if int(self._get_city_count(obs)) != 1: violations.append(f"city_count={self._get_city_count(obs)}")
         if len(owned) != 2: violations.append(f"owned_unit_count={len(owned)}")

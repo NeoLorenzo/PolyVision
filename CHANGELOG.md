@@ -2,6 +2,85 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-V3_Turn_Economy_Drylands_Fishing_Mask_Pre_Training_Freeze-034] - (2026-08-23)
+
+### Scope
+- Corrected the single-tribe turn-economy bug in the Java game engine (`PythonEnv.java`), restoring monotonic Java tick progression (`gs.incTick()`), accurate turn initialization (`gs.initTurn()`), and authentic Polytopia star accumulation (`prev_stars + city_production`) across all turns.
+- Introduced an environment contract version string (`PHASE1_ENVIRONMENT_VERSION = "v3_corrected_turn_economy"`) and enforced fail-closed checkpoint compatibility rejection for historical v2 checkpoints.
+- Added a Drylands-specific policy action mask that automatically filters `RESEARCH FISHING` on `DRYLANDS` maps while strictly preserving the global action catalog size (63,913), stable action IDs, catalog fingerprint (`c849a4ab...`), and legal availability on non-Drylands map profiles (`LAKES`, `CONTINENTS`, etc.).
+- Reconstructed and validated the Turn 2 handoff economy: scripted opening on Turns 0 and 1 yields exactly 7 stars (up from 5 in v2), 4.0 SPT, 1 city, 2 units, at Java tick 2.
+- Created permanent regression diagnostics (`tools/diagnose_phase1_turn_economy.py`) and comprehensive unit/integration test suites (`tools/tests/test_v3_turn_economy_and_fishing_mask.py`).
+- Executed the full 5,517-map opening audit (`audit_phase1_opening.py`), human/model parity validation, action-space capacity audit (max observed 63/256 slots), observation star normalization audit, and frozen pool hash verification.
+- Established a complete Pre-Training Freeze state without running training, validation, or test evaluations.
+
+### Rationale
+- In Phase 1 v2 / Seed2, single-tribe solo play did not advance the internal Java `tick` (it remained frozen at 0). Consequently, `GameState.initTurn()` repeatedly executed `tribe.setStars(INITIAL_STARS)` (resetting stars to 5 on every turn) instead of `tribe.addStars(cityProduction)`, preventing agents from accumulating star balances across turns.
+- In `PythonEnv.stepByIndex()`, calling `gs.incTick()`, clearing transient score-mode win flags (`active.setWinner(INCOMPLETE)`), resetting game over state (`gs.setGameIsOver(false)`), and executing `gs.initTurn(active)` ensures authentic economy accumulation where stars accumulate naturally with city production while unit states refresh once per turn.
+- On Drylands maps, water tiles do not exist, making Fishing research useless in Phase 1. Masking Fishing at the policy layer on Drylands prevents exploratory waste without mutating the underlying 63,913 discrete action space or affecting other map profiles.
+- With the corrected economy, Turn 2 handoff bank evaluates to 13 stars earned (5 initial + 4 from T1 + 4 from T2) minus 6 stars spent (2 Animal 1 + 2 Animal 2 + 2 Warrior 2) = 7 stars.
+
+### Implemented
+- Updated `pol_env/Tribes/src/core/game/PythonEnv.java`:
+  - In `stepByIndex()`, added `gs.incTick()`, `gs.setGameIsOver(false)`, `active.setWinner(Types.RESULT.INCOMPLETE)`, `gs.invalidateComputedActions()`, `gs.initTurn(active)`, and `gs.computePlayerActions(active)` for solo continuation.
+- Updated `pol_env/Tribes/py/register_env.py`:
+  - Defined `PHASE1_ENVIRONMENT_VERSION = "v3_corrected_turn_economy"`.
+  - Added `_resolve_map_profile()` and Drylands Fishing mask in `_filter_allowed_raw_indices()`.
+  - Updated Turn 2 handoff verification to assert `stars == 7`.
+  - Included `phase1_environment_version` and `map_type` in reset and step `info` dictionaries.
+- Updated `pol_env/Tribes/py/environment_contract.py`:
+  - Added `PHASE1_ENVIRONMENT_VERSION` and included it in `CHECKPOINT_REQUIRED_FIELDS` and `environment_compatibility_metadata()`.
+- Updated `pol_env/Tribes/py/gym_env.py`:
+  - Defaulted `POLYVISION_SOLO_NO_OPPONENT_MODE` to `"1"`.
+- Updated `py_rl/cleanrl/cleanrl/ppo.py`:
+  - Included `phase1_environment_version` in `action_interface_meta` and checkpoint sidecar metadata.
+- Updated `tools/evaluate_phase1.py`:
+  - Fixed test pool canonical metadata labeling so full 250-map test runs are labeled `canonical`.
+- Created `tools/diagnose_phase1_turn_economy.py` and `tools/tests/test_v3_turn_economy_and_fishing_mask.py`.
+
+### Validation
+- `python tools/diagnose_phase1_turn_economy.py`: PASS (all 9 turn transitions verified accumulating: Turn 2=7 stars -> Turn 3=11 stars -> Turn 4=16 stars [village captured] -> Turn 11=51 stars, Java tick advancing 2->11).
+- `python tools/audit_phase1_opening.py --pool all`: PASS across all 5,517 maps (5000 train, 250 val, 250 test, 17 human; 100% expected two-unit opening rate).
+- `python -m unittest tools/tests/test_v3_turn_economy_and_fishing_mask.py`: 7/7 tests passed.
+- `python -m unittest discover tools/tests`: 40/40 tests passed.
+- `python -m unittest discover pol_env/Tribes/py/tests`: 20/20 tests passed.
+- `python tools/validate_human_benchmark_parity.py --maps 5 --states-per-map 10`: PASS (5 maps, 48 states, 135 excluded actions; AST audit passed).
+- `python tools/split_phase1_map_pool.py`: Verified frozen split hashes intact across all 5,517 maps.
+- `python tools/validate_environment_contract.py --expected-width 11 --expected-height 11 --max-maps 50`: 50/50 maps passed contract validation with 0 failures.
+
+## [Phase1-Human_Benchmark_Visual_Usability-033] - (2026-08-23)
+
+### Scope
+- Improved the visual usability and legibility of the Phase 1 human benchmark terminal interface (`tools/human_policy_interface.py`) through an ANSI-colored tactical board, deterministic visible-unit numbering, source-grouped movement actions with directional arrows, compact single-line feature annotations, and unambiguous terrain/resource glyph disambiguation (`T` for forest, `F` reserved for fruit).
+- Preserved strict informational parity and zero-privileged-access guarantees for the frozen Seed2 `legal_features` agent.
+- Updated documentation and unit tests covering presentation logic, fallback behavior, directional derivations, and glyph disambiguation.
+
+### Rationale
+- The previous human benchmark interface used dense 3-character symbolic encodings (`F.a`, `CU.`, `..f`, `???`) that imposed high cognitive load on human players by requiring constant mental decoding of terrain, unit, and resource layers.
+- Movement actions were presented as a flat list with verbose multi-line bullet annotations, obscuring which unit could move where and cluttering the terminal.
+- By adopting a visual design hierarchy where terrain is encoded in standard ANSI background colors and salient occupants/resources/cities are prominent foreground glyphs (`1`, `2`..=units, `T`=forest, `C`=city, `V`=village, `A`=animal, `F`=fruit, `H`=fish, `W`=whale, `O`=ore, `P`=crops, `R`=ruin), the board can be parsed at a glance.
+- Changing the forest glyph from `F` to `T` completely eliminates visual ambiguity with Fruit (`F`), while ANSI green backgrounds combined with brown/tan text cues make forests immediately recognizable as wooded terrain.
+- Grouping movement actions by source unit with compass/arrow directions (`↑`, `↓`, `←`, `→`, `↖`, `↗`, `↙`, `↘` and ASCII `N`, `S`, `W`, `E`, `NW`, `NE`, `SW`, `SE`) and compact single-line annotations drastically improves readability while strictly maintaining exact slot ordering, global IDs, and model-visible feature facts.
+- Automatic monochrome fallback ensures clean, unambiguous display (`T1`, `C2`, `Ta`, `Tf`, `T`, `F`, `M`, `~`, `?`) across environments without ANSI color support or redirected streams.
+
+### Implemented
+- Updated `tools/human_policy_interface.py`:
+  - Added `supports_ansi_color()` and `supports_unicode()` detection helpers with environment overrides (`NO_COLOR`, `POLYVISION_FORCE_COLOR`, `POLYVISION_ASCII_ONLY`).
+  - Implemented `extract_visible_units()` to deterministically assign stable spatial 1-indexed unit numbers (`1`, `2`, ...) from the PPO observation array.
+  - Implemented `move_direction()` to derive 8-way directional arrows / compass directions from source and destination coordinates.
+  - Updated `visible_map_lines()` with an ANSI-colored tactical map (terrain backgrounds with brown/tan forest styling, occupant/resource glyphs) and robust monochrome fallback (`T1`, `C2`, `Ta`, `Tf`, `T`, `F`, `M`, `~`, `?`), unambiguously reserving `T` for forest and `F` for fruit.
+  - Restructured `_print_actions()` to group `MOVE` actions by source unit (`MOVES - UNIT N at (x, y)`), rendering compact directional movement lines with single-line feature annotations.
+  - Streamlined `action_feature_annotations()` into concise, compact single-line annotations without qualitative bias or desirability ranking.
+  - Set `HUMAN_INTERFACE_VERSION = "v3_colored_terminal"`.
+- Updated `tools/tests/test_human_benchmark.py`:
+  - Added test cases for deterministic unit numbering, 8-way direction derivations, source-unit movement grouping, ANSI color rendering with forest styling, monochrome fallback formatting without forest/fruit ambiguity, and compact annotation decoding.
+- Updated `docs/human-benchmark.md`:
+  - Documented tactical board design, unit numbering, directional arrows, `T`/`F` glyph disambiguation, monochrome fallback, and preserved parity invariants.
+
+### Validation
+- `python tools/validate_human_benchmark_parity.py --maps 5 --states-per-map 10`: PASS across 5 benchmark maps (48 sampled states, 84 filtered raw actions observed); AST privileged-API audit passed.
+- `python -m unittest discover tools/tests`: 33/33 tests passed (0 failures, 0 errors).
+- `python tools/play_human_t10_wrapper.py --level-pool-glob "levels/phase1_pool_bardur_real/train/*.csv" --seed 42 --page-size 30`: visually confirmed tactical board rendering, unit labeling (`[1] Warrior at (6, 4)` and `[2] Warrior at (6, 6)`), unambiguous `T` forest and `F` fruit display, source-grouped movement menus with compass directions, and clean monochrome/ANSI formatting.
+
 ## Changelog entry requirements
 
 Every new change entry must include `Scope`, `Rationale`, `Implemented`, and `Validation` sections. The `Rationale` section must preserve:
@@ -11,6 +90,36 @@ Every new change entry must include `Scope`, `Rationale`, `Implemented`, and `Va
 - important trade-offs, limits, and compatibility consequences.
 
 Do not substitute a description of what changed for the reason it changed. If the original rationale or validation is unknown, record that explicitly rather than reconstructing it as fact.
+
+## [Phase1-Human_Benchmark_UI_Parity-032] - (2026-08-23)
+
+### Scope
+- Improved the Phase 1 human benchmark terminal presentation layer (`tools/human_policy_interface.py`) to expose the authoritative 42-dimensional `legal_features` action tensor and model-visible economy/city observation scalars while maintaining strict informational parity with the frozen Phase 1 Seed2 PPO agent (`actor_mode=legal_features`).
+- Strengthened automated parity validation in `tools/validate_human_benchmark_parity.py` to enforce shape, dimension, slot-association, and pure feature reconstruction invariants across live benchmark states.
+- Updated human benchmark documentation and unit test suite without modifying historical benchmark attempt records or environment gameplay mechanics.
+
+### Rationale
+- The frozen Phase 1 Seed2 PPO checkpoint uses `actor_mode=legal_features`, which provides the actor with a 42-dimensional feature vector for every legal action slot and 15 economy/state scalars in the flattened observation. The previous human terminal UI only presented generic action names and omitted several model-visible economy features (such as mean/max upgrade progress, ready fractions, level-up availability flags, and per-action movement reveal/backtrack/village annotations and economy deltas), creating an informational asymmetry between the human benchmark player and the PPO model.
+- Informational parity requires that the human receive exactly the information available to the actor: nothing less (to avoid artificially handicapping human decision quality) and nothing more (no raw Java state, Swing/ANSI renderers, full-visibility board state, or privileged oracle values).
+- Translating the exact model-visible feature rows into concise, structured human-readable annotations (e.g. predicted reveal, adjacent fog counts, village direction, population/SPT deltas, upgrade progress, and level-up availability) achieves high legibility while remaining a deterministic pure function of policy inputs.
+
+### Implemented
+- Updated `tools/human_policy_interface.py`:
+  - Added `action_feature_annotations()` to translate the 42-dimensional feature vector into concise, semantically relevant action annotations without heuristic ranking, logits, or value estimation.
+  - Updated `policy_visible_actions()` to validate `legal_action_features_padded` dimensions, fail closed on tensor mismatches, and attach the exact feature row and annotations to each valid action slot.
+  - Extended `visible_state()` to decode previously omitted model-visible economy scalars: mean and max city upgrade progress, upgrade-ready city fraction, any-level-up-available indicator, and turn countdown metrics.
+  - Enhanced map presentation in `visible_map_lines()` with clear coordinate headers, box borders, and clean ASCII tile cells (`[Terrain Unit Resource]`).
+  - Restructured `_print_actions()` to group actions deterministically into fixed category sections (`MOVEMENT`, `CAPTURE`, `ECONOMY / RESOURCES`, `BUILD`, `LEVEL UP`, `RESEARCH`, `TRAINING`, `OTHER`, `TURN`) while strictly preserving authoritative slot order within each section and unambiguous global ID mappings.
+- Updated `tools/validate_human_benchmark_parity.py`:
+  - Extended `FORBIDDEN_OFFICIAL_ATTRIBUTES` to cover all internal and privileged wrapper methods.
+  - Added explicit assertions for feature tensor equality, shape matching `(256, 42)`, metadata consistency (`legal_action_feature_dim` and `LEGAL_ACTION_FEATURE_NAMES`), exact slot-to-feature-row association, absence of padded/invalid slots in the menu, and pure feature annotation reproducibility.
+- Updated `tools/tests/test_human_benchmark.py` with unit tests for feature decoding, annotation generation, observation decoding, menu grouping, and fail-closed validation on malformed tensors.
+- Updated `docs/human-benchmark.md` to reflect the `legal_features` presentation contract and strict parity boundary.
+
+### Validation
+- `python tools/validate_human_benchmark_parity.py --maps 5 --states-per-map 10`: PASS across 5 benchmark maps (48 sampled states, 84 filtered raw actions observed); AST privileged-API audit passed.
+- `python -m unittest discover tools/tests`: 29/29 tests passed (0 failures, 0 errors).
+- `python tools/human_benchmark.py --synthetic-smoke --output-root outputs/tmp_smoke_test`: verified full Turn-10 episode completion with clean sectioned formatting and annotations; temporary directory deleted with zero impact on official human benchmark records.
 
 ## [Phase1-Opening_Fix-031] - (2026-08-14)
 

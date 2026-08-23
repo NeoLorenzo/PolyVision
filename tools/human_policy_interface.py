@@ -8,6 +8,8 @@ catalog metadata. It never reads the Java observation, raw action dictionaries,
 
 from __future__ import annotations
 
+import os
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterable
@@ -17,9 +19,80 @@ import numpy as np
 from pol_env.Tribes.py.environment_contract import observation_layout
 
 
-TERRAIN_SYMBOLS = {0: ".", 1: "~", 2: "D", 3: "M", 4: "V", 5: "C", 6: "F", 7: "?"}
+HUMAN_INTERFACE_VERSION = "v3_colored_terminal"
+TERRAIN_SYMBOLS = {0: ".", 1: "~", 2: "D", 3: "M", 4: "V", 5: "C", 6: "T", 7: "?"}
 RESOURCE_SYMBOLS = {0: "h", 1: "f", 2: "a", 3: "w", 5: "o", 6: "c", 7: "r"}
 SAFE_INFO_MODE = "fast"
+
+
+# ANSI Escape Sequences
+ANSI_RESET = "\033[0m"
+ANSI_BOLD = "\033[1m"
+ANSI_DIM = "\033[2m"
+
+# Standard 16-color ANSI backgrounds
+BG_FOG = "\033[40m"          # Black
+BG_PLAIN = "\033[49m"        # Default / neutral
+BG_FOREST = "\033[42m"       # Green
+BG_MOUNTAIN = "\033[100m"    # Dark Gray / Bright Black
+BG_WATER = "\033[44m"        # Blue
+BG_DEEP_WATER = "\033[44m"   # Blue
+BG_VILLAGE = "\033[43m"      # Yellow/Gold
+BG_CITY = "\033[46m"         # Cyan
+
+# Foregrounds
+FG_UNIT = "\033[1;97m"       # Bold Bright White
+FG_CITY = "\033[1;97m"       # Bold Bright White
+FG_VILLAGE = "\033[1;30m"    # Bold Black
+FG_FOG = "\033[90m"          # Dark Gray
+FG_ANIMAL = "\033[1;93m"     # Bold Bright Yellow
+FG_FRUIT = "\033[1;91m"      # Bold Bright Red
+FG_FISH = "\033[1;96m"       # Bold Bright Cyan
+FG_WHALE = "\033[1;97m"      # Bold Bright White
+FG_ORE = "\033[1;93m"        # Bold Bright Yellow
+FG_CROPS = "\033[1;92m"      # Bold Bright Green
+FG_RUIN = "\033[1;95m"       # Bold Bright Magenta
+FG_MOUNTAIN = "\033[1;97m"   # Bold White
+FG_FOREST = "\033[1;33m"     # Bold Brown/Tan on Green background
+FG_WATER = "\033[96m"        # Cyan
+FG_PLAIN = "\033[90m"        # Dim Gray
+FG_TERRITORY = "\033[36m"    # Cyan
+
+
+DIRECTION_UNICODE = {
+    (0, -1): "↑ ",
+    (0, 1): "↓ ",
+    (-1, 0): "← ",
+    (1, 0): "→ ",
+    (-1, -1): "↖",
+    (1, -1): "↗",
+    (-1, 1): "↙",
+    (1, 1): "↘",
+}
+
+DIRECTION_ASCII = {
+    (0, -1): "N ",
+    (0, 1): "S ",
+    (-1, 0): "W ",
+    (1, 0): "E ",
+    (-1, -1): "NW",
+    (1, -1): "NE",
+    (-1, 1): "SW",
+    (1, 1): "SE",
+}
+
+
+SECTION_DEFINITIONS: list[tuple[str, tuple[str, ...]]] = [
+    ("MOVEMENT", ("MOVE",)),
+    ("CAPTURE", ("CAPTURE",)),
+    ("ECONOMY / RESOURCES", ("RESOURCE_GATHERING", "CLEAR_FOREST", "GROW_FOREST")),
+    ("BUILD", ("BUILD",)),
+    ("LEVEL UP", ("LEVEL_UP",)),
+    ("RESEARCH", ("RESEARCH_TECH",)),
+    ("TRAINING", ("TRAIN", "SPAWN")),
+    ("OTHER", ("EXAMINE",)),
+    ("TURN", ("END_TURN",)),
+]
 
 
 def utc_now() -> str:
@@ -36,12 +109,211 @@ def _scalar(value: Any, default: Any = None) -> Any:
     return value
 
 
+def supports_ansi_color(stream: Any = None) -> bool:
+    """Detect whether ANSI color escapes should be used."""
+    if os.environ.get("POLYVISION_FORCE_COLOR") in ("1", "true", "yes", "on"):
+        return True
+    if os.environ.get("NO_COLOR") is not None:
+        return False
+    if os.environ.get("POLYVISION_NO_COLOR") in ("1", "true", "yes", "on"):
+        return False
+    if stream is None:
+        stream = sys.stdout
+    if not hasattr(stream, "isatty") or not stream.isatty():
+        return False
+    if os.environ.get("TERM") == "dumb":
+        return False
+    return True
+
+
+def supports_unicode(stream: Any = None) -> bool:
+    """Detect whether Unicode directional arrows and glyphs are supported."""
+    if os.environ.get("POLYVISION_ASCII_ONLY") in ("1", "true", "yes", "on"):
+        return False
+    if os.environ.get("POLYVISION_FORCE_UNICODE") in ("1", "true", "yes", "on"):
+        return True
+    if stream is None:
+        stream = sys.stdout
+    encoding = getattr(stream, "encoding", None) or sys.getdefaultencoding() or ""
+    return "utf" in encoding.lower()
+
+
+def move_direction(src: tuple[int, int], dst: tuple[int, int], unicode_arrow: bool = True) -> str:
+    """Derive directional arrow / compass string from source and destination coordinates."""
+    dx = dst[0] - src[0]
+    dy = dst[1] - src[1]
+    mapping = DIRECTION_UNICODE if unicode_arrow else DIRECTION_ASCII
+    return mapping.get((dx, dy), "? ")
+
+
+def extract_visible_units(
+    state: dict[str, Any],
+    actions: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Extract visible units deterministically in (x, y) spatial tile order from PPO observation."""
+    width = int(state["width"])
+    height = int(state["height"])
+    unit_ids = state["unit_ids"]
+
+    unit_type_by_pos: dict[tuple[int, int], str] = {}
+    if actions is not None:
+        for action in actions:
+            if action.get("type") == "MOVE":
+                src = action.get("src_xy")
+                if src is not None:
+                    feat = action.get("features")
+                    if feat is not None and len(feat) > 11 and float(feat[11]) >= 0.5:
+                        unit_type_by_pos[src] = "Warrior"
+                    elif src not in unit_type_by_pos:
+                        unit_type_by_pos[src] = "Warrior"
+
+    units = []
+    unit_num = 1
+    for x in range(width):
+        for y in range(height):
+            tile = x * height + y
+            if int(unit_ids[tile]) > 0:
+                pos = (x, y)
+                u_type = unit_type_by_pos.get(pos, "Warrior")
+                units.append({
+                    "number": unit_num,
+                    "pos": pos,
+                    "type": u_type,
+                    "tile": tile,
+                })
+                unit_num += 1
+    return units
+
+
+def action_feature_annotations(feature_vector: np.ndarray | Iterable[float], action_type: str | None = None) -> list[str]:
+    """Turn the model-visible 42-feature row into concise, human-readable annotations."""
+    feat = np.asarray(feature_vector, dtype=np.float32).reshape(-1)
+    if feat.shape != (42,):
+        raise RuntimeError(f"action feature row shape mismatch: expected (42,), got {feat.shape}")
+
+    lines: list[str] = []
+    a_type = (action_type or "").upper()
+    is_move = a_type == "MOVE" or bool(feat[0] >= 0.5)
+
+    if is_move:
+        revealed_norm = float(feat[1])
+        revealed = int(round(revealed_norm * 12.0))
+        if revealed_norm >= 1.0:
+            lines.append("reveal +12+")
+        elif not bool(feat[4] >= 0.5) and revealed > 0:
+            lines.append(f"reveal +{revealed}")
+
+        adj_fog_norm = float(feat[2])
+        adj_fog = int(round(adj_fog_norm * 8.0))
+        if adj_fog_norm >= 1.0:
+            lines.append("adjacent fog 8+")
+        elif adj_fog > 0:
+            lines.append(f"adjacent fog {adj_fog}")
+
+        adj_delta = int(round(float(feat[3]) * 8.0))
+        if adj_delta > 0:
+            lines.append(f"fog change +{adj_delta}")
+        elif adj_delta < 0:
+            lines.append(f"fog change {adj_delta}")
+
+        if bool(feat[5] >= 0.5):
+            lines.append("target: uncaptured village")
+        elif bool(feat[6] >= 0.5):
+            dist_delta = float(feat[7])
+            if dist_delta > 0.001:
+                lines.append("closer to village")
+            elif dist_delta < -0.001:
+                lines.append("further from village")
+
+        if bool(feat[8] >= 0.5):
+            lines.append("immediate backtrack")
+
+        if bool(feat[9] >= 0.5):
+            lines.append("city bounds")
+
+        capital_delta = float(feat[10])
+        if capital_delta > 0.001:
+            lines.append("away from capital")
+        elif capital_delta < -0.001:
+            lines.append("toward capital")
+
+    elif a_type in ("RESOURCE_GATHERING", "BUILD", "CLEAR_FOREST", "GROW_FOREST") or bool(
+        feat[16] >= 0.5 or feat[18] >= 0.5 or feat[19] >= 0.5 or feat[20] >= 0.5
+    ):
+        pop_delta = int(round(float(feat[36]) * 2.0))
+        if pop_delta != 0:
+            lines.append(f"pop {pop_delta:+d}")
+
+        spt_delta = int(round(float(feat[37]) * 5.0))
+        if spt_delta != 0:
+            lines.append(f"SPT {spt_delta:+d}")
+
+        progress_before = int(round(float(feat[40]) * 100.0))
+        if progress_before > 0 or bool(feat[41] >= 0.5):
+            lines.append(f"city progress {progress_before}%")
+
+        if bool(feat[41] >= 0.5):
+            lines.append("city upgrade ready")
+
+        if bool(feat[38] >= 0.5):
+            lines.append("makes level-up ready")
+
+        if bool(feat[26] >= 0.5):
+            lines.append("resource: ANIMAL")
+        elif bool(feat[27] >= 0.5):
+            lines.append("resource: FRUIT")
+        elif bool(feat[28] >= 0.5):
+            lines.append("resource: FISH")
+        elif bool(feat[29] >= 0.5):
+            lines.append("resource: CROPS")
+        elif bool(feat[30] >= 0.5):
+            lines.append("resource: ORE")
+
+        if bool(feat[32] >= 0.5):
+            lines.append("building: LUMBER_HUT")
+        elif bool(feat[33] >= 0.5):
+            lines.append("building: SAWMILL")
+
+    elif a_type == "LEVEL_UP" or bool(feat[17] >= 0.5):
+        pop_delta = int(round(float(feat[36]) * 2.0))
+        if pop_delta != 0:
+            lines.append(f"pop {pop_delta:+d}")
+
+        spt_delta = int(round(float(feat[37]) * 5.0))
+        if spt_delta != 0:
+            lines.append(f"SPT {spt_delta:+d}")
+
+        if bool(feat[35] >= 0.5):
+            lines.append("choice: WORKSHOP")
+
+        if bool(feat[39] >= 0.5):
+            lines.append("level-up claim")
+
+    elif a_type == "RESEARCH_TECH" or bool(feat[15] >= 0.5):
+        if bool(feat[23] >= 0.5):
+            lines.append("tech: ORGANIZATION")
+        elif bool(feat[24] >= 0.5):
+            lines.append("tech: FORESTRY")
+
+    elif a_type == "CAPTURE" or bool(feat[13] >= 0.5):
+        spt_delta = int(round(float(feat[37]) * 5.0))
+        if spt_delta != 0:
+            lines.append(f"SPT {spt_delta:+d}")
+
+    elif a_type in ("TRAIN", "SPAWN") or bool(feat[14] >= 0.5):
+        if bool(feat[11] >= 0.5):
+            lines.append("unit: warrior")
+
+    return lines
+
+
 def policy_visible_ids(info: dict[str, Any]) -> list[int]:
     ids = np.asarray(info.get("legal_global_ids_padded", []), dtype=np.int64).reshape(-1)
     valid = np.asarray(info.get("legal_action_valid_mask", []), dtype=bool).reshape(-1)
     if ids.shape != valid.shape:
         raise RuntimeError(f"legal-slot shape mismatch: ids={ids.shape}, mask={valid.shape}")
-    selected = [int(value) for value in ids[valid]]
+    valid_indices = np.nonzero(valid)[0]
+    selected = [int(ids[slot_idx]) for slot_idx in valid_indices]
     if len(selected) != len(set(selected)):
         raise RuntimeError("policy-visible legal global IDs contain duplicates")
     declared = int(info.get("legal_action_count", len(selected)))
@@ -56,7 +328,7 @@ def _tile_xy(catalog: Any, tile: int) -> tuple[int, int]:
 
 def decode_global_action(env: Any, global_id: int) -> tuple[str, str]:
     """Decode a stable global ID without consulting a raw Java action object."""
-    wrapper = env.unwrapped
+    wrapper = getattr(env, "unwrapped", env)
     catalog = wrapper._catalog
     gid = int(global_id)
     offsets = catalog.offsets
@@ -111,11 +383,82 @@ def decode_global_action(env: Any, global_id: int) -> tuple[str, str]:
 
 
 def policy_visible_actions(env: Any, info: dict[str, Any]) -> list[dict[str, Any]]:
-    return [
-        {"slot": slot, "global_id": gid, "type": action_type, "description": description}
-        for slot, gid in enumerate(policy_visible_ids(info))
-        for action_type, description in [decode_global_action(env, gid)]
-    ]
+    ids = np.asarray(info.get("legal_global_ids_padded", []), dtype=np.int64).reshape(-1)
+    valid = np.asarray(info.get("legal_action_valid_mask", []), dtype=bool).reshape(-1)
+    if ids.shape != valid.shape:
+        raise RuntimeError(f"legal-slot shape mismatch: ids={ids.shape}, mask={valid.shape}")
+
+    features = info.get("legal_action_features_padded", None)
+    if features is None:
+        raise RuntimeError("missing required info field 'legal_action_features_padded'")
+    features_arr = np.asarray(features, dtype=np.float32)
+    if features_arr.ndim != 2:
+        raise RuntimeError(f"expected 2D legal_action_features_padded, got shape={features_arr.shape}")
+    if features_arr.shape[0] != ids.shape[0]:
+        raise RuntimeError(
+            f"legal_action_features_padded row count {features_arr.shape[0]} != slot count {ids.shape[0]}"
+        )
+
+    wrapper = getattr(env, "unwrapped", env)
+    expected_dim = getattr(wrapper, "ACTION_FEATURE_DIM", None)
+    if expected_dim is None:
+        expected_dim = int(info.get("legal_action_feature_dim", 42))
+    else:
+        expected_dim = int(expected_dim)
+
+    if features_arr.shape[1] != expected_dim:
+        raise RuntimeError(
+            f"legal_action_features_padded feature dim {features_arr.shape[1]} != expected {expected_dim}"
+        )
+
+    expected_names = getattr(wrapper, "LEGAL_ACTION_FEATURE_NAMES", ())
+    if expected_names and len(expected_names) != expected_dim:
+        raise RuntimeError(
+            f"LEGAL_ACTION_FEATURE_NAMES length {len(expected_names)} != feature dim {expected_dim}"
+        )
+
+    valid_slot_indices = np.nonzero(valid)[0]
+    selected_ids = [int(ids[slot_idx]) for slot_idx in valid_slot_indices]
+    if len(selected_ids) != len(set(selected_ids)):
+        raise RuntimeError("policy-visible legal global IDs contain duplicates")
+
+    declared = int(info.get("legal_action_count", len(selected_ids)))
+    if declared != len(selected_ids):
+        raise RuntimeError(f"legal_action_count={declared} but visible slot count={len(selected_ids)}")
+
+    catalog = getattr(wrapper, "_catalog", None)
+    n_tiles = int(catalog.n_tiles) if catalog is not None else 121
+    move_offset = int(catalog.offsets["MOVE"]) if catalog is not None and "MOVE" in catalog.offsets else None
+
+    actions: list[dict[str, Any]] = []
+    for menu_slot, slot_idx in enumerate(valid_slot_indices):
+        gid = int(ids[slot_idx])
+        action_type, description = decode_global_action(env, gid)
+        feat_row = features_arr[slot_idx]
+        annotations = action_feature_annotations(feat_row, action_type)
+
+        src_xy = None
+        dst_xy = None
+        if action_type == "MOVE" and catalog is not None and move_offset is not None:
+            local = gid - move_offset
+            src_t, dst_t = divmod(local, n_tiles)
+            src_xy = _tile_xy(catalog, src_t)
+            dst_xy = _tile_xy(catalog, dst_t)
+
+        actions.append(
+            {
+                "slot": int(menu_slot),
+                "padded_slot": int(slot_idx),
+                "global_id": int(gid),
+                "type": str(action_type),
+                "description": str(description),
+                "features": feat_row,
+                "annotations": annotations,
+                "src_xy": src_xy,
+                "dst_xy": dst_xy,
+            }
+        )
+    return actions
 
 
 def visible_state(observation: np.ndarray, info: dict[str, Any]) -> dict[str, Any]:
@@ -142,39 +485,249 @@ def visible_state(observation: np.ndarray, info: dict[str, Any]) -> dict[str, An
         "stars": int(round(float(obs[legacy]))),
         "score": int(round(float(obs[legacy + 1]))),
         "city_count": int(round(float(obs[legacy + 2]))),
+        "kills": int(round(float(obs[legacy + 3]))),
         "turn": int(round(float(obs[scalar + 2]) * 10.0)),
         "spt": int(round(float(obs[scalar + 1]) * 30.0)),
+        "turns_remaining_after_current": float(obs[scalar + 3]),
+        "turns_remaining_including_current": float(obs[scalar + 4]),
         "tech_organization": bool(obs[scalar + 5] >= 0.5),
         "tech_forestry": bool(obs[scalar + 6] >= 0.5),
         "tech_count": int(round(float(obs[scalar + 7]) * 24.0)),
         "avg_city_level": float(obs[scalar + 9]) * 5.0,
         "max_city_level": float(obs[scalar + 10]) * 5.0,
+        "mean_upgrade_progress": float(obs[scalar + 11]),
+        "max_upgrade_progress": float(obs[scalar + 12]),
+        "upgrade_ready_frac": float(obs[scalar + 13]),
+        "any_level_up_available": bool(obs[scalar + 14] >= 0.5),
         "visible_unit_count": int(np.sum(units > 0)),
     }
 
 
-def visible_map_lines(state: dict[str, Any]) -> list[str]:
+def _legacy_compact_map_lines(state: dict[str, Any]) -> list[str]:
     width, height = int(state["width"]), int(state["height"])
     terrain = state["terrain"]
     units = state["unit_ids"]
     resources = state["resources"]
-    lines = ["Visible map (terrain/unit/resource; ? is fog)"]
-    lines.append("    " + " ".join(f"{x:>3}" for x in range(width)))
+    lines = ["Visible map: [Terrain Unit Resource] (? = fog)"]
+    header_cells = [f"{x:^5}" for x in range(width)]
+    lines.append("     " + " ".join(header_cells))
+    lines.append("    +" + "-----+" * width)
     for y in range(height):
-        cells = []
+        row_cells = []
         for x in range(width):
             tile = x * height + y
             terrain_id = int(terrain[tile])
             if terrain_id == 7:
-                cells.append("???")
+                row_cells.append(" ??? ")
                 continue
             terr = TERRAIN_SYMBOLS.get(terrain_id, str(terrain_id)[-1])
             unit = "U" if int(units[tile]) > 0 else "."
-            resource = RESOURCE_SYMBOLS.get(int(resources[tile]), ".")
-            cells.append(f"{terr}{unit}{resource}")
-        lines.append(f"{y:>3} " + " ".join(cells))
-    lines.append("Legend: .=plain ~=water D=deep M=mountain V=village C=city F=forest; U=visible unit")
-    lines.append("Resources: a=animal f=fruit h=fish w=whale o=ore c=crops r=ruin")
+            res_id = int(resources[tile])
+            res = RESOURCE_SYMBOLS.get(res_id, ".") if res_id >= 0 else "."
+            row_cells.append(f" {terr}{unit}{res} ")
+        lines.append(f"{y:>3} |" + "|".join(row_cells) + "|")
+        lines.append("    +" + "-----+" * width)
+    lines.append("Terrain: .=plain ~=water D=deep M=mountain V=village C=city T=forest")
+    lines.append("Occupants: U=visible unit; Resources: a=animal f=fruit h=fish w=whale o=ore c=crops r=ruin")
+    return lines
+
+
+def visible_map_lines(
+    state: dict[str, Any],
+    actions: list[dict[str, Any]] | None = None,
+    use_ansi: bool | None = None,
+    unicode_chars: bool | None = None,
+    mode: str = "tactical",
+) -> list[str]:
+    """Generate human-readable map lines using colored tactical display or monochrome fallback."""
+    if mode == "compact_symbolic":
+        return _legacy_compact_map_lines(state)
+
+    if use_ansi is None:
+        use_ansi = supports_ansi_color()
+    if unicode_chars is None:
+        unicode_chars = supports_unicode()
+
+    width, height = int(state["width"]), int(state["height"])
+    terrain = state["terrain"]
+    city_ids = state["city_ids"]
+    resources = state["resources"]
+
+    unit_list = extract_visible_units(state, actions)
+    unit_map = {u["pos"]: u["number"] for u in unit_list}
+
+    lines = [f"Tactical Map ({'ANSI Color' if use_ansi else 'Monochrome Fallback'}):"]
+    header_cells = [f"{x:>3}" for x in range(width)]
+    lines.append("     " + " ".join(header_cells))
+    lines.append("    +" + "---+" * width)
+
+    territory_dot = "·" if unicode_chars else "."
+
+    for y in range(height):
+        row_cells = []
+        for x in range(width):
+            tile = x * height + y
+            terrain_id = int(terrain[tile])
+            res_id = int(resources[tile])
+            u_num = unit_map.get((x, y))
+            c_id = int(city_ids[tile])
+
+            if terrain_id == 7:  # Fog
+                if use_ansi:
+                    row_cells.append(f"{FG_FOG}{BG_FOG} ? {ANSI_RESET}")
+                else:
+                    row_cells.append(" ? ")
+                continue
+
+            # Visible Unit
+            if u_num is not None:
+                u_str = f"{u_num}" if u_num < 10 else f"{u_num % 10}"
+                if use_ansi:
+                    if terrain_id == 5:
+                        bg = BG_CITY
+                    elif terrain_id == 4:
+                        bg = BG_VILLAGE
+                    elif terrain_id == 6:
+                        bg = BG_FOREST
+                    elif terrain_id == 3:
+                        bg = BG_MOUNTAIN
+                    elif terrain_id in (1, 2):
+                        bg = BG_WATER
+                    else:
+                        bg = BG_PLAIN
+                    row_cells.append(f"{FG_UNIT}{bg} {u_str} {ANSI_RESET}")
+                else:
+                    if terrain_id == 5:
+                        row_cells.append(f"C{u_str} ")
+                    elif terrain_id == 4:
+                        row_cells.append(f"V{u_str} ")
+                    elif terrain_id == 6:
+                        row_cells.append(f"T{u_str} ")
+                    elif terrain_id == 3:
+                        row_cells.append(f"M{u_str} ")
+                    elif terrain_id in (1, 2):
+                        row_cells.append(f"~{u_str} ")
+                    elif res_id == 2:
+                        row_cells.append(f"A{u_str} ")
+                    elif res_id == 1:
+                        row_cells.append(f"F{u_str} ")
+                    else:
+                        row_cells.append(f" {u_str} ")
+                continue
+
+            # City Center
+            if terrain_id == 5:
+                if use_ansi:
+                    row_cells.append(f"{FG_CITY}{BG_CITY} C {ANSI_RESET}")
+                else:
+                    row_cells.append(" C ")
+                continue
+
+            # Village
+            if terrain_id == 4:
+                if use_ansi:
+                    row_cells.append(f"{FG_VILLAGE}{BG_VILLAGE} V {ANSI_RESET}")
+                else:
+                    row_cells.append(" V ")
+                continue
+
+            # Resources
+            if res_id == 2:  # Animal
+                if use_ansi:
+                    bg = BG_FOREST if terrain_id == 6 else BG_PLAIN
+                    row_cells.append(f"{FG_ANIMAL}{bg} A {ANSI_RESET}")
+                else:
+                    row_cells.append("Ta " if terrain_id == 6 else " A ")
+                continue
+            elif res_id == 1:  # Fruit
+                if use_ansi:
+                    bg = BG_FOREST if terrain_id == 6 else BG_PLAIN
+                    row_cells.append(f"{FG_FRUIT}{bg} F {ANSI_RESET}")
+                else:
+                    row_cells.append("Tf " if terrain_id == 6 else " F ")
+                continue
+            elif res_id == 0:  # Fish
+                if use_ansi:
+                    row_cells.append(f"{FG_FISH}{BG_WATER} H {ANSI_RESET}")
+                else:
+                    row_cells.append(" H ")
+                continue
+            elif res_id == 3:  # Whale
+                if use_ansi:
+                    row_cells.append(f"{FG_WHALE}{BG_WATER} W {ANSI_RESET}")
+                else:
+                    row_cells.append(" W ")
+                continue
+            elif res_id == 5:  # Ore
+                if use_ansi:
+                    bg = BG_MOUNTAIN if terrain_id == 3 else BG_PLAIN
+                    row_cells.append(f"{FG_ORE}{bg} O {ANSI_RESET}")
+                else:
+                    row_cells.append("Mo " if terrain_id == 3 else " O ")
+                continue
+            elif res_id == 6:  # Crops
+                if use_ansi:
+                    row_cells.append(f"{FG_CROPS}{BG_PLAIN} P {ANSI_RESET}")
+                else:
+                    row_cells.append(" P ")
+                continue
+            elif res_id == 7:  # Ruin
+                if use_ansi:
+                    bg = BG_FOREST if terrain_id == 6 else BG_PLAIN
+                    row_cells.append(f"{FG_RUIN}{bg} R {ANSI_RESET}")
+                else:
+                    row_cells.append("Tr " if terrain_id == 6 else " R ")
+                continue
+
+            # Empty Terrain
+            if terrain_id == 6:  # Forest
+                if use_ansi:
+                    row_cells.append(f"{FG_FOREST}{BG_FOREST} T {ANSI_RESET}")
+                else:
+                    row_cells.append(" T ")
+            elif terrain_id == 3:  # Mountain
+                if use_ansi:
+                    row_cells.append(f"{FG_MOUNTAIN}{BG_MOUNTAIN} M {ANSI_RESET}")
+                else:
+                    row_cells.append(" M ")
+            elif terrain_id == 1:  # Shallow Water
+                if use_ansi:
+                    row_cells.append(f"{FG_WATER}{BG_WATER} ~ {ANSI_RESET}")
+                else:
+                    row_cells.append(" ~ ")
+            elif terrain_id == 2:  # Deep Water
+                if use_ansi:
+                    row_cells.append(f"{FG_WATER}{BG_DEEP_WATER} D {ANSI_RESET}")
+                else:
+                    row_cells.append(" D ")
+            else:  # Plain (0)
+                if c_id > 0:  # City territory
+                    if use_ansi:
+                        row_cells.append(f"{FG_TERRITORY}{BG_PLAIN} {territory_dot} {ANSI_RESET}")
+                    else:
+                        row_cells.append(" . ")
+                else:
+                    if use_ansi:
+                        row_cells.append(f"{FG_PLAIN}{BG_PLAIN} . {ANSI_RESET}")
+                    else:
+                        row_cells.append(" . ")
+
+        lines.append(f"{y:>3} |" + "|".join(row_cells) + "|")
+        lines.append("    +" + "---+" * width)
+
+    if use_ansi:
+        lines.append("Terrain (bg): plain=neutral forest=green water=blue mountain=gray city=cyan village=gold fog=dark")
+        lines.append("Glyphs: 1,2..=unit T=forest C=city V=village A=animal F=fruit H=fish W=whale O=ore P=crops R=ruin ?=fog")
+    else:
+        lines.append("Terrain: .=plain T=forest M=mountain ~=water D=deep water C=city V=village ?=fog")
+        lines.append("Glyphs: 1,2..=unit A=animal F=fruit H=fish W=whale O=ore P=crops R=ruin")
+
+    if unit_list:
+        unit_descs = [f"[{u['number']}] {u['type']} at {u['pos']}" for u in unit_list]
+        lines.append("Units: " + " | ".join(unit_descs))
+    else:
+        lines.append("Units: none")
+
     return lines
 
 
@@ -182,14 +735,27 @@ def visible_metrics(state: dict[str, Any]) -> dict[str, Any]:
     return {
         key: state[key]
         for key in (
-            "turn", "stars", "spt", "city_count", "visible_unit_count", "tech_count",
-            "tech_organization", "tech_forestry", "avg_city_level", "max_city_level",
+            "turn",
+            "stars",
+            "spt",
+            "city_count",
+            "visible_unit_count",
+            "tech_count",
+            "tech_organization",
+            "tech_forestry",
+            "avg_city_level",
+            "max_city_level",
+            "mean_upgrade_progress",
+            "max_upgrade_progress",
+            "upgrade_ready_frac",
+            "any_level_up_available",
         )
+        if key in state
     }
 
 
 def capture_environment_contract(env: Any, info: dict[str, Any]) -> dict[str, Any]:
-    wrapper = env.unwrapped
+    wrapper = getattr(env, "unwrapped", env)
     map_width = info["map_width"] if "map_width" in info else wrapper._catalog.width
     map_height = info["map_height"] if "map_height" in info else wrapper._catalog.height
     observation_dim = (
@@ -251,7 +817,7 @@ def capture_environment_contract(env: Any, info: dict[str, Any]) -> dict[str, An
 
 
 def validate_official_contract(env: Any, info: dict[str, Any]) -> None:
-    wrapper = env.unwrapped
+    wrapper = getattr(env, "unwrapped", env)
     if type(wrapper).__name__ != "TribesGymWrapper":
         raise RuntimeError(f"official benchmark requires TribesGymWrapper, got {type(wrapper).__name__}")
     if str(info.get("info_mode")) != SAFE_INFO_MODE:
@@ -263,21 +829,102 @@ def validate_official_contract(env: Any, info: dict[str, Any]) -> None:
         )
     if int(info.get("global_action_space_n", -1)) != int(env.action_space.n):
         raise RuntimeError("global action-space metadata disagrees with the environment")
-    policy_visible_ids(info)
+    policy_visible_actions(env, info)
 
 
-def _print_actions(actions: list[dict[str, Any]], page: int, page_size: int, output: Callable[[str], None]) -> int:
+def _print_actions(
+    actions: list[dict[str, Any]],
+    page: int,
+    page_size: int,
+    output: Callable[[str], None],
+    state: dict[str, Any] | None = None,
+    unicode_arrows: bool | None = None,
+) -> int:
     pages = max(1, (len(actions) + page_size - 1) // page_size)
     page = max(0, min(page, pages - 1))
     start, end = page * page_size, min(len(actions), (page + 1) * page_size)
-    output(f"Legal policy actions {start}-{end - 1} of {len(actions) - 1} (page {page + 1}/{pages})")
-    last_type = None
-    for index in range(start, end):
-        action = actions[index]
-        if action["type"] != last_type:
-            output(f"  [{action['type']}]")
-            last_type = action["type"]
-        output(f"  {index:>3}: gid={action['global_id']:>6}  {action['description']}")
+    output(f"--- Legal Policy Actions ({start} to {end - 1} of {len(actions) - 1}; Page {page + 1}/{pages}) ---")
+
+    if unicode_arrows is None:
+        unicode_arrows = supports_unicode()
+
+    unit_list = extract_visible_units(state, actions) if state is not None else []
+
+    groups: list[tuple[str, str, list[int]]] = []
+
+    move_indices = [idx for idx, a in enumerate(actions) if a["type"] == "MOVE"]
+    if move_indices:
+        moves_by_src: dict[tuple[int, int], list[int]] = {}
+        for idx in move_indices:
+            src = actions[idx].get("src_xy")
+            if src is not None:
+                moves_by_src.setdefault(src, []).append(idx)
+
+        handled_moves: set[int] = set()
+        for u in unit_list:
+            pos = u["pos"]
+            if pos in moves_by_src:
+                u_moves = moves_by_src[pos]
+                groups.append((
+                    f"MOVE_UNIT_{u['number']}",
+                    f"MOVES - UNIT {u['number']} at {pos}",
+                    u_moves,
+                ))
+                handled_moves.update(u_moves)
+
+        unhandled = [idx for idx in move_indices if idx not in handled_moves]
+        if unhandled:
+            groups.append(("MOVE_OTHER", "MOVES - OTHER", unhandled))
+
+    for sec_name, sec_types in SECTION_DEFINITIONS:
+        if sec_name == "MOVEMENT":
+            continue
+        sec_indices = [idx for idx, a in enumerate(actions) if a["type"] in sec_types]
+        if sec_indices:
+            groups.append((sec_name, sec_name, sec_indices))
+
+    classified_indices = {idx for _, _, idcs in groups for idx in idcs}
+    remaining = [idx for idx in range(len(actions)) if idx not in classified_indices]
+    if remaining:
+        groups.append(("OTHER", "OTHER", remaining))
+
+    flattened_slots: list[tuple[str, int]] = []
+    for _gkey, gheader, idcs in groups:
+        for idx in idcs:
+            flattened_slots.append((gheader, idx))
+
+    page_items = flattened_slots[start:end]
+
+    current_header = None
+    for gheader, action_idx in page_items:
+        action = actions[action_idx]
+        if gheader != current_header:
+            current_header = gheader
+            output(f"\n[{gheader}]")
+
+        a_type = action["type"]
+        if a_type == "MOVE":
+            src = action.get("src_xy")
+            dst = action.get("dst_xy")
+            if src is not None and dst is not None:
+                arrow = move_direction(src, dst, unicode_arrow=unicode_arrows)
+                ann_str = " | ".join(action.get("annotations", []))
+                if ann_str:
+                    output(f"  [{action['slot']:>3}] {arrow} {dst}   {ann_str}  (gid={action['global_id']})")
+                else:
+                    output(f"  [{action['slot']:>3}] {arrow} {dst}  (gid={action['global_id']})")
+            else:
+                output(f"  [{action['slot']:>3}] {action['description']}  (gid={action['global_id']})")
+                ann_str = " | ".join(action.get("annotations", []))
+                if ann_str:
+                    output(f"        * {ann_str}")
+        else:
+            output(f"  [{action['slot']:>3}] {action['description']}  (gid={action['global_id']})")
+            ann_str = " | ".join(action.get("annotations", []))
+            if ann_str:
+                output(f"        * {ann_str}")
+
+    output("")
     return page
 
 
@@ -334,12 +981,21 @@ def run_policy_visible_episode(
             state_callback(env, observation, info)
         output_fn("")
         output_fn(
-            f"Turn {state['turn']} | stars={state['stars']} | SPT={state['spt']} | "
-            f"cities={state['city_count']} | visible units={state['visible_unit_count']}"
+            f"=== Turn {state['turn']}/10 | Stars {state['stars']} | SPT {state['spt']} | "
+            f"Cities {state['city_count']} | Visible units {state['visible_unit_count']} ==="
         )
-        for line in visible_map_lines(state):
+        for line in visible_map_lines(state, actions=actions):
             output_fn(line)
-        page = _print_actions(actions, page, max(1, int(page_size)), output_fn)
+        output_fn("")
+        output_fn("Economy & Cities:")
+        output_fn(
+            f"  Avg city level:        {state['avg_city_level']:.2f}  | Max city level:       {state['max_city_level']:.0f}\n"
+            f"  Mean upgrade progress: {int(round(state['mean_upgrade_progress'] * 100))}%  | Max upgrade progress: {int(round(state['max_upgrade_progress'] * 100))}%\n"
+            f"  Cities upgrade-ready:  {int(round(state['upgrade_ready_frac'] * 100))}%  | Level-up available:   {'yes' if state['any_level_up_available'] else 'no'}\n"
+            f"  Techs researched:      {state['tech_count']}   (Organization: {'yes' if state['tech_organization'] else 'no'}, Forestry: {'yes' if state['tech_forestry'] else 'no'})"
+        )
+        output_fn("")
+        page = _print_actions(actions, page, max(1, int(page_size)), output_fn, state=state)
 
         selected_gid: int | None = None
         if selector is not None:
@@ -355,10 +1011,10 @@ def run_policy_visible_episode(
                         visible_metrics(state), {}, contract, history,
                     )
                 if lowered == "n":
-                    page = _print_actions(actions, page + 1, max(1, int(page_size)), output_fn)
+                    page = _print_actions(actions, page + 1, max(1, int(page_size)), output_fn, state=state)
                     continue
                 if lowered == "p":
-                    page = _print_actions(actions, page - 1, max(1, int(page_size)), output_fn)
+                    page = _print_actions(actions, page - 1, max(1, int(page_size)), output_fn, state=state)
                     continue
                 if lowered.startswith("g "):
                     try:
