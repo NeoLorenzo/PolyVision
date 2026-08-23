@@ -2,6 +2,51 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Py4J_Bridge_Throughput_Optimization-035] - (2026-08-23)
+
+### Scope
+- Implemented and validated two semantics-preserving Java/Py4J bridge throughput optimizations for Phase 1 pre-training:
+  1. Defaulted to the batched legal-action JSON bridge (`POLYVISION_BATCH_LEGAL_ACTION_FETCH="1"`) with legacy fallback (`"0"`).
+  2. Eliminated 4 redundant Py4J round trips per step (`self._env.isDone()`, `self._env.getScores()`, `self._env.getTick()`, and `self._env.getActiveTribeID()`) in `TribesGymEnv.step()` by deriving them fail-closed from the already-deserialized `obs` JSON payload (`POLYVISION_DERIVE_OBS_METADATA="1"`).
+- Added fail-closed runtime contract validation for observation metadata and optional runtime assertion checking (`POLYVISION_OBS_METADATA_EQUIV_CHECK`).
+- Created a dedicated Py4J metadata equivalence test suite (`tools/tests/test_py4j_metadata_equivalence.py`) auditing single-tribe and multi-tribe states.
+- Created an action-rich transition equivalence validator (`tools/validate_transition_equivalence.py`) verifying all 18 transition invariants side-by-side across training maps.
+- Created a deterministic SPS microbenchmarking tool (`tools/benchmark_bridge_throughput.py`) evaluating baseline vs batch-only vs fully optimized environment transitions/second on training maps.
+
+### Rationale
+- In the baseline path, `TribesGymEnv.list_actions()` fetched Java action strings individually across the Py4J gateway, incurring per-element bridge serialization overhead. In batch mode, Java packages all legal actions into a single JSON array string, eliminating per-element bridge round trips and accelerating Python-side action parsing by ~43x.
+- In `TribesGymEnv.step()`, four separate Py4J bridge calls (`isDone()`, `getScores()`, `getTick()`, `getActiveTribeID()`) were issued immediately following `observationJson()`, even though `observationJsonFromState()` already serializes `gameIsOver`, `tick`, `activeTribeID`, and `tribes[*].score` from the identical game state.
+- Auditing demonstrated that deriving these values directly from `obs` produces bitwise-identical results across both single-tribe and multi-tribe states while saving 4 network round trips per environment step.
+
+### Implemented
+- Updated `pol_env/Tribes/py/gym_env.py`:
+  - Defaulted `POLYVISION_BATCH_LEGAL_ACTION_FETCH` to `"1"` (legacy fallback retained via `"0"`).
+  - Defaulted `POLYVISION_DERIVE_OBS_METADATA` to `"1"` (legacy fallback retained via `"0"`).
+  - Added `POLYVISION_OBS_METADATA_EQUIV_CHECK` for fail-closed assertion checking against direct Java calls.
+  - Implemented strict, fail-closed extraction for `done`, `tick`, `active_tribe_id`, and `scores` in `step()`.
+  - Updated SPS profiling breakdowns to record `obs_metadata_derive_s` and zeroed bridge call durations.
+- Created `tools/tests/test_py4j_metadata_equivalence.py`:
+  - Audits `isDone()`, `getTick()`, `getActiveTribeID()`, and `getScores()` against observation fields across single-tribe and multi-tribe maps.
+- Created `tools/validate_transition_equivalence.py`:
+  - Runs Legacy vs Optimized environments side-by-side on identical training maps and action sequences.
+  - Verifies 18 invariant properties after every decision (flattened obs, recursive raw obs, reward, term/trunc, wrapper turn, Java tick, stars, SPT, city count, unit count, raw legal payload, global IDs, valid mask, padded global IDs, 42-d features, catalog fingerprint, Fishing filtering, info dict, global-to-raw index mapping).
+- Created `tools/benchmark_bridge_throughput.py`:
+  - Benchmarks A (Legacy), B (Batch only), and C (Batch + Derived Metadata) on training maps with deterministic seeds and profiling breakdowns.
+
+### Validation
+- `python -m unittest tools/tests/test_py4j_metadata_equivalence.py`: PASS (1,012 states tested: 930 single-tribe, 82 multi-tribe; 0 mismatches across all 4 getters).
+- `python tools/validate_transition_equivalence.py --maps 15 --transitions-per-map 60`: PASS (840 decision states validated across 15 maps; 100% match on all 18 invariants; actions exercised: BUILD=9, CAPTURE=10, CLEAR_FOREST=18, END_TURN=128, EXAMINE=4, LEVEL_UP=31, MOVE=389, RESEARCH_TECH=85, RESOURCE_GATHERING=96, SPAWN=55, Turn-10 truncations=8).
+- `python tools/benchmark_bridge_throughput.py --warmup 50 --transitions 1000 --reps 3`:
+  - Configuration A (Baseline): 123.40 ± 5.19 env transitions/sec
+  - Configuration B (Batch only): 122.96 ± 1.36 env transitions/sec
+  - Configuration C (Fully Optimized): 134.71 ± 6.92 env transitions/sec (+9.16% speedup vs baseline, legal action parsing reduced from 1.38s to 0.03s, metadata bridge calls reduced from 0.49s to 0.00s).
+- `python -m unittest discover tools/tests`: 42/42 tests passed.
+- `python -m unittest discover pol_env/Tribes/py/tests`: 20/20 tests passed.
+- `python tools/validate_human_benchmark_parity.py --maps 5 --states-per-map 10`: PASS.
+- `python tools/diagnose_phase1_turn_economy.py`: PASS (all 9 turn transitions verified).
+- `python tools/validate_environment_contract.py --expected-width 11 --expected-height 11 --max-maps 20`: PASS (20/20 maps verified).
+- `python pol_env/Tribes/py/validate_action_interface.py`: PASS (10,000 decision states verified).
+
 ## [Phase1-V3_Turn_Economy_Drylands_Fishing_Mask_Pre_Training_Freeze-034] - (2026-08-23)
 
 ### Scope

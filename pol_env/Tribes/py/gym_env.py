@@ -38,7 +38,7 @@ class TribesGymEnv:
             os.environ.get("POLYVISION_PROFILE_SPS", "0")
         ).strip().lower() in ("1", "true", "yes", "on")
         self._batch_legal_action_fetch_enabled = str(
-            os.environ.get("POLYVISION_BATCH_LEGAL_ACTION_FETCH", "0")
+            os.environ.get("POLYVISION_BATCH_LEGAL_ACTION_FETCH", "1")
         ).strip().lower() in ("1", "true", "yes", "on")
         self._batch_legal_fetch_equiv_check_enabled = str(
             os.environ.get("POLYVISION_BATCH_LEGAL_FETCH_EQUIV_CHECK", "0")
@@ -50,6 +50,12 @@ class TribesGymEnv:
             )
         except Exception:
             self._batch_legal_fetch_equiv_check_every_n = 50
+        self._derive_obs_metadata_enabled = str(
+            os.environ.get("POLYVISION_DERIVE_OBS_METADATA", "1")
+        ).strip().lower() in ("1", "true", "yes", "on")
+        self._obs_metadata_equiv_check_enabled = str(
+            os.environ.get("POLYVISION_OBS_METADATA_EQUIV_CHECK", "0")
+        ).strip().lower() in ("1", "true", "yes", "on")
         self._list_actions_call_count = 0
         self._last_obs = None
         self._last_spt = 0.0
@@ -90,11 +96,6 @@ class TribesGymEnv:
         if self._profile_sps_enabled:
             profile["java_response_parse_s"] = float(time.perf_counter() - t_obs_parse0)
 
-        t_done0 = time.perf_counter() if self._profile_sps_enabled else None
-        done = bool(self._env.isDone())
-        if self._profile_sps_enabled:
-            profile["java_done_fetch_s"] = float(time.perf_counter() - t_done0)
-
         t_spt0 = time.perf_counter() if self._profile_sps_enabled else None
         current_spt = self._compute_spt_from_obs(obs, tribe_id=0)
         if self._profile_sps_enabled:
@@ -102,21 +103,66 @@ class TribesGymEnv:
         reward = float(current_spt - prev_spt)
         self._last_spt = current_spt
 
-        t_scores0 = time.perf_counter() if self._profile_sps_enabled else None
-        scores = list(self._env.getScores())
-        if self._profile_sps_enabled:
-            profile["java_scores_fetch_s"] = float(time.perf_counter() - t_scores0)
-        tribe0_score = scores[0] if scores else 0
+        if self._derive_obs_metadata_enabled:
+            t_meta0 = time.perf_counter() if self._profile_sps_enabled else None
+            try:
+                done = bool(obs["gameIsOver"])
+                tick = int(obs["tick"])
+                active_tribe_id = int(obs["activeTribeID"])
+                tribes_data = obs["tribes"]
+                if not isinstance(tribes_data, dict):
+                    raise TypeError(f"obs['tribes'] must be dict, got {type(tribes_data)}")
+                sorted_tribes = sorted(
+                    tribes_data.items(),
+                    key=lambda item: int(item[0])
+                )
+                scores = [int(v["score"]) for _, v in sorted_tribes]
+            except (KeyError, TypeError, ValueError) as exc:
+                raise RuntimeError(
+                    f"Observation metadata contract violation: {exc}"
+                ) from exc
+            tribe0_score = scores[0] if scores else 0
+            if self._profile_sps_enabled:
+                profile["obs_metadata_derive_s"] = float(time.perf_counter() - t_meta0)
+                profile["java_done_fetch_s"] = 0.0
+                profile["java_scores_fetch_s"] = 0.0
+                profile["java_tick_fetch_s"] = 0.0
+                profile["java_active_tribe_fetch_s"] = 0.0
 
-        t_tick0 = time.perf_counter() if self._profile_sps_enabled else None
-        tick = int(self._env.getTick())
-        if self._profile_sps_enabled:
-            profile["java_tick_fetch_s"] = float(time.perf_counter() - t_tick0)
+            if self._obs_metadata_equiv_check_enabled:
+                ref_done = bool(self._env.isDone())
+                ref_scores = list(self._env.getScores())
+                ref_tick = int(self._env.getTick())
+                ref_active_tribe_id = int(self._env.getActiveTribeID())
+                if done != ref_done:
+                    raise RuntimeError(f"METADATA_EQUIV mismatch: done={done} vs java={ref_done}")
+                if tick != ref_tick:
+                    raise RuntimeError(f"METADATA_EQUIV mismatch: tick={tick} vs java={ref_tick}")
+                if active_tribe_id != ref_active_tribe_id:
+                    raise RuntimeError(f"METADATA_EQUIV mismatch: activeTribeID={active_tribe_id} vs java={ref_active_tribe_id}")
+                if scores != ref_scores:
+                    raise RuntimeError(f"METADATA_EQUIV mismatch: scores={scores} vs java={ref_scores}")
+        else:
+            t_done0 = time.perf_counter() if self._profile_sps_enabled else None
+            done = bool(self._env.isDone())
+            if self._profile_sps_enabled:
+                profile["java_done_fetch_s"] = float(time.perf_counter() - t_done0)
 
-        t_active0 = time.perf_counter() if self._profile_sps_enabled else None
-        active_tribe_id = int(self._env.getActiveTribeID())
-        if self._profile_sps_enabled:
-            profile["java_active_tribe_fetch_s"] = float(time.perf_counter() - t_active0)
+            t_scores0 = time.perf_counter() if self._profile_sps_enabled else None
+            scores = list(self._env.getScores())
+            if self._profile_sps_enabled:
+                profile["java_scores_fetch_s"] = float(time.perf_counter() - t_scores0)
+            tribe0_score = scores[0] if scores else 0
+
+            t_tick0 = time.perf_counter() if self._profile_sps_enabled else None
+            tick = int(self._env.getTick())
+            if self._profile_sps_enabled:
+                profile["java_tick_fetch_s"] = float(time.perf_counter() - t_tick0)
+
+            t_active0 = time.perf_counter() if self._profile_sps_enabled else None
+            active_tribe_id = int(self._env.getActiveTribeID())
+            if self._profile_sps_enabled:
+                profile["java_active_tribe_fetch_s"] = float(time.perf_counter() - t_active0)
 
         info = {
             "tick": tick,
