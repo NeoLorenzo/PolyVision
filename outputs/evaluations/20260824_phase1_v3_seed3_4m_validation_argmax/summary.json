@@ -1,0 +1,55 @@
+{
+  "bootstrap": {
+    "method": "fixed-seed nonparametric percentile bootstrap; stochastic headline bootstraps per-map replicate means",
+    "samples": 5000
+  },
+  "canonical": false,
+  "evaluation_id": "20260824_phase1_v3_seed3_4m_validation_argmax",
+  "evaluation_schema_version": "polyvision-phase1-evaluation-v1",
+  "paired": {
+    "ppo_argmax_vs_random_legal": null,
+    "ppo_argmax_vs_visible_greedy": null,
+    "ppo_sampled_vs_random_legal": null
+  },
+  "policies": {
+    "ppo_argmax": {
+      "episode_level": {
+        "count": 250,
+        "max": 26.0,
+        "mean": 17.088,
+        "mean_ci95": [
+          16.656,
+          17.544
+        ],
+        "median": 17.0,
+        "min": 6.0,
+        "p05": 12.0,
+        "p25": 14.0,
+        "p75": 20.0,
+        "p95": 23.0,
+        "stddev": 3.601686352018073
+      },
+      "episodes": 250,
+      "headline_level": "map_level",
+      "map_level": {
+        "count": 250,
+        "max": 26.0,
+        "mean": 17.088,
+        "mean_ci95": [
+          16.636,
+          17.54
+        ],
+        "median": 17.0,
+        "min": 6.0,
+        "p05": 12.0,
+        "p25": 14.0,
+        "p75": 20.0,
+        "p95": 23.0,
+        "stddev": 3.601686352018073
+      },
+      "maps": 250
+    }
+  },
+  "pool": "validation",
+  "primary_metric": "final Turn-10 stars per turn"
+}

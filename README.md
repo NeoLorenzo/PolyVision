@@ -167,6 +167,7 @@ Historical Seed-1 and Seed-2 runs remain preserved for their respective historic
 - [Training](docs/training.md)
 - [Evaluation](docs/evaluation.md)
 - [Phase 1 v3 Seed3 16M Reference Run](docs/results/Phase1_V3_Seed3_16M_Reference_Run.md)
+- [Phase 1 v3 Seed3 16M Behavioral Failure Analysis](docs/results/Phase1_V3_Seed3_16M_Behavioral_Failure_Analysis.md)
 - [First Phase 1 validation results (Historical)](docs/results/PolyVision_Phase1_Validation_Results.md)
 - [Phase 1 Seed-1 mixed-opening reflection](docs/results/Phase1_Seed1_Mixed_Opening_Validation_Reflection.md)
 - [Phase 1 scripted-opening audit](docs/results/Phase1_Scripted_Opening_Audit.md)

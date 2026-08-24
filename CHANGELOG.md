@@ -2,7 +2,70 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-V3_Seed3_16M_Behavioral_Failure_Analysis_and_Verification-037] - (2026-08-24)
+
+### Scope
+- Completed and documented the comprehensive behavioral failure analysis and empirical hypothesis audit for the frozen reference run `Phase1-Scientific-Train-V3-Seed3.cleanrl_model` (16,000,000 steps, Seed 3).
+- Resolved the apparent metric discrepancy between 0% argmax Forestry adoption and 0.076 mean lumber huts built through environment semantics and instrumentation auditing.
+- Performed descriptive split-episode and within-map paired replicate analyses across all 1,250 canonical validation sampled episodes.
+- Executed a focused, hypothesis-driven diagnostic evaluation of the frozen 4,000,000-step checkpoint (`model_checkpoint_4000000.cleanrl_model`) on all 250 validation maps, refuting the catastrophic-forgetting hypothesis.
+- Systematically audited and classified all failure hypotheses (Verified, Supported but not causal, Speculative, Contradicted) and refined architectural representations and causal framing.
+- Created the authoritative analysis document `docs/results/Phase1_V3_Seed3_16M_Behavioral_Failure_Analysis.md` and updated repository documentation and provenance indices without modifying environment code, rewards, features, hyperparameters, models, maps, or split definitions, and without accessing the test pool.
+
+### Rationale
+- Before designing future algorithmic or reward interventions, behavioral failure diagnoses must be verified against ground-truth episode data, game-engine mechanics, and checkpoint states to prevent implementing fixes based on incorrect assumptions.
+- Rigorous investigation revealed that deterministic PPO exhibited 0.0% explicit Forestry research at both 4M and 16M steps, demonstrating that Forestry was never an established argmax strategy; earlier telemetry observations reflected stochastic sampling over a sub-threshold logit tail (~15–25% probability mass) during exploratory rollouts with active policy entropy.
+- Auditing the Java engine and Python wrapper proved that the 0.076 mean lumber huts in argmax occurred entirely on 2 maps where Ruin `EXAMINE` actions granted random research bonuses, unlocking Forestry directly in Java's `GameState` while Python's `RESEARCH_TECH` action tracker recorded `forestry_researched = 0`. This is an instrumentation scope nuance, not an environment contradiction.
+- Within-map analysis confirms that stochastic rollouts adopting Forestry achieve higher SPT (+2.533 paired mean difference across 237 eligible maps), supporting the hypothesis that delayed economic tech is a key performance bottleneck while maintaining proper distinction between correlation and causation.
+
+### Implemented
+- Created and finalized `docs/results/Phase1_V3_Seed3_16M_Behavioral_Failure_Analysis.md` detailing:
+  - Executive summary with verified empirical findings.
+  - Stratified performance comparisons, trajectory audits, and counterfactual logit extractions.
+  - Complete ruin-granted Forestry instrumentation discovery and step-by-step traces on `map_001171.csv` and `map_001676.csv`.
+  - Sampled PPO Forestry split and within-map paired analysis across 237 eligible maps (184 W / 3 T / 50 L).
+  - 4M diagnostic validation evaluation results (17.088 mean SPT, 0.0% Forestry, 0.048 lumber huts).
+  - Systematic claim classification table and revised confidence in diagnosed bottlenecks.
+  - Open research questions requiring future controlled empirical ablation.
+- Updated `docs/results/Phase1_V3_Seed3_16M_Reference_Run.md` with a link and summary of the completed behavioral failure analysis.
+- Updated `README.md` documentation index to include the behavioral failure analysis.
+- Updated `docs/evaluation.md` documenting the focused 4M diagnostic validation-only evaluation and its explicit role in hypothesis testing (not checkpoint selection or test-pool access).
+- Updated `docs/training.md` with a retrospective note on training telemetry vs deterministic argmax convergence.
+- Updated `docs/rewards.md` with a research-status note regarding ongoing investigation of reward shaping and delayed economic credit assignment.
+- Updated `docs/reproducibility.md` to record the 4M diagnostic validation evaluation artifact (`outputs/evaluations/20260824_phase1_v3_seed3_4m_validation_argmax`).
+
+### Validation
+- **Task 1 (Forestry / Lumber-Hut Consistency):**
+  - Argmax explicit Forestry adoption: exactly 0 / 250 (0.0%).
+  * Argmax maps with $\ge 1$ lumber hut: exactly 2 / 250 (0.80%): `map_001171.csv` (7 huts) and `map_001676.csv` (12 huts); total 19 huts (mean 0.0760).
+  * Root cause traced to `ExamineCommand.java` granting `FORESTRY` via `EXAMINE` actions; Python `_update_economy_counters_from_action` only listens for `RESEARCH_TECH`, preserving original historical metric semantics.
+- **Task 2 (Sampled PPO Forestry Outcomes):**
+  * Evaluated on all 1,250 canonical validation episodes:
+    - With Forestry researched ($N=583$): Mean SPT = 18.806 (median 19.000), mean cities = 4.774, mean units = 12.878, mean stars = 26.762, mean lumber huts = 10.364, mean Forestry turn = 6.276 (median 6.0, min 2, max 10).
+    - Without Forestry researched ($N=667$): Mean SPT = 16.736 (median 17.000), mean cities = 5.147, mean units = 12.649, mean stars = 28.142, mean lumber huts = 0.067.
+    - Raw aggregate difference: +2.070 SPT.
+  * Within-map paired replicate analysis (237 eligible maps with both Forestry and non-Forestry replicates):
+    - Mean paired difference: +2.533 SPT (median +2.500 SPT).
+    - Win / Tie / Loss record: 184 Wins (77.6%) / 3 Ties (1.3%) / 50 Losses (21.1%).
+    - Distribution: $>+4.0$: 74 (31.2%), $+2.0\text{ to }+4.0$: 50 (21.1%), $0.0\text{ to }+2.0$: 60 (25.3%), ties: 3 (1.3%), $-2.0\text{ to }0.0$: 34 (14.3%), $-4.0\text{ to }-2.0$: 13 (5.5%), $<-4.0$: 3 (1.3%).
+    - Explicitly documented as descriptive / associational, not causal.
+  * Large improvement maps audit: Top sampled-advantage maps (`map_004817.csv` +8.60, `map_005425.csv` +8.60, `map_002016.csv` +6.00) strongly coincide with stochastic Forestry adoption and lumber hut construction.
+- **Task 3 (4M Checkpoint Validation Evaluation):**
+  * Checkpoint `runs/Tribes-v0__Phase1-Scientific-Train-V3-Seed3__3__1787526811/model_checkpoint_4000000.cleanrl_model` evaluated on 250 validation maps (deterministic argmax, 1 rep/map, seed 42):
+    - Mean SPT = 17.088 (95% CI [16.64, 17.54], median 17.000).
+    - Explicit Forestry adoption = 0 / 250 (0.0%).
+    - Mean lumber huts = 0.048 (12 huts on 1 ruin-granted map).
+    - Mean final stars = 40.796, mean final units = 13.808, mean final cities = 5.184.
+    - Directly compared to 16M argmax (17.180 mean SPT, 0/250 Forestry, 41.060 stars, 13.800 units, 5.160 cities), contradicting the catastrophic forgetting claim.
+- **Task 4 (Systematic Claim Classification):**
+  * Classified all claims: VERIFIED (0% argmax Forestry, ruin explanation, sampled superiority, 4M argmax 0% Forestry), SUPPORTED BUT NOT CAUSAL (Forestry economic headroom, reward discount barrier, fog/village competition, redundant warrior spawns, state-action interaction representation difficulty), SPECULATIVE (reward shaping as sole root cause, precise expected upsides), CONTRADICTED (catastrophic forgetting of Forestry).
+- **Safety & Contract Integrity:**
+  * Zero test-pool maps evaluated or inspected (strictly confined to development validation pool).
+  * No model selection or checkpoint ranking performed from the 4M diagnostic run.
+  * Zero code, model, map, reward, observation, or feature files modified.
+
 ## [Phase1-V3_Seed3_16M_Reference_Run_Freeze-036] - (2026-08-24)
+
 
 ### Scope
 - Documented and froze the completed PolyVision Phase 1 v3 Seed3 16M reference run (`Phase1-Scientific-Train-V3-Seed3.cleanrl_model`), establishing the frozen reference benchmark for ongoing Phase 1 optimization.

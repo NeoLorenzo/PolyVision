@@ -56,6 +56,15 @@ Evaluated on 250 pristine test maps after checkpoint freeze (3,000 episodes tota
 - **Paired comparisons:** PPO argmax beat visible greedy on all 250 maps (250 W / 0 T / 0 L, +8.93 SPT mean difference). PPO sampled beat random legal on 250/250 maps (+10.84 SPT). PPO argmax beat random legal on 250/250 maps (+10.18 SPT).
 - **Validation $\rightarrow$ Test deltas:** argmax $-0.30$ SPT, sampled $-0.15$ SPT, greedy $+0.03$ SPT, random $+0.03$ SPT.
 
+### Diagnostic 4M Checkpoint Evaluation (`outputs/evaluations/20260824_phase1_v3_seed3_4m_validation_argmax`)
+
+A focused diagnostic evaluation was conducted on the frozen 4,000,000-step checkpoint (`model_checkpoint_4000000.cleanrl_model`) across all 250 validation maps (1 episode per map, deterministic argmax, seed 42) to test the specific hypothesis that PPO learned deterministic Forestry early in training and subsequently forgot it:
+- **Purpose:** Hypothesis testing for behavioral analysis (not checkpoint selection or benchmark ranking).
+- **Scope:** Confined strictly to the development validation pool (250 maps); zero test maps were accessed.
+- **Results:** PPO argmax achieved mean 17.088 Turn-10 SPT (95% CI [16.64, 17.54], median 17.00), 0 / 250 explicit Forestry adoption (0.0%), and 0.048 mean lumber huts (from 1 ruin drop).
+- **Finding:** The 4M deterministic policy behaviorally matched the 16M reference model (17.18 SPT, 0.0% Forestry), refuting the catastrophic forgetting hypothesis and showing that mid-training telemetry reflected stochastic rollout exploration rather than an established argmax strategy.
+
+
 ## Historical Phase 1 Seed-1 validation result
 
 The first complete 3,000-episode suite, `20260814T110912Z_validation_canonical`, evaluated the Seed-1 10M checkpoint across all 250 validation maps. PPO argmax achieved mean T10 SPT 14.576 (map-level bootstrap 95% CI [14.204, 14.948]), compared with 13.678 for PPO sampled, 7.128 for visible greedy, and 5.897 for random legal. PPO argmax beat visible greedy on all 250 paired maps.

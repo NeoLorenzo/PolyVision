@@ -80,7 +80,8 @@ The authoritative frozen reference benchmark for Phase 1 optimization is fully s
 | **Canonical validation evaluation** | `outputs/evaluations/20260824_phase1_v3_seed3_16m_validation_canonical` |
 | **Canonical pristine test evaluation** | `outputs/evaluations/20260824_phase1_v3_seed3_16m_pristine_test` |
 | **Human benchmark agent evaluation** | `outputs/evaluations/20260824_phase1_v3_seed3_16m_human_benchmark_argmax` |
+| **Diagnostic 4M validation evaluation** | `outputs/evaluations/20260824_phase1_v3_seed3_4m_validation_argmax` (focused behavioral diagnostic; validation pool only) |
 
-See [Phase 1 v3 Seed3 16M Reference Run](results/Phase1_V3_Seed3_16M_Reference_Run.md) for full evaluation metrics and paired comparisons.
+See [Phase 1 v3 Seed3 16M Reference Run](results/Phase1_V3_Seed3_16M_Reference_Run.md) for full evaluation metrics and paired comparisons, and [Phase 1 v3 Seed3 16M Behavioral Failure Analysis](results/Phase1_V3_Seed3_16M_Behavioral_Failure_Analysis.md) for detailed behavioral and hypothesis-audit findings.
 
 Human benchmark attempt files additionally record stable map hashes, episode seed, interface contract, reward/filter settings, Git provenance, shaped return, curated terminal metrics, and every chosen stable global ID. Preserve the first completed attempt separately from later replays. `outputs/human_benchmark/summary.json` is derived evidence; individual attempt files and the append-only event index are the durable source. See [Human benchmark](human-benchmark.md).

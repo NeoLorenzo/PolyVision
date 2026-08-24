@@ -47,3 +47,7 @@ Default weights are 1, 2, and 3 respectively and can be changed with the matchin
 The environment reports many economy, research, exploration, action-quality, and tactical-mistake metrics. These are diagnostics unless explicitly included above. In particular, final T10 SPT and training-summary charts should not be mistaken for the per-step reward or for controlled held-out evaluation.
 
 Because Phase 1 is shaped and combat-restricted, its return is not a measure of full-game strength. Report final SPT, city count, expansion timing, research, legality/fallback rates, and raw shaped return separately.
+
+## Research Status on Shaping and Delayed Economic Returns
+
+The interaction between dense step-level shaping rewards (such as immediate fruit/animal gathering deltas and fog clearance bounties) and multi-step delayed economic investments (such as Tier-2 Forestry research) is under active investigation. Behavioral analysis shows that while stochastic policy rollouts frequently explore Forestry, deterministic argmax policies consistently favor immediate Tier-1 actions. See the [Phase 1 v3 Seed3 16M Behavioral Failure Analysis](results/Phase1_V3_Seed3_16M_Behavioral_Failure_Analysis.md) for detailed empirical findings and mechanistic hypotheses regarding temporal credit assignment.

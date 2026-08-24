@@ -142,3 +142,5 @@ The slight drop of $-0.30$ SPT from validation to test confirms strong out-of-di
    Historical V1 and V2 results remain documented and valid exclusively within their respective historical task definitions.
 5. **Active Status:**
    This run serves as the **frozen reference benchmark** for Phase 1. Phase 1 is **not** complete; active optimization continues to target higher Turn-10 SPT efficiency.
+6. **Behavioral Failure Analysis:**
+   A detailed behavioral analysis and hypothesis audit is documented in [Phase 1 v3 Seed3 16M Behavioral Failure Analysis](Phase1_V3_Seed3_16M_Behavioral_Failure_Analysis.md). Key findings establish that deterministic argmax exhibits 0.0% explicit Forestry adoption across all 250 validation maps, while stochastic sampled replicates with Forestry achieve a +2.533 mean paired SPT advantage across 237 within-map comparisons (descriptive association).
