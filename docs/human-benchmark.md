@@ -1,6 +1,6 @@
 # Human benchmark
 
-> **Ready to resume under corrected v2:** the earlier `map_003696.csv` start exposed the historical opening bug; no canonical score was recorded and completed first attempts remain zero. The existing started event remains non-completed historical metadata. Future first attempts use the same `v2_guaranteed_two_unit` wrapper as PPO, which passed all 17/17 benchmark maps.
+> **Current Benchmark Progress (1/17 Completed):** 1 of 17 benchmark maps has a completed canonical first attempt (`map_004393.csv`). Human Turn-10 SPT reached **27**, while the frozen reference agent (Phase 1 v3 Seed3 16M PPO argmax) scored **20** on the same map ($+7$ SPT advantage for human). This single result is an illustrative $n=1$ anecdotal comparison and must **not** be interpreted as a statistically generalizable claim about human versus agent capability. 16 benchmark maps remain unplayed.
 
 The Phase 1 human benchmark is a persistent human-versus-agent challenge on the 17 maps in `levels/phase1_pool_bardur_real/human_benchmark/`. It measures decision quality inside PolyVision's constrained Bardur Turn-10 task. It is not the pristine scientific test set and does not measure unrestricted full-game Polytopia skill.
 
@@ -41,7 +41,7 @@ The official UI is a presentation layer over `TribesGymWrapper`, the same author
 - every active Phase 1 action filter, because neither UI nor registry reimplements filtering;
 - execution through `env.step(global_id)` and the wrapper's maintained global-ID-to-Java-action mapping.
 
-For `actor_mode=legal_features` models (such as Phase 1 Seed2), the official interface translates both the flattened observation and each legal action's 42-dimensional feature row into concise, structured human-readable annotations.
+For `actor_mode=legal_features` models (such as the Phase 1 v3 Seed3 reference model), the official interface translates both the flattened observation and each legal action's 42-dimensional feature row into concise, structured human-readable annotations.
 
 ### Tactical Map and Movement Display
 
@@ -103,10 +103,22 @@ Inspect or regenerate the summary without playing:
 python tools/human_benchmark.py --summary
 ```
 
+### Current Benchmark Status
+
+- **Pool Progress:** 1 / 17 completed canonical first attempts (16 unplayed).
+- **Completed Map:** `map_004393.csv`
+- **Human Turn-10 SPT:** 27
+- **PPO Argmax Turn-10 SPT (v3 Seed3 16M on same map):** 20
+- **Advantage:** Human $+7$ SPT on `map_004393.csv`
+
+The full 17-map PPO argmax baseline is recorded at `outputs/evaluations/20260824_phase1_v3_seed3_16m_human_benchmark_argmax` (mean 16.71 SPT, median 17.00 SPT, 95% CI [14.94, 18.47]).
+
 Automated workflow tests use `--synthetic-smoke` with an explicit non-canonical output directory. Such attempts carry `participant_kind: synthetic_test` and are excluded from every human statistic.
 
 The result format is checkpoint-independent: stable map hashes and episode configuration allow future PPO evaluations to join against human results without changing or replacing the human record.
 
 ## Interpretation
 
-Human benchmark maps may be replayed by people and evaluated repeatedly by future models, and results may influence development. They therefore remain permanently separate from the pristine test pool. Report human challenge results, scientific test generalization, and privileged-oracle diagnostics as different evidence categories. Beating this benchmark does not imply general Polytopia or full-game strength.
+Human benchmark maps may be replayed by people and evaluated repeatedly by future models, and results may influence development. They therefore remain permanently separate from the pristine test pool. Report human challenge results, scientific test generalization, and privileged-oracle diagnostics as different evidence categories.
+
+The current single-map human result ($n=1$) is strictly an illustrative anecdotal comparison and does not constitute generalizable evidence of overall human versus agent capability. Furthermore, beating this benchmark does not imply general Polytopia or full-game strength.

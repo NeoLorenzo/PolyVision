@@ -136,9 +136,11 @@ python tools/human_benchmark.py
 
 The command selects an unplayed human-benchmark map and presents exactly the wrapper-filtered stable global IDs available to PPO. Results remain separate from pristine test evidence; see [Human benchmark](docs/human-benchmark.md).
 
-The first complete canonical validation suite has now evaluated the first properly trained Phase 1 model over 3,000 episodes and all 250 validation maps. PPO argmax reached mean T10 SPT 14.576 and beat the visible-greedy baseline on every paired map. See [PolyVision Phase 1 Validation Results](docs/results/PolyVision_Phase1_Validation_Results.md) for the full reflection, uncertainty, failure cases, and limitations.
+The current frozen reference result is the **Phase 1 v3 Seed3 16M frozen reference benchmark**: on 250 held-out test maps, deterministic PPO achieved 16.88 mean Turn-10 SPT (95% CI 16.46–17.31), compared with 7.96 for the policy-visible greedy baseline. PPO beat greedy on all 250 maps, with a mean advantage of +8.93 SPT. See [Phase 1 v3 Seed3 16M Reference Run](docs/results/Phase1_V3_Seed3_16M_Reference_Run.md) for full metrics, validation/test distributions, paired comparisons, and scientific interpretation.
 
-This was the first long Phase 1 scientific model, but it is now **historical / shelved**, not the final candidate. Its validation informs development under the historical mixed-opening task; a fresh v2 model and new validation are required before pristine capability test.
+Phase 1 is **not** complete; active optimization remains ongoing and 16.88 test argmax SPT serves as the frozen reference benchmark to beat.
+
+Historical Seed-1 and Seed-2 runs remain preserved for their respective historical task definitions. See [Phase 1 Seed-1 mixed-opening reflection](docs/results/Phase1_Seed1_Mixed_Opening_Validation_Reflection.md) and [Phase 1 scripted-opening audit](docs/results/Phase1_Scripted_Opening_Audit.md).
 
 ## Repository structure
 
@@ -164,7 +166,9 @@ This was the first long Phase 1 scientific model, but it is now **historical / s
 - [Rewards](docs/rewards.md)
 - [Training](docs/training.md)
 - [Evaluation](docs/evaluation.md)
-- [First Phase 1 validation results](docs/results/PolyVision_Phase1_Validation_Results.md)
+- [Phase 1 v3 Seed3 16M Reference Run](docs/results/Phase1_V3_Seed3_16M_Reference_Run.md)
+- [First Phase 1 validation results (Historical)](docs/results/PolyVision_Phase1_Validation_Results.md)
+- [Phase 1 Seed-1 mixed-opening reflection](docs/results/Phase1_Seed1_Mixed_Opening_Validation_Reflection.md)
 - [Phase 1 scripted-opening audit](docs/results/Phase1_Scripted_Opening_Audit.md)
 - [Human benchmark](docs/human-benchmark.md)
 - [Maps](docs/maps.md)

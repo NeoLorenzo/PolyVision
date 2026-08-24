@@ -2,6 +2,36 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-V3_Seed3_16M_Reference_Run_Freeze-036] - (2026-08-24)
+
+### Scope
+- Documented and froze the completed PolyVision Phase 1 v3 Seed3 16M reference run (`Phase1-Scientific-Train-V3-Seed3.cleanrl_model`), establishing the frozen reference benchmark for ongoing Phase 1 optimization.
+- Recorded canonical validation (3,000 episodes on 250 held-out validation maps), canonical pristine test (3,000 episodes on 250 pristine test maps), and human benchmark agent evaluation (17 maps) along with limited human attempt data.
+- Created the authoritative run card `docs/results/Phase1_V3_Seed3_16M_Reference_Run.md` and updated repository documentation and provenance indices without modifying code, models, maps, or evaluation outputs.
+
+### Rationale
+- Following environment corrections in v3 (`v3_corrected_turn_economy` with accumulating star balance and Drylands Fishing masking) and throughput optimizations, a 16M timestep scientific run (Seed 3) was completed.
+- Scientific integrity requires freezing the reference checkpoint, sidecar, and evaluation protocol before running pristine test evaluation, and documenting provenance (commit SHA, model SHA, sidecar SHA, split hashes, evaluation directories) completely.
+- Phase 1 optimization remains active; freezing this run establishes a durable, reproducible reference benchmark (16.88 test argmax SPT) against which subsequent algorithmic, architectural, and hyperparameter improvements will be measured.
+- The human benchmark comparison (1 completed attempt out of 17 on `map_004393.csv`: human 27 vs PPO 20) is documented explicitly as an illustrative $n=1$ anecdotal comparison rather than a generalized human-versus-agent capability claim.
+
+### Implemented
+- Created `docs/results/Phase1_V3_Seed3_16M_Reference_Run.md` detailing run provenance, training commands, frozen split hashes, canonical validation/test distributions, paired comparisons, and scientific interpretations.
+- Updated `README.md` to feature the Phase 1 v3 Seed3 16M frozen reference benchmark prominently, reflect ongoing Phase 1 optimization, link the new run card, and preserve historical documentation.
+- Updated `docs/evaluation.md` to record canonical validation (`outputs/evaluations/20260824_phase1_v3_seed3_16m_validation_canonical`) and pristine test (`outputs/evaluations/20260824_phase1_v3_seed3_16m_pristine_test`) results, note pre-test model freezing, and preserve prior methodology.
+- Updated `docs/training.md` with the authoritative 16M Seed3 training command and configuration.
+- Updated `docs/human-benchmark.md` with the 1/17 completed first attempt on `map_004393.csv` (human 27 vs PPO 20, $+7$ delta) and explicit $n=1$ caveat.
+- Updated `docs/reproducibility.md` with complete provenance records for the frozen reference benchmark.
+
+### Validation
+- Verified exact numeric matching across all evaluation artifacts:
+  - Canonical validation: PPO argmax mean 17.18 (95% CI [16.72, 17.66]), sampled 17.70 (95% CI [17.37, 18.03]), visible greedy 7.93, random legal 6.67. Paired: argmax vs greedy 249 W / 0 T / 1 L (+9.25 SPT).
+  - Pristine test: PPO argmax mean 16.88 (95% CI [16.46, 17.31]), sampled 17.55 (95% CI [17.20, 17.89]), visible greedy 7.96, random legal 6.70. Paired: argmax vs greedy 250 W / 0 T / 0 L (+8.93 SPT). Validation $\rightarrow$ test deltas: argmax $-0.30$, sampled $-0.15$, greedy $+0.03$, random $+0.03$.
+  - Human benchmark evaluation: PPO argmax 17-map mean 16.71 (95% CI [14.94, 18.47]); `map_004393.csv` human 27 vs PPO argmax 20 (+7 SPT).
+- Verified SHA-256 hashes for model (`A6803CB00E08522819FDEB74BEDE8816CF131C1F28244C12D44F3EEFB9D2C234`) and sidecar (`0CE2B01464A47506C19BF5C34B4E39F294C992AEA0607AB3755F15D5E10DB736`).
+- Verified split hashes for train (5000: `a99b309...`), validation (250: `a56e74c...`), test (250: `8a8e0f7...`), and human benchmark (17: `adbe5a7...`).
+- Confirmed zero code, model, map, reward, environment, or evaluation files were modified.
+
 ## [Phase1-Py4J_Bridge_Throughput_Optimization-035] - (2026-08-23)
 
 ### Scope

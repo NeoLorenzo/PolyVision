@@ -1,12 +1,14 @@
 # Evaluation
 
-> **Seed-1 is shelved before pristine test.** Its validation remains valid for historical `v1_mixed_capital_regression`, but it is not a candidate for the corrected task. The test maps were reset only for environment-contract audits: no checkpoint, policy action, capability score, or tuning feedback was involved. They remain pristine with respect to model capability evaluation and development feedback.
+> **Current Reference Benchmark:** The active reference baseline is the **Phase 1 v3 Seed3 16M frozen reference benchmark** (`Phase1-Scientific-Train-V3-Seed3.cleanrl_model`), evaluated under `phase1_environment_version=v3_corrected_turn_economy` and `phase1_opening_version=v2_guaranteed_two_unit`. The model and evaluation protocol were frozen prior to running its canonical pristine test evaluation. Phase 1 is **not** complete; active optimization continues.
+>
+> Historical Seed-1 remains shelved and valid only for historical `v1_mixed_capital_regression`.
 
 PolyVision has checkpoint introspection, a canonical Phase 1 batch evaluator, fair policy-visible baselines, contract validators, and historical comparison artifacts. Current-interface multi-seed evidence remains an active research target.
 
-## Canonical Phase 1 validation suite
+## Canonical Phase 1 validation and test suite
 
-`tools/evaluate_phase1.py` is the maintained batch evaluator. The current run is a **validation evaluation**: its results may be inspected and used for future model decisions. The pristine test pool must remain untouched until a candidate checkpoint and protocol are deliberately frozen. The CLI refuses `--pool test` unless `--confirm-test` is also supplied.
+`tools/evaluate_phase1.py` is the maintained batch evaluator. The validation pool (`levels/phase1_pool_bardur_real/validation/*.csv`) is used for model development and checkpoint selection. The pristine test pool (`levels/phase1_pool_bardur_real/test/*.csv`) is evaluated only after a candidate checkpoint and protocol are deliberately frozen. The CLI refuses `--pool test` unless `--confirm-test` is also supplied.
 
 ```powershell
 python tools/evaluate_phase1.py `
@@ -17,7 +19,7 @@ python tools/evaluate_phase1.py `
     --seed 42
 ```
 
-| Policy | Runs per map | Validation maps | Total episodes |
+| Policy | Runs per map | Pool maps | Total episodes |
 |---|---:|---:|---:|
 | PPO argmax | 1 | 250 | 250 |
 | PPO sampled | 5 | 250 | 1,250 |
@@ -31,15 +33,36 @@ Final Turn-10 stars per turn is the primary capability metric; shaped return is 
 
 Outputs are written to `outputs/evaluations/<evaluation_id>/`: `config.json`, `episodes.jsonl`, `per_map.csv`, `summary.json`, `summary.csv`, and `comparison.csv`. Configuration records manifest/pool identity, ordered map hashes, schedule/RNG rules, checkpoint and sidecar hashes, interface metadata, Git/runtime provenance, and relevant `POLYVISION_*` settings. `--max-maps` and nonstandard repeats produce an explicitly partial, smoke, noncanonical result.
 
-## First canonical validation result
+## Canonical v3 Seed3 16M reference results
+
+The authoritative run card is documented in [Phase 1 v3 Seed3 16M Reference Run](results/Phase1_V3_Seed3_16M_Reference_Run.md).
+
+### Validation evaluation (`outputs/evaluations/20260824_phase1_v3_seed3_16m_validation_canonical`)
+
+Evaluated on 250 held-out validation maps (3,000 episodes total):
+- **PPO argmax:** Mean 17.18 Turn-10 SPT (95% CI [16.72, 17.66]), Median 17.00
+- **PPO sampled:** Mean 17.70 Turn-10 SPT (95% CI [17.37, 18.03]), Median 17.60
+- **Visible greedy:** Mean 7.93 Turn-10 SPT (95% CI [7.78, 8.09]), Median 8.00
+- **Random legal:** Mean 6.67 Turn-10 SPT (95% CI [6.58, 6.75]), Median 6.60
+- **Paired comparisons:** PPO argmax beat visible greedy on 249/250 maps (249 W / 0 T / 1 L, +9.25 SPT mean difference). PPO sampled beat random legal on 250/250 maps (+11.03 SPT). PPO argmax beat random legal on 250/250 maps (+10.52 SPT).
+
+### Pristine test evaluation (`outputs/evaluations/20260824_phase1_v3_seed3_16m_pristine_test`)
+
+Evaluated on 250 pristine test maps after checkpoint freeze (3,000 episodes total):
+- **PPO argmax:** Mean 16.88 Turn-10 SPT (95% CI [16.46, 17.31]), Median 17.00
+- **PPO sampled:** Mean 17.55 Turn-10 SPT (95% CI [17.20, 17.89]), Median 17.50
+- **Visible greedy:** Mean 7.96 Turn-10 SPT (95% CI [7.82, 8.10]), Median 8.00
+- **Random legal:** Mean 6.70 Turn-10 SPT (95% CI [6.62, 6.79]), Median 6.60
+- **Paired comparisons:** PPO argmax beat visible greedy on all 250 maps (250 W / 0 T / 0 L, +8.93 SPT mean difference). PPO sampled beat random legal on 250/250 maps (+10.84 SPT). PPO argmax beat random legal on 250/250 maps (+10.18 SPT).
+- **Validation $\rightarrow$ Test deltas:** argmax $-0.30$ SPT, sampled $-0.15$ SPT, greedy $+0.03$ SPT, random $+0.03$ SPT.
+
+## Historical Phase 1 Seed-1 validation result
 
 The first complete 3,000-episode suite, `20260814T110912Z_validation_canonical`, evaluated the Seed-1 10M checkpoint across all 250 validation maps. PPO argmax achieved mean T10 SPT 14.576 (map-level bootstrap 95% CI [14.204, 14.948]), compared with 13.678 for PPO sampled, 7.128 for visible greedy, and 5.897 for random legal. PPO argmax beat visible greedy on all 250 paired maps.
 
 Opening-audit interpretation: the result remains internally valid for the historical mixed-opening task. Training used 55.02% two-unit and 44.98% one-unit maps; validation used 56.40% and 43.60%. Do not reinterpret this result as evaluation under a universal two-unit opening.
 
-Future canonical evaluations record `phase1_opening_version=v2_guaranteed_two_unit`. Historical sidecars lacking that field, or explicitly marked v1, fail corrected-environment compatibility by default. Retrain and revalidate under v2 before considering the pristine capability test.
-
-Read the authoritative [Seed-1 mixed-opening reflection](results/Phase1_Seed1_Mixed_Opening_Validation_Reflection.md). This historical result is preserved but shelved; it is development evidence for v1, not the final Phase 1 candidate or a pristine-test result.
+Read the authoritative [Seed-1 mixed-opening reflection](results/Phase1_Seed1_Mixed_Opening_Validation_Reflection.md). This historical result is preserved but shelved; it is development evidence for v1, not the current Phase 1 reference candidate or a pristine-test result.
 
 ## Inspect one checkpoint
 
@@ -92,6 +115,6 @@ Report mean, median, standard deviation/confidence interval, and percentiles for
 
 ## Interpreting existing evidence
 
-The latest W&B export includes the completed first 10M training run on the current 11×11, 256-slot, 42-feature contract. Its retained values are training snapshots; the canonical validation evidence is the separate 3,000-episode result linked above. Both describe the first Phase 1 model, not the final Phase 1 model.
+The historical W&B export includes the completed 10M training run for Seed-1. Its retained values are training snapshots; canonical evaluation evidence is documented in dedicated validation and test suites. The active reference baseline is the Phase 1 v3 Seed3 16M frozen reference benchmark (`Phase1-Scientific-Train-V3-Seed3.cleanrl_model`), while Phase 1 optimization continues.
 
-The strongest committed repeated-episode comparison is a historical 500-episode PPO-versus-Organization-oracle evaluation. It used an older map/action contract and a map sequence that was not strictly paired between policies. It is useful methodology and milestone evidence but is not directly comparable to current checkpoints. Details live in the clearly marked [historical benchmark registry](history/model-run-benchmark-log.md).
+The strongest committed repeated-episode comparison from early development is a historical 500-episode PPO-versus-Organization-oracle evaluation. It used an older map/action contract and a map sequence that was not strictly paired between policies. It is useful methodology and milestone evidence but is not directly comparable to current checkpoints. Details live in the clearly marked [historical benchmark registry](history/model-run-benchmark-log.md).

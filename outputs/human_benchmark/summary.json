@@ -1,35 +1,36 @@
 {
   "benchmark_schema_version": 1,
-  "generated_at_utc": "2026-08-14T13:04:36.134537Z",
+  "generated_at_utc": "2026-08-24T17:25:22.696801Z",
   "benchmark_map_count": 17,
-  "completed_first_attempt_maps": 0,
-  "remaining_first_attempt_maps": 17,
+  "completed_first_attempt_maps": 1,
+  "remaining_first_attempt_maps": 16,
   "human_attempt_status_counts": {
-    "aborted": 1
+    "aborted": 2,
+    "completed": 1
   },
   "first_attempt": {
-    "count": 0,
-    "mean_spt": null,
-    "median_spt": null,
-    "stddev_spt": null,
-    "min_spt": null,
-    "max_spt": null
+    "count": 1,
+    "mean_spt": 27.0,
+    "median_spt": 27.0,
+    "stddev_spt": 0.0,
+    "min_spt": 27.0,
+    "max_spt": 27.0
   },
   "latest_attempt": {
-    "count": 0,
-    "mean_spt": null,
-    "median_spt": null,
-    "stddev_spt": null,
-    "min_spt": null,
-    "max_spt": null
+    "count": 1,
+    "mean_spt": 27.0,
+    "median_spt": 27.0,
+    "stddev_spt": 0.0,
+    "min_spt": 27.0,
+    "max_spt": 27.0
   },
   "best_attempt": {
-    "count": 0,
-    "mean_spt": null,
-    "median_spt": null,
-    "stddev_spt": null,
-    "min_spt": null,
-    "max_spt": null
+    "count": 1,
+    "mean_spt": 27.0,
+    "median_spt": 27.0,
+    "stddev_spt": 0.0,
+    "min_spt": 27.0,
+    "max_spt": 27.0
   },
   "maps": [
     {
@@ -107,7 +108,7 @@
       "csv_sha256": "5a6fdf730d7c0b18f8a7c4781002219e05b4ed6f50f95a0f32e6d0f908208337",
       "canonical_map_sha256": "73d19c7e70eb9abe63604ddac847d660934623b1360ef31fa5e573d406f92da6",
       "completed_first_attempt": false,
-      "human_attempt_count": 0,
+      "human_attempt_count": 1,
       "first_attempt_spt": null,
       "latest_attempt_spt": null,
       "best_attempt_spt": null
@@ -176,11 +177,11 @@
       "filename": "map_004393.csv",
       "csv_sha256": "37c79d8cd877b603242c8d08de4f54b5e5a6baeaa0b037e6210863f07164b4f8",
       "canonical_map_sha256": "8150bfe5b53f4775a967079c9870717ca6caba6842c76c8e6e670b2065370bec",
-      "completed_first_attempt": false,
-      "human_attempt_count": 0,
-      "first_attempt_spt": null,
-      "latest_attempt_spt": null,
-      "best_attempt_spt": null
+      "completed_first_attempt": true,
+      "human_attempt_count": 1,
+      "first_attempt_spt": 27.0,
+      "latest_attempt_spt": 27.0,
+      "best_attempt_spt": 27.0
     },
     {
       "filename": "map_004555.csv",

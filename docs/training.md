@@ -2,7 +2,33 @@
 
 The primary trainer is `py_rl/cleanrl/cleanrl/ppo.py`. It is based on CleanRL PPO but contains PolyVision-specific actor paths, asynchronous JVM orchestration, validation, telemetry, and checkpoint metadata.
 
-## Representative run
+## Authoritative Phase 1 v3 Seed3 16M Reference Run
+
+The authoritative command used to produce the **Phase 1 v3 Seed3 16M frozen reference benchmark** (`Phase1-Scientific-Train-V3-Seed3.cleanrl_model`) is:
+
+```powershell
+cd C:\PolyVision; $env:POLYVISION_LEVEL_POOL_GLOB='levels/phase1_pool_bardur_real/train/*.csv'; $env:POLYVISION_SOLO_NO_OPPONENT_MODE='1'; $env:POLYVISION_INFO_MODE='fast'; $env:POLYVISION_BATCH_LEGAL_ACTION_FETCH='1'; $env:POLYVISION_DERIVE_OBS_METADATA='1'; python py_rl/cleanrl/cleanrl/ppo.py `
+    --exp-name Phase1-Scientific-Train-V3-Seed3 `
+    --seed 3 `
+    --actor-mode legal_features `
+    --total-timesteps 16000000 `
+    --num-envs 20 `
+    --num-steps 128 `
+    --max-legal-actions 256 `
+    --legal-action-feature-dim 42 `
+    --enable-step-diagnostics `
+    --step-diagnostics-log-every 3 `
+    --track `
+    --wandb-project-name cleanRL `
+    --save-model `
+    --save-frequency 500000 `
+    --force-revalidate-action-interface `
+    --validation-states 10000
+```
+
+This 16M run represents the frozen reference benchmark for Phase 1 optimization under `phase1_environment_version=v3_corrected_turn_economy` and `phase1_opening_version=v2_guaranteed_two_unit`. For smaller local development smoke runs, use smaller `--total-timesteps` and fewer `--num-envs` as shown below.
+
+## Representative development run
 
 From the repository root in an activated Python environment:
 
@@ -23,7 +49,7 @@ The trainer defaults to `legal_only`, 500,000 timesteps, 12 environments, 128 ro
 
 The wrapper also defaults to `levels/phase1_pool_bardur_real/train/*.csv` when the environment variable is absent. Training must never use `validation`, `test`, or `human_benchmark`; explicit pool overrides exist for evaluation, not PPO gradient runs. Record the training glob and aggregate pool identity with every experiment.
 
-New checkpoints record `phase1_opening_version=v2_guaranteed_two_unit`. Do not resume the shelved Seed-1 checkpoint: it was trained under `v1_mixed_capital_regression`, materially differs on approximately 45% of starting states, and fails current compatibility by default. The next scientific model must start from scratch.
+Checkpoints record `phase1_environment_version=v3_corrected_turn_economy` and `phase1_opening_version=v2_guaranteed_two_unit`. Do not resume the shelved Seed-1 checkpoint: it was trained under `v1_mixed_capital_regression`, materially differs on approximately 45% of starting states, and fails current compatibility by default. Phase 1 optimization continues actively from scratch.
 
 ## Important arguments
 

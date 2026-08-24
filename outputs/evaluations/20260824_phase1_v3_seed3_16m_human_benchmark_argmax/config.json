@@ -1,0 +1,204 @@
+{
+  "canonical": false,
+  "checkpoint_metadata": {
+    "action_catalog_fingerprint": "c849a4abf7b0bee073ccc56b63ae65917ea30e77068ad648c472130693dfe6e4",
+    "action_offset_table_hash": "c849a4abf7b0bee073ccc56b63ae65917ea30e77068ad648c472130693dfe6e4",
+    "action_space_n": "63913",
+    "actor_mode": "legal_features",
+    "canonicalizer_version": "flat-v1-structured",
+    "catalog_version": "flat-v1",
+    "global_action_space_n": "63913",
+    "legal_action_feature_dim": 42,
+    "legal_action_feature_version": "v1_3_move_focus_plus_semantic_econ",
+    "map_height": "11",
+    "map_width": "11",
+    "max_legal_actions": "256",
+    "observation_dim": "505",
+    "phase1_environment_version": "v3_corrected_turn_economy",
+    "phase1_opening_version": "v2_guaranteed_two_unit"
+  },
+  "checkpoint_sha256": "a6803cb00e08522819fdeb74bede8816cf131c1f28244c12d44f3eefb9d2c234",
+  "classification": "partial-smoke-noncanonical",
+  "ended_utc": "2026-08-24T17:25:18.360153Z",
+  "environment_interface_metadata": {
+    "action_catalog_fingerprint": "c849a4abf7b0bee073ccc56b63ae65917ea30e77068ad648c472130693dfe6e4",
+    "action_space_n": 63913,
+    "actor_mode": "legal_features",
+    "canonicalizer_version": "flat-v1-structured",
+    "catalog_version": "flat-v1",
+    "legal_action_feature_dim": 42,
+    "legal_action_feature_version": "v1_3_move_focus_plus_semantic_econ",
+    "map_height": 11,
+    "map_width": 11,
+    "max_legal_actions": 256,
+    "observation_dim": 505,
+    "phase1_environment_version": "v3_corrected_turn_economy",
+    "phase1_opening_version": "v2_guaranteed_two_unit"
+  },
+  "evaluated_map_count": 17,
+  "evaluation_id": "20260824_phase1_v3_seed3_16m_human_benchmark_argmax",
+  "evaluation_schema_version": "polyvision-phase1-evaluation-v1",
+  "evaluation_seed": 42,
+  "expected_manifest_map_count": 17,
+  "model_path": "C:\\PolyVision\\runs\\Tribes-v0__Phase1-Scientific-Train-V3-Seed3__3__1787526811\\Phase1-Scientific-Train-V3-Seed3.cleanrl_model",
+  "ordered_maps": [
+    {
+      "canonical_map_sha256": "02556e614537258b39ee6fb724ca0d5ce2304735cc0d32c2536411a0cacbdede",
+      "csv_sha256": "ac9eb9658301b5d987d64ab367da5afbde053f6a67c9580e3436dfdbd65b8337",
+      "filename": "map_002814.csv",
+      "path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\human_benchmark\\map_002814.csv",
+      "pool": "human_benchmark"
+    },
+    {
+      "canonical_map_sha256": "1c4b4c9df88cd424f4e49ff802bd8023585ea3547730a259b98914ef86e6ae44",
+      "csv_sha256": "079eb85daa9bda22a1e6fe5fcaa879fbf2ca2e2655f0e9f090b29fdbf716811c",
+      "filename": "map_004593.csv",
+      "path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\human_benchmark\\map_004593.csv",
+      "pool": "human_benchmark"
+    },
+    {
+      "canonical_map_sha256": "2ac97062b0b789bb683680a51e60e5271bbf0dd13da09d0af706773fa2b88ad1",
+      "csv_sha256": "101086cb10c6cd9df683152a1a6a7de59c92fbba50473d5a169f8bd96c6dd306",
+      "filename": "map_001144.csv",
+      "path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\human_benchmark\\map_001144.csv",
+      "pool": "human_benchmark"
+    },
+    {
+      "canonical_map_sha256": "2edabd3c22709fac639a112fd677102551c6446fe686ea970e4c98c8f7509f55",
+      "csv_sha256": "467de907d6f6b1bb8486dd0936b0b89db26e7a960299d1c492663e2a484185b6",
+      "filename": "map_003830.csv",
+      "path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\human_benchmark\\map_003830.csv",
+      "pool": "human_benchmark"
+    },
+    {
+      "canonical_map_sha256": "3bc5b846ab5da899f2b68034dbecc5aee38221bb5bf1ae50dd61e0b5c5de7658",
+      "csv_sha256": "d4dc09c906f5ee7a9ef694ab423273743054121629de89e76ae01f878509abd6",
+      "filename": "map_001694.csv",
+      "path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\human_benchmark\\map_001694.csv",
+      "pool": "human_benchmark"
+    },
+    {
+      "canonical_map_sha256": "515dd06d7e8e1510c1c81b5e6b6c60c9d367499559fbfeeefa01a48cfd529161",
+      "csv_sha256": "4436fbdd3128f7a33e3670bc1b765a07ec80748d3402bf61efba41053a9cd163",
+      "filename": "map_000747.csv",
+      "path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\human_benchmark\\map_000747.csv",
+      "pool": "human_benchmark"
+    },
+    {
+      "canonical_map_sha256": "52d8067297b59b4fe1b44c64b9c429ce750d82ff4fc37b9c66f6ba18d7c837e4",
+      "csv_sha256": "cbd784a586f76ae049bf5a96699c73750c2f33f652880455c6753e1ed576ebd9",
+      "filename": "map_003632.csv",
+      "path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\human_benchmark\\map_003632.csv",
+      "pool": "human_benchmark"
+    },
+    {
+      "canonical_map_sha256": "5f1161a5d56749e8eb211129f6196fd63d35eec22874ec8c4026f1984f53556d",
+      "csv_sha256": "dbde360be9f1088d3b87b61b1c78f060ed5a81d6cffd391cba4dd92101141394",
+      "filename": "map_003082.csv",
+      "path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\human_benchmark\\map_003082.csv",
+      "pool": "human_benchmark"
+    },
+    {
+      "canonical_map_sha256": "6d7779e5c172a3cac65ce0bec50f7ed56d6d2bbbc1a5a87e70be0c9b925df96f",
+      "csv_sha256": "c0ad6f001e98706cf931e61fa028fef9a9c9ac690589f971fc89ace817143e19",
+      "filename": "map_001105.csv",
+      "path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\human_benchmark\\map_001105.csv",
+      "pool": "human_benchmark"
+    },
+    {
+      "canonical_map_sha256": "73d19c7e70eb9abe63604ddac847d660934623b1360ef31fa5e573d406f92da6",
+      "csv_sha256": "5a6fdf730d7c0b18f8a7c4781002219e05b4ed6f50f95a0f32e6d0f908208337",
+      "filename": "map_001907.csv",
+      "path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\human_benchmark\\map_001907.csv",
+      "pool": "human_benchmark"
+    },
+    {
+      "canonical_map_sha256": "79ec60ba4a10f1a7521a4bfcce58d5bd7c55cd3cd14905454733dafa8dd6c794",
+      "csv_sha256": "4e965208490da94851b0b392d81b483a1acc8c9349c3d4848f7e2691aa570e52",
+      "filename": "map_004233.csv",
+      "path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\human_benchmark\\map_004233.csv",
+      "pool": "human_benchmark"
+    },
+    {
+      "canonical_map_sha256": "8150bfe5b53f4775a967079c9870717ca6caba6842c76c8e6e670b2065370bec",
+      "csv_sha256": "37c79d8cd877b603242c8d08de4f54b5e5a6baeaa0b037e6210863f07164b4f8",
+      "filename": "map_004393.csv",
+      "path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\human_benchmark\\map_004393.csv",
+      "pool": "human_benchmark"
+    },
+    {
+      "canonical_map_sha256": "945308b53d7b4f6b82c72674edd7be81e4ccfbd1db82e4fe523bdf90242bfd07",
+      "csv_sha256": "3d8b80055c21945581d48659a1364ec9ad8fd4ec168ceef3db37d9b94dd055c5",
+      "filename": "map_001793.csv",
+      "path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\human_benchmark\\map_001793.csv",
+      "pool": "human_benchmark"
+    },
+    {
+      "canonical_map_sha256": "a4a911b08772635b67d85db70452cf0b9cb9673d85bca82b8bbec93a01e6438c",
+      "csv_sha256": "8ccb93e25180c2af6c965196657ad26334f9f1a7d6c7d8b35e8856cc22052172",
+      "filename": "map_003696.csv",
+      "path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\human_benchmark\\map_003696.csv",
+      "pool": "human_benchmark"
+    },
+    {
+      "canonical_map_sha256": "b755c86f884bb68279cc7eb463728b0c88599662b26926edcef37733647c211d",
+      "csv_sha256": "5e6147234e65da58ac8e4cbab2d058daf7f585e7cc843017dc9d56f2358173ad",
+      "filename": "map_001502.csv",
+      "path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\human_benchmark\\map_001502.csv",
+      "pool": "human_benchmark"
+    },
+    {
+      "canonical_map_sha256": "bf1f14fd56badc7033c8cfc3d465d97441b82c10f42720d209c8fcd1002faffc",
+      "csv_sha256": "8e5c9522d3873f3a19fdb270248c5fbaf60c09aefae4881a65eed1ed7a397ed5",
+      "filename": "map_004555.csv",
+      "path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\human_benchmark\\map_004555.csv",
+      "pool": "human_benchmark"
+    },
+    {
+      "canonical_map_sha256": "fc9d3d78fcc01d72f9759c31bcb0cd6dec54f2951172935b741c6d2c7337d5af",
+      "csv_sha256": "789b4992cdc30ef1f12574d08c66b7bb3eab41a3e1cef3bcbc56cb23bdea21e8",
+      "filename": "map_000354.csv",
+      "path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\human_benchmark\\map_000354.csv",
+      "pool": "human_benchmark"
+    }
+  ],
+  "policies": [
+    "ppo_argmax"
+  ],
+  "policy_semantics": {
+    "ppo_argmax": "highest-logit valid slot",
+    "ppo_sampled": "torch.multinomial over authoritative valid-slot probabilities with per-episode generator",
+    "random_legal": "uniform policy-visible valid slot",
+    "visible_greedy": "deterministic observation/legal-feature heuristic"
+  },
+  "polyvision_environment": {
+    "POLYVISION_BATCH_LEGAL_ACTION_FETCH": "1",
+    "POLYVISION_DERIVE_OBS_METADATA": "1",
+    "POLYVISION_INFO_MODE": "fast",
+    "POLYVISION_LEVEL_POOL_GLOB": "levels/phase1_pool_bardur_real/human_benchmark/*.csv",
+    "POLYVISION_LEVEL_SELECTION_MODE": "round_robin",
+    "POLYVISION_MAX_LEGAL_ACTIONS": "256",
+    "POLYVISION_SOLO_NO_OPPONENT_MODE": "1"
+  },
+  "pool": "human_benchmark",
+  "pool_glob": "levels/phase1_pool_bardur_real/human_benchmark/*.csv",
+  "pool_identity": "adbe5a707392aad15342f3c595a78abeeb85cb0ce77b91a8d9339276a2674a69",
+  "repeats_per_stochastic_map": 1,
+  "runtime": {
+    "git_commit": "3bdabaa4f1de8236b5bc80f1f0fbadbd1905282e",
+    "git_dirty": true,
+    "gymnasium": "1.3.0",
+    "java": "openjdk version \"21.0.8\" 2025-07-15 LTS\nOpenJDK Runtime Environment Temurin-21.0.8+9 (build 21.0.8+9-LTS)\nOpenJDK 64-Bit Server VM Temurin-21.0.8+9 (build 21.0.8+9-LTS, mixed mode, sharing)",
+    "platform": "Windows-10-10.0.22621-SP0",
+    "py4j": "0.10.9.9",
+    "python": "3.11.9",
+    "torch": "2.11.0+cpu"
+  },
+  "schedule_rules": "episode seed is shared by map+replicate across policies; policy seed is policy-specific; exact manifest map is runner-selected and verified",
+  "sidecar_path": "C:\\PolyVision\\runs\\Tribes-v0__Phase1-Scientific-Train-V3-Seed3__3__1787526811\\Phase1-Scientific-Train-V3-Seed3.cleanrl_model.action_interface.json",
+  "sidecar_sha256": "0ce2b01464a47506c19bf5c34b4e39f294c992aea0607ab3755f15d5e10db736",
+  "split_manifest_path": "C:\\PolyVision\\pol_env\\Tribes\\levels\\phase1_pool_bardur_real\\split_manifest.json",
+  "split_manifest_sha256": "c8721cd0fcb636d9ddb483745585e5b69eca9ca501950a1ddec6a51d0c763690",
+  "started_utc": "2026-08-24T17:25:06.529702Z",
+  "status": "complete"
+}

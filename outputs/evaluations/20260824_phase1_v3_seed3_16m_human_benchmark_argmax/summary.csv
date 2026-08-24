@@ -1,0 +1,2 @@
+policy,maps,episodes,headline_level,mean_spt,median_spt,stddev_spt,min_spt,max_spt,p05_spt,p25_spt,p75_spt,p95_spt,ci95_low,ci95_high
+ppo_argmax,17,17,map_level,16.705882352941178,17.0,3.901357229900143,8.0,25.0,11.2,14.0,19.0,21.799999999999997,14.941176470588236,18.470588235294116
