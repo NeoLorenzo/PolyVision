@@ -16,10 +16,14 @@ from typing import Any, Callable, Iterable
 
 import numpy as np
 
-from pol_env.Tribes.py.environment_contract import observation_layout
+from pol_env.Tribes.py.environment_contract import (
+    MAX_OWNED_CITIES,
+    decode_owned_city_slots,
+    observation_layout,
+)
 
 
-HUMAN_INTERFACE_VERSION = "v3_colored_terminal"
+HUMAN_INTERFACE_VERSION = "v4_exact_city_terminal"
 TERRAIN_SYMBOLS = {0: ".", 1: "~", 2: "D", 3: "M", 4: "V", 5: "C", 6: "T", 7: "?"}
 RESOURCE_SYMBOLS = {0: "h", 1: "f", 2: "a", 3: "w", 5: "o", 6: "c", 7: "r"}
 SAFE_INFO_MODE = "fast"
@@ -475,6 +479,8 @@ def visible_state(observation: np.ndarray, info: dict[str, Any]) -> dict[str, An
     units = np.rint(obs[n : 2 * n]).astype(np.int64)
     cities = np.rint(obs[2 * n : 3 * n]).astype(np.int64)
     resources = np.rint(obs[layout.resource_start : layout.resource_end] * 8.0 - 1.0).astype(np.int16)
+    city_block = obs[layout.city_block_start : layout.city_block_end]
+    owned_cities = decode_owned_city_slots(city_block, width=width, height=height, max_cities=layout.city_slots)
     return {
         "width": width,
         "height": height,
@@ -482,6 +488,7 @@ def visible_state(observation: np.ndarray, info: dict[str, Any]) -> dict[str, An
         "unit_ids": units,
         "city_ids": cities,
         "resources": resources,
+        "owned_cities": owned_cities,
         "stars": int(round(float(obs[legacy]))),
         "score": int(round(float(obs[legacy + 1]))),
         "city_count": int(round(float(obs[legacy + 2]))),
@@ -987,7 +994,18 @@ def run_policy_visible_episode(
         for line in visible_map_lines(state, actions=actions):
             output_fn(line)
         output_fn("")
-        output_fn("Economy & Cities:")
+        owned_cities = state.get("owned_cities", [])
+        if owned_cities:
+            output_fn(f"Owned Cities ({len(owned_cities)}/{MAX_OWNED_CITIES}):")
+            for c in owned_cities:
+                slot_num = c["slot"] + 1
+                output_fn(
+                    f"  City #{slot_num} @ ({c['x']}, {c['y']}): Level {c['level']} | "
+                    f"Pop {c['population']}/{c['population_need']} | "
+                    f"Production +{c['production']} SPT | "
+                    f"Units {c['supported_unit_count']}/{c['unit_capacity']}"
+                )
+        output_fn("Economy & Aggregates:")
         output_fn(
             f"  Avg city level:        {state['avg_city_level']:.2f}  | Max city level:       {state['max_city_level']:.0f}\n"
             f"  Mean upgrade progress: {int(round(state['mean_upgrade_progress'] * 100))}%  | Max upgrade progress: {int(round(state['max_upgrade_progress'] * 100))}%\n"

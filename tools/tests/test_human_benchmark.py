@@ -39,13 +39,13 @@ class FakeEnv:
         self._terminal_spt_over_15_weight = 3.0
         self._resource_gather_upgrade_filter_enabled = False
         self.stepped = []
-        self.obs = np.zeros((505,), dtype=np.float32)
+        self.obs = np.zeros((586,), dtype=np.float32)
         self.obs[:121] = 7
         self.obs[121:363] = -1
         self.info = {
             "map_width": 11,
             "map_height": 11,
-            "observation_dim": 505,
+            "observation_dim": 586,
             "global_action_space_n": self._catalog.total_size,
             "max_legal_actions": 4,
             "catalog_version": "flat-v1",
@@ -144,7 +144,7 @@ class PolicyInterfaceTests(unittest.TestCase):
         self.assertIn("resource: ANIMAL", ann_eco)
 
     def test_visible_state_extended_economy_decoding(self):
-        obs = np.zeros((505,), dtype=np.float32)
+        obs = np.zeros((586,), dtype=np.float32)
         obs[363] = 8.0  # legacy stars
         obs[364] = 100.0  # score
         obs[365] = 3.0  # city count
@@ -161,6 +161,17 @@ class PolicyInterfaceTests(unittest.TestCase):
         obs[503] = 0.33  # upgrade ready frac -> 0.33
         obs[504] = 1.0  # any level up available -> True
 
+        # City slot 0 (PARITY-001)
+        obs[505] = 1.0  # present
+        obs[506] = 3.0 / 10.0  # x = 3
+        obs[507] = 5.0 / 10.0  # y = 5
+        obs[508] = 2.0  # level = 2
+        obs[509] = 1.0  # population = 1
+        obs[510] = 3.0  # population_need = 3
+        obs[511] = 4.0  # production = 4
+        obs[512] = 2.0  # units = 2
+        obs[513] = 3.0  # capacity = 3
+
         info = {"map_width": 11, "map_height": 11}
         st = visible_state(obs, info)
         self.assertEqual(st["turn"], 6)
@@ -176,6 +187,16 @@ class PolicyInterfaceTests(unittest.TestCase):
         self.assertAlmostEqual(st["max_upgrade_progress"], 0.75, places=2)
         self.assertAlmostEqual(st["upgrade_ready_frac"], 0.33, places=2)
         self.assertTrue(st["any_level_up_available"])
+
+        self.assertEqual(len(st["owned_cities"]), 1)
+        self.assertEqual(st["owned_cities"][0]["x"], 3)
+        self.assertEqual(st["owned_cities"][0]["y"], 5)
+        self.assertEqual(st["owned_cities"][0]["level"], 2)
+        self.assertEqual(st["owned_cities"][0]["population"], 1)
+        self.assertEqual(st["owned_cities"][0]["population_need"], 3)
+        self.assertEqual(st["owned_cities"][0]["production"], 4)
+        self.assertEqual(st["owned_cities"][0]["supported_unit_count"], 2)
+        self.assertEqual(st["owned_cities"][0]["unit_capacity"], 3)
 
     def test_deterministic_unit_numbering(self):
         st = {

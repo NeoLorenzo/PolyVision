@@ -12,6 +12,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from pol_env.Tribes.py.register_env import TribesGymWrapper
+from pol_env.Tribes.py.environment_contract import observation_layout
 
 
 def main() -> int:
@@ -39,7 +40,8 @@ def main() -> int:
     env = TribesGymWrapper()
     pool_size = len(env._level_pool)
     maps_to_test = pool_size if args.max_maps is None else min(pool_size, max(1, int(args.max_maps)))
-    expected_obs_dim = 4 * args.expected_width * args.expected_height + 21
+    layout = observation_layout(args.expected_width, args.expected_height)
+    expected_obs_dim = layout.expected_obs_dim
     fingerprints = Counter()
     action_sizes = Counter()
     legal_counts = []

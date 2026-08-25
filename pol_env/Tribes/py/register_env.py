@@ -9,7 +9,18 @@ import re
 import time
 from gymnasium.envs.registration import register
 from .gym_env import TribesGymEnv, make_default_env
-from .environment_contract import MapGeometryError, validate_fixed_square_geometry
+from .environment_contract import (
+    MapGeometryError,
+    ObservationContractError,
+    validate_fixed_square_geometry,
+    extract_owned_cities,
+    encode_owned_city_slots,
+    decode_owned_city_slots,
+    MAX_OWNED_CITIES,
+    CITY_SLOT_FEATURE_DIM,
+    CITY_BLOCK_DIM,
+    PHASE1_ENVIRONMENT_VERSION as CONTRACT_PHASE1_ENVIRONMENT_VERSION,
+)
 
 
 class GlobalActionCatalog:
@@ -209,7 +220,7 @@ class TribesGymWrapper(gym.Env):
     CATALOG_VERSION = "flat-v1"
     CANONICALIZER_VERSION = "flat-v1-structured"
     PHASE1_OPENING_VERSION = "v2_guaranteed_two_unit"
-    PHASE1_ENVIRONMENT_VERSION = "v3_corrected_turn_economy"
+    PHASE1_ENVIRONMENT_VERSION = "v4_exact_per_city_state"
     MAX_LEGAL_ACTIONS_DEFAULT = 256
     LEGAL_ACTION_FEATURE_VERSION = "v1_3_move_focus_plus_semantic_econ"
     REVEAL_CLIP = 12.0
@@ -423,6 +434,7 @@ class TribesGymWrapper(gym.Env):
                 int(i): str(name).upper()
                 for i, name in enumerate(vocab.get("TECHNOLOGY", []))
             }
+            self._controlled_tribe_id = 0
             self._catalog_fingerprint = self._catalog.fingerprint()
             self.action_space = gym.spaces.Discrete(self._catalog.total_size)
             if int(self.action_space.n) != int(self._catalog.total_size):
@@ -439,7 +451,7 @@ class TribesGymWrapper(gym.Env):
                 shape=obs_array.shape, 
                 dtype=np.float32
             )
-        except MapGeometryError:
+        except (MapGeometryError, ObservationContractError):
             raise
         except Exception as e:
             # Fallback to placeholders if initialization fails
@@ -5017,8 +5029,8 @@ class TribesGymWrapper(gym.Env):
 
         current_stars = float(self._get_bardur_stars(obs_dict))
         current_spt = float(self._compute_bardur_spt(obs_dict))
-        turn_count = float(self._turn_count)
-        max_turns = float(max(1, int(self.MAX_TURNS)))
+        turn_count = float(getattr(self, "_turn_count", 0))
+        max_turns = float(max(1, int(getattr(self, "MAX_TURNS", 10))))
         turns_remaining_after_current = float(np.clip((max_turns - turn_count) / max_turns, 0.0, 1.0))
         turns_remaining_including_current = float(np.clip((max_turns - turn_count + 1.0) / max_turns, 0.0, 1.0))
         tech_has_organization = 1.0 if self._has_researched_tech(obs_dict, "ORGANIZATION", tribe_id=0) else 0.0
@@ -5073,6 +5085,12 @@ class TribesGymWrapper(gym.Env):
         features.append(float(np.clip(max_upgrade_progress, 0.0, 1.0)))
         features.append(float(np.clip(upgrade_ready_frac, 0.0, 1.0)))
         features.append(any_level_up_available)
+
+        # Append exact per-city state block (PARITY-001)
+        controlled_tribe = int(getattr(self, "_controlled_tribe_id", 0))
+        canonical_cities = extract_owned_cities(obs_dict, tribe_id=controlled_tribe)
+        city_slot_features = encode_owned_city_slots(canonical_cities, width=width, height=height)
+        features.extend(city_slot_features)
 
         return np.array(features, dtype=np.float32)
     

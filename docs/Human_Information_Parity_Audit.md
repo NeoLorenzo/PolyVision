@@ -347,10 +347,10 @@ A key methodological question in game RL is deciding which public game rules mus
 
 | Disparity ID | Layer | Information / Behavior | Human Access | AI Access | Primary Class | Phase-1 Severity | Full-Game Severity | Current Source | Target Parity Direction (Architecture-Neutral) | Status |
 |:---:|:---:|---|---|---|:---:|:---:|:---:|---|---|:---:|
-| `STATE-CITY-001` | State | Per-City Level | Displayed over city | Destroyed into global mean/max | `REPRESENTATION_LOSS` | **Critical** | **Critical** | `register_env.py:5054-5071` | Preserve exact level for each city with unambiguous spatial/entity association | **CONFIRMED** |
-| `STATE-CITY-002` | State | Per-City Population & Need | Displayed in status bar | Destroyed into global progress | `REPRESENTATION_LOSS` | **Critical** | **Critical** | `register_env.py:5049-5073` | Preserve exact population and population-needed values for each city | **CONFIRMED** |
-| `STATE-CITY-003` | State | Per-City SPT Contribution | Displayed on banner | Summed into global SPT | `REPRESENTATION_LOSS` | **High** | **High** | `register_env.py:5019,5062` | Preserve individual city production contributions | **CONFIRMED** |
-| `STATE-CITY-004` | State | City Unit Count & Capacity | Displayed pips under city | Omitted across all layers | `AI_DEFICIT` | **Critical** | **Critical** | `City.java:296,418` | Preserve supported units count and capacity ($L+1$) per city | **CONFIRMED** |
+| `STATE-CITY-001` | State | Per-City Level | Displayed over city | Destroyed into global mean/max | `REPRESENTATION_LOSS` | **Critical** | **Critical** | `register_env.py:5054-5071` | Preserve exact level for each city with unambiguous spatial/entity association | **RESOLVED (PARITY-001)** |
+| `STATE-CITY-002` | State | Per-City Population & Need | Displayed in status bar | Destroyed into global progress | `REPRESENTATION_LOSS` | **Critical** | **Critical** | `register_env.py:5049-5073` | Preserve exact population and population-needed values for each city | **RESOLVED (PARITY-001)** |
+| `STATE-CITY-003` | State | Per-City SPT Contribution | Displayed on banner | Summed into global SPT | `REPRESENTATION_LOSS` | **High** | **High** | `register_env.py:5019,5062` | Preserve individual city production contributions | **RESOLVED (PARITY-001)** |
+| `STATE-CITY-004` | State | City Unit Count & Capacity | Displayed pips under city | Omitted across all layers | `AI_DEFICIT` | **Critical** | **Critical** | `City.java:296,418` | Preserve supported units count and capacity ($L+1$) per city | **RESOLVED (PARITY-001)** |
 | `STATE-MAP-001` | State | Building Placement & Type | Inspectable on board | Discarded in Python flattening | `AI_DEFICIT` | **High** | **High** | `PythonEnv.java:345`, `register_env.py:4962` | Expose the type and location of every human-visible building without loss of spatial identity | **CONFIRMED** |
 | `STATE-MAP-002` | State | Road Grid on Map | Inspectable on board | Discarded in Python flattening | `AI_DEFICIT` | **Medium** | **High** | `Board.java:1010`, `register_env.py:4962` | Expose visible road placement on tiles | **CONFIRMED** |
 | `STATE-MAP-003` | State | Capital City Identity | Star icon on city banner | Omitted from state vector | `AI_DEFICIT` | **Medium** | **High** | `City.java:381`, `register_env.py:5028` | Expose capital identity for the capital city | **CONFIRMED** |
@@ -421,25 +421,31 @@ A key methodological question in game RL is deciding which public game rules mus
 
 ## 14. Audit Closure Status
 
-### 14.1 Confirmed Current Phase-1 Parity Deficits
-- Complete absence of per-city unit capacity and supported unit counts (`STATE-CITY-004`).
+### 14.1 Resolved Milestones
+- **PARITY-001 (Exact Per-City State — Contract `v4_exact_per_city_state`):**  
+  ```text
+  PARITY-001 — Exact Per-City State
+  Status: CLOSED / FROZEN
+  Environment contract: v4_exact_per_city_state
+  Observation dimension: 586
+  ```
+  Closed `STATE-CITY-001` (exact per-city level), `STATE-CITY-002` (exact per-city population & need), `STATE-CITY-003` (exact per-city production), and `STATE-CITY-004` (supported unit count and unit capacity $= \text{level} + 1$).  
+  Implemented via a fixed 9-slot deterministic per-city observation block (81 dimensions, expanding 11×11 observation space to 586 values). Cities are spatially ordered by $(x, y)$ ascending. Raw engine actor IDs are completely excluded. Legacy aggregate city features are retained alongside the exact block for interim interface continuity.
+
+### 14.2 Remaining Confirmed Phase-1 Parity Deficits
 - Complete absence of 2D building placement and types on map (`STATE-MAP-001`).
 - Complete absence of road network on map (`STATE-MAP-002`).
 - Absence of action star cost in legal action features (`FEAT-MISS-001`).
-- Absence of explicit capital identity in state vector (`STATE-MAP-003`).
+- Absence of explicit capital identity in state vector (`STATE-MAP-003`) — *explicitly retained as UNRESOLVED and outside the PARITY-001 contract*.
 
-### 14.2 Confirmed Representation Problems
-- Destructive global aggregation of per-city levels, populations, and production (`STATE-CITY-001`, `002`, `003`).
+### 14.3 Remaining Representation Problems
 - Heavy compression of 24-tech research state down to 2 boolean flags and a count scalar (`STATE-TECH-001`).
-- Raw monotonic engine actor IDs injected as continuous float32 inputs (`STATE-ID-001`).
+- Raw monotonic engine actor IDs injected as continuous float32 inputs in legacy board planes (`STATE-ID-001`).
 - Spatial move destinations encoded as discrete index embeddings rather than explicit $(x, y)$ coordinates (`FEAT-SPAT-001`).
 
-### 14.3 Deferred / Unverified Full-Game Risks
+### 14.4 Deferred / Unverified Full-Game Risks
 - Hidden-state dependence in `StepMove.java` (Zone of Control queries hidden units) and `AttackFactory.java` (Attack queries hidden units) — dormant in solo no-combat Phase 1.
 - Unit HP, Max HP, veteran status, and kill count omissions — low priority for solo Phase 1, critical for future combat.
-
-### 14.4 Implementation Readiness
-**The audit is complete and ready.** All critical human-visible information items and engine behaviors are verified and cited. The document provides the exact normative foundation required to design the future Human–AI Information Parity observation and action contract.
 
 ---
 

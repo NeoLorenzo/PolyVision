@@ -34,7 +34,7 @@ def compatibility_metadata(width=11, height=11, **overrides):
         "catalog_version": "flat-v1",
         "canonicalizer_version": "flat-v1-structured",
         "phase1_opening_version": "v2_guaranteed_two_unit",
-        "phase1_environment_version": "v3_corrected_turn_economy",
+        "phase1_environment_version": "v4_exact_per_city_state",
         "max_legal_actions": 128,
     }
     values.update(overrides)
@@ -43,10 +43,13 @@ def compatibility_metadata(width=11, height=11, **overrides):
 
 class ObservationLayoutTests(unittest.TestCase):
     def test_dimension_derived_layouts(self):
-        layout_12 = observation_layout(12, 12)
-        self.assertEqual((layout_12.legacy_obs_dim, layout_12.resource_block_dim, layout_12.expected_obs_dim), (438, 144, 597))
         layout_11 = observation_layout(11, 11)
-        self.assertEqual((layout_11.legacy_obs_dim, layout_11.resource_block_dim, layout_11.expected_obs_dim), (369, 121, 505))
+        self.assertEqual(
+            (layout_11.legacy_obs_dim, layout_11.resource_block_dim, layout_11.expected_obs_dim),
+            (369, 121, 586),
+        )
+        self.assertEqual(layout_11.city_block_start, 505)
+        self.assertEqual(layout_11.city_block_end, 586)
 
 
 class GeometryContractTests(unittest.TestCase):

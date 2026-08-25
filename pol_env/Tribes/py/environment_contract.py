@@ -17,6 +17,185 @@ class CheckpointCompatibilityError(RuntimeError):
     """Raised before loading model tensors when interface metadata is incompatible."""
 
 
+class ObservationContractError(RuntimeError):
+    """Raised when an observation violates the environment interface contract."""
+
+
+PHASE1_ENVIRONMENT_VERSION = "v4_exact_per_city_state"
+
+MAX_OWNED_CITIES = 9
+CITY_SLOT_FEATURE_DIM = 9
+CITY_SLOT_FEATURE_NAMES = (
+    "city_present",
+    "city_x",
+    "city_y",
+    "city_level",
+    "city_population",
+    "city_population_need",
+    "city_production",
+    "city_supported_unit_count",
+    "city_unit_capacity",
+)
+CITY_BLOCK_DIM = MAX_OWNED_CITIES * CITY_SLOT_FEATURE_DIM  # 81
+
+
+@dataclass(frozen=True)
+class OwnedCityState:
+    x: int
+    y: int
+    level: int
+    population: int
+    population_need: int
+    production: int
+    supported_unit_count: int
+    unit_capacity: int
+
+
+def extract_owned_cities(
+    obs_dict: Mapping,
+    tribe_id: int,
+) -> list[OwnedCityState]:
+    """Extract canonical owned-city states from fog-respecting POV observation dictionary.
+
+    Cities are deterministically sorted by spatial coordinates (x, y) ascending.
+    Raw actor IDs are never exposed in the returned records.
+    """
+    if not isinstance(obs_dict, Mapping):
+        raise ObservationContractError(f"obs_dict must be a Mapping, got {type(obs_dict).__name__}")
+    tribe_id = int(tribe_id)
+    city_map = obs_dict.get("city", {})
+    if not isinstance(city_map, Mapping):
+        return []
+    owned: list[OwnedCityState] = []
+    for raw_actor_id, city_info in city_map.items():
+        if not isinstance(city_info, Mapping):
+            continue
+        try:
+            c_tribe = int(city_info.get("tribeID", -1))
+        except Exception:
+            continue
+        if c_tribe != tribe_id:
+            continue
+        try:
+            x = int(city_info.get("x", -1))
+            y = int(city_info.get("y", -1))
+            level = int(city_info.get("level", 1))
+            population = int(city_info.get("population", 0))
+            population_need = int(city_info.get("population_need", level + 1))
+            production = int(city_info.get("production", 1))
+            units = city_info.get("units", [])
+            supported_unit_count = len(units) if isinstance(units, (list, tuple)) else 0
+            unit_capacity = level + 1
+        except Exception as exc:
+            raise ObservationContractError(
+                f"Malformed city record for actor {raw_actor_id}: {exc}"
+            ) from exc
+
+        owned.append(
+            OwnedCityState(
+                x=x,
+                y=y,
+                level=level,
+                population=population,
+                population_need=population_need,
+                production=production,
+                supported_unit_count=supported_unit_count,
+                unit_capacity=unit_capacity,
+            )
+        )
+    # Sort deterministically by spatial coordinates (x, y) ascending: primary key x, secondary key y
+    owned.sort(key=lambda c: (c.x, c.y))
+    return owned
+
+
+def encode_owned_city_slots(
+    owned_cities: list[OwnedCityState],
+    width: int,
+    height: int,
+    max_cities: int = MAX_OWNED_CITIES,
+) -> list[float]:
+    """Encode owned cities into a fixed-width, exact, non-clipping 1D feature list.
+
+    Raises ObservationContractError if owned city count exceeds max_cities or coordinates
+    are out of bounds.
+    """
+    if len(owned_cities) > max_cities:
+        raise ObservationContractError(
+            f"Owned city count {len(owned_cities)} exceeds MAX_OWNED_CITIES={max_cities}"
+        )
+    max_x = max(1, width - 1)
+    max_y = max(1, height - 1)
+    features: list[float] = []
+    for i in range(max_cities):
+        if i < len(owned_cities):
+            city = owned_cities[i]
+            if city.x < 0 or city.x >= width or city.y < 0 or city.y >= height:
+                raise ObservationContractError(
+                    f"City coordinates ({city.x}, {city.y}) out of bounds for board {width}x{height}"
+                )
+            features.extend([
+                1.0,  # city_present
+                float(city.x) / float(max_x),
+                float(city.y) / float(max_y),
+                float(city.level),
+                float(city.population),
+                float(city.population_need),
+                float(city.production),
+                float(city.supported_unit_count),
+                float(city.unit_capacity),
+            ])
+        else:
+            features.extend([0.0] * CITY_SLOT_FEATURE_DIM)
+    return features
+
+
+def decode_owned_city_slots(
+    city_block: Iterable[float],
+    width: int,
+    height: int,
+    max_cities: int = MAX_OWNED_CITIES,
+) -> list[dict[str, Any]]:
+    """Decode exact integer city primitives from a flattened city-slot feature block."""
+    import numpy as np
+
+    block = np.asarray(city_block, dtype=np.float32).reshape(-1)
+    expected_size = max_cities * CITY_SLOT_FEATURE_DIM
+    if block.size != expected_size:
+        raise ObservationContractError(
+            f"Expected city block size {expected_size}, got {block.size}"
+        )
+    max_x = max(1, width - 1)
+    max_y = max(1, height - 1)
+    cities: list[dict[str, Any]] = []
+    for i in range(max_cities):
+        offset = i * CITY_SLOT_FEATURE_DIM
+        present = bool(block[offset + 0] >= 0.5)
+        if not present:
+            continue
+        x = int(round(float(block[offset + 1]) * max_x))
+        y = int(round(float(block[offset + 2]) * max_y))
+        level = int(round(float(block[offset + 3])))
+        population = int(round(float(block[offset + 4])))
+        population_need = int(round(float(block[offset + 5])))
+        production = int(round(float(block[offset + 6])))
+        supported_unit_count = int(round(float(block[offset + 7])))
+        unit_capacity = int(round(float(block[offset + 8])))
+        cities.append(
+            {
+                "slot": i,
+                "x": x,
+                "y": y,
+                "level": level,
+                "population": population,
+                "population_need": population_need,
+                "production": production,
+                "supported_unit_count": supported_unit_count,
+                "unit_capacity": unit_capacity,
+            }
+        )
+    return cities
+
+
 @dataclass(frozen=True)
 class ObservationLayout:
     width: int
@@ -24,10 +203,15 @@ class ObservationLayout:
     n_tiles: int
     legacy_obs_dim: int
     resource_block_dim: int
+    scalar_start: int
+    scalar_end: int
+    city_block_start: int
+    city_block_end: int
     expected_obs_dim: int
     resource_start: int
     resource_end: int
-    scalar_start: int
+    city_slots: int = MAX_OWNED_CITIES
+    city_slot_dim: int = CITY_SLOT_FEATURE_DIM
 
 
 def observation_layout(width: int, height: int) -> ObservationLayout:
@@ -39,16 +223,27 @@ def observation_layout(width: int, height: int) -> ObservationLayout:
     legacy_obs_dim = 3 * n_tiles + 6
     resource_block_dim = n_tiles
     scalar_start = legacy_obs_dim + resource_block_dim
+    scalar_dim = 15
+    scalar_end = scalar_start + scalar_dim
+    city_block_start = scalar_end
+    city_block_dim = MAX_OWNED_CITIES * CITY_SLOT_FEATURE_DIM  # 81
+    city_block_end = city_block_start + city_block_dim
+    expected_obs_dim = city_block_end
     return ObservationLayout(
         width=width,
         height=height,
         n_tiles=n_tiles,
         legacy_obs_dim=legacy_obs_dim,
         resource_block_dim=resource_block_dim,
-        expected_obs_dim=4 * n_tiles + 21,
+        scalar_start=scalar_start,
+        scalar_end=scalar_end,
+        city_block_start=city_block_start,
+        city_block_end=city_block_end,
+        expected_obs_dim=expected_obs_dim,
         resource_start=legacy_obs_dim,
         resource_end=scalar_start,
-        scalar_start=scalar_start,
+        city_slots=MAX_OWNED_CITIES,
+        city_slot_dim=CITY_SLOT_FEATURE_DIM,
     )
 
 
@@ -85,8 +280,6 @@ def validate_fixed_square_geometry(
             )
     return loaded_width, loaded_height
 
-
-PHASE1_ENVIRONMENT_VERSION = "v3_corrected_turn_economy"
 
 CHECKPOINT_REQUIRED_FIELDS = (
     "map_width",

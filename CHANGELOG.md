@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-PARITY_001_Exact_Per_City_State-041] - (2026-08-25)
+
+### Scope
+- Implemented `PARITY-001 — Exact Per-City State`, resolving `STATE-CITY-001`, `STATE-CITY-002`, `STATE-CITY-003`, and `STATE-CITY-004` from the Human–AI Information Parity Audit.
+- Expanded the 11×11 Phase-1 observation space from 505 to 586 dimensions ($505 + 9 \times 9 = 586$) by appending a fixed 9-slot exact per-city state block (`MAX_OWNED_CITIES = 9`, `CITY_SLOT_FEATURE_DIM = 9`).
+- Exclusively extracted owned cities from the fog-respecting POV observation JSON (`obs_dict["city"]` where `tribeID == controlled_tribe_id`).
+- Implemented deterministic spatial sorting by $(x, y)$ ascending (`key=lambda c: (c.x, c.y)`), completely eliminating raw engine actor IDs and chronology leakage from the representation.
+- Preserved exact, unclipped numeric quantities for small integer city primitives:
+  - `city_present`: `1.0` if city exists, `0.0` for empty slot
+  - `city_x`, `city_y`: Normalized by board geometry $(W-1, H-1)$
+  - `city_level`, `city_population`, `city_population_need`, `city_production`, `city_supported_unit_count`, `city_unit_capacity`: Exact float values
+  - Empty slots: All 9 features zero-padded (`0.0`)
+- Defined `ObservationContractError(RuntimeError)` and ensured wrapper initialization re-raises it alongside `MapGeometryError` to prevent silent fallback to `(1000,)` placeholder shapes on contract violations.
+- Bumped environment version to `PHASE1_ENVIRONMENT_VERSION = "v4_exact_per_city_state"`.
+- Enforced clean rejection of historical 505-dimensional checkpoints (`v3_corrected_turn_economy`) with `CheckpointCompatibilityError`.
+- Updated Human Benchmark presentation interface (`tools/human_policy_interface.py`, `HUMAN_INTERFACE_VERSION = "v4_exact_city_terminal"`) to decode exact owned cities from the policy observation and display canonical unnormalized city records.
+- Added comprehensive unit test suite in `pol_env/Tribes/py/tests/test_parity_001_city_state.py` covering roundtrip decoding, multi-city distinguishability, spatial sorting, actor-ID independence, zero padding, overflow error handling, POV ownership filtering, 586-dim observation contract, and checkpoint compatibility rejection.
+
+### Rationale
+- Closes the highest-priority Phase-1 information parity gap by giving the policy exact per-city visibility matching what human players observe on the board and status cards, without modifying rewards, curriculum, action spaces, or PPO hyperparameters.
+
 ## [Phase1-Human_AI_Information_Parity_Audit-040] - (2026-08-25)
 
 ### Scope

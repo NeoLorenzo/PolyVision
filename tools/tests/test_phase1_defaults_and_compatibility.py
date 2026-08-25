@@ -8,6 +8,7 @@ import torch
 
 from pol_env.Tribes.py.register_env import TribesGymWrapper
 from pol_env.Tribes.py.environment_contract import (
+    CheckpointCompatibilityError,
     environment_compatibility_metadata,
     read_checkpoint_metadata,
     validate_checkpoint_compatibility,
@@ -58,7 +59,7 @@ class TestRewardDefaults(unittest.TestCase):
 
 
 class TestPPOActorDefaults(unittest.TestCase):
-    def _make_dummy_env_adapter(self, action_n: int = 63913, obs_dim: int = 505):
+    def _make_dummy_env_adapter(self, action_n: int = 63913, obs_dim: int = 586):
         return SimpleNamespace(
             single_observation_space=gym.spaces.Box(low=-1e5, high=1e5, shape=(obs_dim,)),
             single_action_space=gym.spaces.Discrete(action_n),
@@ -90,13 +91,13 @@ class TestPPOActorDefaults(unittest.TestCase):
 
 
 class TestCheckpointMetadataCompatibility(unittest.TestCase):
-    def _make_dummy_env_adapter(self, action_n: int = 63913, obs_dim: int = 505):
+    def _make_dummy_env_adapter(self, action_n: int = 63913, obs_dim: int = 586):
         return SimpleNamespace(
             single_observation_space=gym.spaces.Box(low=-1e5, high=1e5, shape=(obs_dim,)),
             single_action_space=gym.spaces.Discrete(action_n),
         )
 
-    def test_frozen_reference_checkpoint_loads_with_sidecar_actor_mode(self):
+    def test_frozen_reference_checkpoint_is_rejected_by_current_v4_environment(self):
         ckpt_path = (
             REPO_ROOT
             / "runs"
@@ -108,38 +109,34 @@ class TestCheckpointMetadataCompatibility(unittest.TestCase):
 
         meta = read_checkpoint_metadata(str(ckpt_path))
         self.assertEqual(meta.get("actor_mode"), "legal_features")
-        self.assertEqual(int(meta.get("legal_action_feature_dim")), 42)
-        self.assertEqual(int(meta.get("max_legal_actions")), 256)
+        self.assertEqual(int(meta.get("observation_dim")), 505)
         self.assertEqual(meta.get("phase1_environment_version"), "v3_corrected_turn_economy")
-        self.assertEqual(meta.get("phase1_opening_version"), "v2_guaranteed_two_unit")
 
-        # Verify compatibility validation passes with environment metadata
+        # Current v4 environment metadata has observation_dim=586 and phase1_environment_version=v4_exact_per_city_state
         wrapper = object.__new__(TribesGymWrapper)
         wrapper._catalog = SimpleNamespace(width=11, height=11)
-        wrapper.observation_space = gym.spaces.Box(low=-1e5, high=1e5, shape=(505,))
+        wrapper.observation_space = gym.spaces.Box(low=-1e5, high=1e5, shape=(586,))
         wrapper.action_space = gym.spaces.Discrete(63913)
         wrapper._catalog_fingerprint = meta["action_catalog_fingerprint"]
         wrapper._max_legal_actions = 256
+        wrapper.PHASE1_ENVIRONMENT_VERSION = "v4_exact_per_city_state"
+        wrapper.LEGAL_ACTION_FEATURE_VERSION = meta["legal_action_feature_version"]
+        wrapper.ACTION_FEATURE_DIM = meta["legal_action_feature_dim"]
+        wrapper.CATALOG_VERSION = meta["catalog_version"]
+        wrapper.CANONICALIZER_VERSION = meta["canonicalizer_version"]
+        wrapper.PHASE1_OPENING_VERSION = meta["phase1_opening_version"]
 
         env_meta = environment_compatibility_metadata(
             wrapper,
             actor_mode=meta["actor_mode"],
             max_legal_actions=meta["max_legal_actions"],
         )
-        validate_checkpoint_compatibility(meta, env_meta)
 
-        # Verify Agent instantiates and loads weights cleanly
-        adapter = self._make_dummy_env_adapter()
-        agent = Agent(
-            adapter,
-            actor_mode=meta["actor_mode"],
-            max_legal_actions=meta["max_legal_actions"],
-            legal_action_feature_dim=meta["legal_action_feature_dim"],
-        )
-        state_dict = torch.load(str(ckpt_path), map_location="cpu")
-        agent.load_state_dict(state_dict)
-        agent.eval()
-        self.assertEqual(agent.actor_mode, "legal_features")
+        with self.assertRaises(CheckpointCompatibilityError) as ctx:
+            validate_checkpoint_compatibility(meta, env_meta)
+        err = str(ctx.exception)
+        self.assertIn("observation_dim", err)
+        self.assertIn("phase1_environment_version", err)
 
     def test_historical_legal_only_checkpoint_metadata_retains_legal_only(self):
         ckpt_path = (

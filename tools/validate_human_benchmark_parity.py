@@ -19,6 +19,11 @@ if str(REPO_ROOT) not in sys.path:
 from tools import human_policy_interface
 from tools.human_benchmark import POOL_ROOT, load_benchmark_maps, official_environment
 from tools.human_policy_interface import capture_environment_contract, policy_visible_actions, policy_visible_ids
+from pol_env.Tribes.py.environment_contract import (
+    extract_owned_cities,
+    decode_owned_city_slots,
+    observation_layout,
+)
 
 
 FORBIDDEN_OFFICIAL_ATTRIBUTES = {
@@ -53,6 +58,59 @@ def assert_information_safety() -> None:
         raise RuntimeError(f"official presentation module references privileged/raw APIs: {offenders}")
 
 
+def assert_live_city_parity(
+    canonical: list[Any],
+    decoded_policy: list[dict[str, Any]],
+    human_visible: list[dict[str, Any]],
+) -> None:
+    """Verify live end-to-end invariant: canonical == decoded_policy == human_visible."""
+    if len(canonical) != len(decoded_policy):
+        raise RuntimeError(
+            f"PARITY-001 Live Discrepancy: Canonical city count ({len(canonical)}) != "
+            f"decoded policy city count ({len(decoded_policy)})\n"
+            f"Canonical: {canonical}\nDecoded: {decoded_policy}"
+        )
+    if len(decoded_policy) != len(human_visible):
+        raise RuntimeError(
+            f"PARITY-001 Live Discrepancy: Decoded policy city count ({len(decoded_policy)}) != "
+            f"human visible city count ({len(human_visible)})\n"
+            f"Decoded: {decoded_policy}\nHuman: {human_visible}"
+        )
+
+    CHECK_FIELDS = (
+        "x",
+        "y",
+        "level",
+        "population",
+        "population_need",
+        "production",
+        "supported_unit_count",
+        "unit_capacity",
+    )
+    for idx, (can, dec, hum) in enumerate(zip(canonical, decoded_policy, human_visible)):
+        can_dict = {
+            "x": can.x,
+            "y": can.y,
+            "level": can.level,
+            "population": can.population,
+            "population_need": can.population_need,
+            "production": can.production,
+            "supported_unit_count": can.supported_unit_count,
+            "unit_capacity": can.unit_capacity,
+        }
+        for field in CHECK_FIELDS:
+            c_val = can_dict[field]
+            d_val = dec.get(field)
+            h_val = hum.get(field)
+            if c_val != d_val or d_val != h_val:
+                raise RuntimeError(
+                    f"PARITY-001 Live Discrepancy at city index {idx}, field '{field}':\n"
+                    f"  Canonical (Java POV): {c_val} (full: {can_dict})\n"
+                    f"  Decoded Policy Tensor: {d_val} (full: {dec})\n"
+                    f"  Human Benchmark Visible: {h_val} (full: {hum})"
+                )
+
+
 def assert_state_parity(human_env, model_env, human_obs, model_obs, human_info, model_info) -> list[int]:
     if not np.array_equal(np.asarray(human_obs), np.asarray(model_obs)):
         raise RuntimeError("human/model flattened observations differ")
@@ -60,6 +118,28 @@ def assert_state_parity(human_env, model_env, human_obs, model_obs, human_info, 
     model_contract = capture_environment_contract(model_env, model_info)
     if human_contract != model_contract:
         raise RuntimeError("human/model environment contracts differ")
+
+    # Verify live end-to-end city state parity across all layers:
+    # 1. Canonical extraction from fog-respecting Java POV observation
+    wrapper = human_env.unwrapped
+    last_obs = getattr(wrapper.tribes_env, "_last_obs", {})
+    controlled_tribe = int(getattr(wrapper, "_controlled_tribe_id", 0))
+    canonical_cities = extract_owned_cities(last_obs, tribe_id=controlled_tribe)
+
+    # 2. Decoding the PPO model observation city block
+    width = int(model_info["map_width"])
+    height = int(model_info["map_height"])
+    layout = observation_layout(width, height)
+    obs_vec = np.asarray(model_obs, dtype=np.float32).reshape(-1)
+    city_block = obs_vec[layout.city_block_start : layout.city_block_end]
+    decoded_policy_cities = decode_owned_city_slots(city_block, width=width, height=height, max_cities=layout.city_slots)
+
+    # 3. State supplied to human benchmark interface
+    human_visible = human_policy_interface.visible_state(human_obs, human_info)
+    human_visible_cities = human_visible.get("owned_cities", [])
+
+    # Invariant: canonical == decoded_policy == human_visible
+    assert_live_city_parity(canonical_cities, decoded_policy_cities, human_visible_cities)
 
     # 1. Check legal slot tensors equality between human and model environments
     human_gids = np.asarray(human_info.get("legal_global_ids_padded", []))
