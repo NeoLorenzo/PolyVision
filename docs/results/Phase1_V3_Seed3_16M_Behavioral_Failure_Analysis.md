@@ -1,8 +1,12 @@
-# Phase 1 v3 Seed3 16M Behavioral Failure Analysis
+# Phase 1 v3 Seed3 16M Behavioral Failure Analysis (Historical)
+
+> [!NOTE]
+> **Historical Policy Diagnostic Notice:**
+> This behavioral failure analysis specifically analyzes the **previous reference checkpoint** (`runs/Tribes-v0__Phase1-Scientific-Train-V3-Seed3__3__1787526811/Phase1-Scientific-Train-V3-Seed3.cleanrl_model`, 16.88 test argmax SPT) trained under the baseline dense shaping reward without Terminal-SPT. It provides a detailed diagnostic audit of why that specific policy failed to adopt deterministic Forestry. It does not describe the subsequent [Phase 1 v3 Seed3 16M Terminal-SPT Reference Run](Phase1_V3_Seed3_16M_TerminalSPT_Reference_Run.md), which achieved 99.2% deterministic Forestry adoption and 19.34 test argmax SPT.
 
 ## 1. Executive Summary
 
-This document presents a comprehensive behavioral failure analysis and empirical hypothesis audit of the frozen reference model for PolyVision Phase 1: **`runs/Tribes-v0__Phase1-Scientific-Train-V3-Seed3__3__1787526811/Phase1-Scientific-Train-V3-Seed3.cleanrl_model`** (16,000,000 environment steps, Seed 3).
+This document presents a comprehensive behavioral failure analysis and empirical hypothesis audit of the previous frozen reference model for PolyVision Phase 1: **`runs/Tribes-v0__Phase1-Scientific-Train-V3-Seed3__3__1787526811/Phase1-Scientific-Train-V3-Seed3.cleanrl_model`** (16,000,000 environment steps, Seed 3).
 
 ### Key Verified Findings
 * **Validation Performance:** Deterministic PPO (`ppo_argmax`) achieves **17.18 mean Turn-10 SPT** (median 17.00, 95% CI [16.72, 17.66]), substantially exceeding the policy-visible greedy baseline of **7.93 SPT** and random legal baseline of **6.67 SPT**.

@@ -18,9 +18,9 @@ The policy interacts through stable global action IDs rather than state-local Ja
 - Gymnasium `Tribes-v0` environment with deterministic reset and cleanup behavior
 - 11×11 genuine Bardur corpus with a reproducible, hash-verified experimental split
 - geometry-derived observations and global action catalog
-- legality-aware PPO actor modes: `legal_only`, `legal_features`, and `dense_debug`
+- legality-aware PPO actor modes: `legal_features` (default), `legal_only` (ablation/baseline), and `dense_debug`
 - 42-dimensional semantic/economic legal-action features
-- shaped Phase 1 rewards for economy, expansion, and exploration
+- shaped Phase 1 rewards for economy, expansion, exploration, and core Terminal-SPT bonus
 - strict pre-training action-interface validation with content-aware caching
 - checkpoint sidecars that enforce environment/interface compatibility
 - asynchronous multi-JVM training, TensorBoard/W&B telemetry, diagnostics, and SPS profiling
@@ -85,14 +85,13 @@ The primary PPO entrypoint is:
 py_rl/cleanrl/cleanrl/ppo.py
 ```
 
-A representative tracked-interface run is:
+A representative development training run (using default `legal_features` actor and Terminal-SPT reward):
 
 ```powershell
 $env:POLYVISION_LEVEL_POOL_GLOB = 'levels/phase1_pool_bardur_real/train/*.csv'
 $env:POLYVISION_SOLO_NO_OPPONENT_MODE = '1'
 $env:POLYVISION_INFO_MODE = 'fast'
 python py_rl/cleanrl/cleanrl/ppo.py `
-    --actor-mode legal_features `
     --total-timesteps 500000 `
     --num-envs 12 `
     --num-steps 128 `
@@ -100,7 +99,7 @@ python py_rl/cleanrl/cleanrl/ppo.py `
     --save-frequency 100000
 ```
 
-Strict 10,000-state interface validation runs before training by default and is cached by code, configuration, and map-pool identity. TensorBoard output and models are written under `runs/`; W&B is optional with `--track`. Each model is accompanied by an action-interface JSON sidecar required by current evaluators. See [Training](docs/training.md) before launching long runs.
+Standard Phase-1 training automatically uses `legal_features` and Terminal-SPT without requiring explicit flags or reward environment variables. Strict 10,000-state interface validation runs before training by default and is cached by code, configuration, and map-pool identity. TensorBoard output and models are written under `runs/`; W&B is optional with `--track`. Each model is accompanied by an action-interface JSON sidecar required by current evaluators. See [Training](docs/training.md) for ablations, full options, and reproducibility commands.
 
 ## Evaluation and evidence
 
@@ -136,11 +135,11 @@ python tools/human_benchmark.py
 
 The command selects an unplayed human-benchmark map and presents exactly the wrapper-filtered stable global IDs available to PPO. Results remain separate from pristine test evidence; see [Human benchmark](docs/human-benchmark.md).
 
-The current frozen reference result is the **Phase 1 v3 Seed3 16M frozen reference benchmark**: on 250 held-out test maps, deterministic PPO achieved 16.88 mean Turn-10 SPT (95% CI 16.46–17.31), compared with 7.96 for the policy-visible greedy baseline. PPO beat greedy on all 250 maps, with a mean advantage of +8.93 SPT. See [Phase 1 v3 Seed3 16M Reference Run](docs/results/Phase1_V3_Seed3_16M_Reference_Run.md) for full metrics, validation/test distributions, paired comparisons, and scientific interpretation.
+The current frozen reference result is the **Phase 1 v3 Seed3 16M Terminal-SPT frozen reference benchmark**: on 250 pristine held-out test maps, deterministic PPO achieved **19.34 mean Turn-10 SPT** (95% CI 18.95–19.75, median 19.00), compared with **7.96** for the policy-visible greedy baseline and **19.87** on the 250 validation maps. PPO beat visible greedy on all 250 test maps (250 W / 0 T / 0 L), with a mean paired advantage of **+11.39 SPT**. See [Phase 1 v3 Seed3 16M Terminal-SPT Reference Run](docs/results/Phase1_V3_Seed3_16M_TerminalSPT_Reference_Run.md) for full metrics, validation/test distributions, paired comparisons, and scientific interpretation.
 
-Phase 1 is **not** complete; active optimization remains ongoing and 16.88 test argmax SPT serves as the frozen reference benchmark to beat.
+Phase 1 is **not** complete; active optimization remains ongoing and 19.34 test argmax SPT serves as the current frozen reference benchmark to beat.
 
-Historical Seed-1 and Seed-2 runs remain preserved for their respective historical task definitions. See [Phase 1 Seed-1 mixed-opening reflection](docs/results/Phase1_Seed1_Mixed_Opening_Validation_Reflection.md) and [Phase 1 scripted-opening audit](docs/results/Phase1_Scripted_Opening_Audit.md).
+Historical Seed-1, Seed-2, and the previous baseline 16M reference run remain preserved for their respective historical task and reward definitions. See [Phase 1 v3 Seed3 16M Reference Run (Superseded)](docs/results/Phase1_V3_Seed3_16M_Reference_Run.md), [Phase 1 Seed-1 mixed-opening reflection](docs/results/Phase1_Seed1_Mixed_Opening_Validation_Reflection.md), and [Phase 1 scripted-opening audit](docs/results/Phase1_Scripted_Opening_Audit.md).
 
 ## Repository structure
 
@@ -166,7 +165,8 @@ Historical Seed-1 and Seed-2 runs remain preserved for their respective historic
 - [Rewards](docs/rewards.md)
 - [Training](docs/training.md)
 - [Evaluation](docs/evaluation.md)
-- [Phase 1 v3 Seed3 16M Reference Run](docs/results/Phase1_V3_Seed3_16M_Reference_Run.md)
+- [Phase 1 v3 Seed3 16M Terminal-SPT Reference Run](docs/results/Phase1_V3_Seed3_16M_TerminalSPT_Reference_Run.md)
+- [Phase 1 v3 Seed3 16M Reference Run (Historical)](docs/results/Phase1_V3_Seed3_16M_Reference_Run.md)
 - [Phase 1 v3 Seed3 16M Behavioral Failure Analysis](docs/results/Phase1_V3_Seed3_16M_Behavioral_Failure_Analysis.md)
 - [First Phase 1 validation results (Historical)](docs/results/PolyVision_Phase1_Validation_Results.md)
 - [Phase 1 Seed-1 mixed-opening reflection](docs/results/Phase1_Seed1_Mixed_Opening_Validation_Reflection.md)

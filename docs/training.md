@@ -2,13 +2,13 @@
 
 The primary trainer is `py_rl/cleanrl/cleanrl/ppo.py`. It is based on CleanRL PPO but contains PolyVision-specific actor paths, asynchronous JVM orchestration, validation, telemetry, and checkpoint metadata.
 
-## Authoritative Phase 1 v3 Seed3 16M Reference Run
+## Authoritative Phase 1 v3 Seed3 16M Terminal-SPT Reference Run
 
-The authoritative command used to produce the **Phase 1 v3 Seed3 16M frozen reference benchmark** (`Phase1-Scientific-Train-V3-Seed3.cleanrl_model`) is:
+The authoritative command used to produce the **Phase 1 v3 Seed3 16M Terminal-SPT frozen reference benchmark** (`model_checkpoint_16000000.cleanrl_model`, SHA-256 `853bc4b1...`, completed 2026-08-25) is:
 
 ```powershell
-cd C:\PolyVision; $env:POLYVISION_LEVEL_POOL_GLOB='levels/phase1_pool_bardur_real/train/*.csv'; $env:POLYVISION_SOLO_NO_OPPONENT_MODE='1'; $env:POLYVISION_INFO_MODE='fast'; $env:POLYVISION_BATCH_LEGAL_ACTION_FETCH='1'; $env:POLYVISION_DERIVE_OBS_METADATA='1'; python py_rl/cleanrl/cleanrl/ppo.py `
-    --exp-name Phase1-Scientific-Train-V3-Seed3 `
+cd C:\PolyVision; $env:POLYVISION_LEVEL_POOL_GLOB='levels/phase1_pool_bardur_real/train/*.csv'; $env:POLYVISION_SOLO_NO_OPPONENT_MODE='1'; $env:POLYVISION_INFO_MODE='fast'; $env:POLYVISION_BATCH_LEGAL_ACTION_FETCH='1'; $env:POLYVISION_DERIVE_OBS_METADATA='1'; $env:POLYVISION_TERMINAL_SPT_REWARD_ENABLED='1'; python py_rl/cleanrl/cleanrl/ppo.py `
+    --exp-name Phase1-Scientific-Train-V3-Seed3-TerminalSPT `
     --seed 3 `
     --actor-mode legal_features `
     --total-timesteps 16000000 `
@@ -26,7 +26,21 @@ cd C:\PolyVision; $env:POLYVISION_LEVEL_POOL_GLOB='levels/phase1_pool_bardur_rea
     --validation-states 10000
 ```
 
-This 16M run represents the frozen reference benchmark for Phase 1 optimization under `phase1_environment_version=v3_corrected_turn_economy` and `phase1_opening_version=v2_guaranteed_two_unit`. For smaller local development smoke runs, use smaller `--total-timesteps` and fewer `--num-envs` as shown below.
+### Reference Run Specifications
+
+- **Run Directory:** `runs/Tribes-v0__Phase1-Scientific-Train-V3-Seed3-TerminalSPT__3__1787602198`
+- **Canonical Checkpoint:** `runs/Tribes-v0__Phase1-Scientific-Train-V3-Seed3-TerminalSPT__3__1787602198/model_checkpoint_16000000.cleanrl_model`
+- **Sidecar File:** `runs/Tribes-v0__Phase1-Scientific-Train-V3-Seed3-TerminalSPT__3__1787602198/model_checkpoint_16000000.cleanrl_model.action_interface.json`
+- **Seed:** `3`
+- **Timesteps:** 16,000,000 global environment transitions
+- **Actor Mode:** `legal_features` (42-dimensional semantic action features, 256 legal slots, 505-d observation)
+- **Environment Contract:** `phase1_environment_version=v3_corrected_turn_economy`, `phase1_opening_version=v2_guaranteed_two_unit`
+- **Reward Configuration:** `POLYVISION_TERMINAL_SPT_REWARD_ENABLED=1` (Terminal-SPT base weight 1.0, over-10 weight 2.0, over-15 weight 3.0) + standard step-level shaping
+- **Key PPO Settings:** LR 2.5e-4 with linear annealing, 20 parallel envs, 128 rollout steps per env, batch size 2560, minibatch size 640 (4 minibatches/epoch), 4 epochs, $\gamma=0.99$, $\lambda=0.95$, clip 0.2
+- **Completion Date:** 2026-08-25
+- **Authoritative Run Card:** [Phase 1 v3 Seed3 16M Terminal-SPT Reference Run](results/Phase1_V3_Seed3_16M_TerminalSPT_Reference_Run.md)
+
+This 16M run represents the active frozen reference benchmark for Phase 1 optimization. (The previous baseline run without Terminal-SPT, `Phase1-Scientific-Train-V3-Seed3.cleanrl_model`, remains preserved as a historical benchmark in [Phase 1 v3 Seed3 16M Reference Run](results/Phase1_V3_Seed3_16M_Reference_Run.md)).
 
 ## Representative development run
 
@@ -37,7 +51,6 @@ $env:POLYVISION_LEVEL_POOL_GLOB = 'levels/phase1_pool_bardur_real/train/*.csv'
 $env:POLYVISION_SOLO_NO_OPPONENT_MODE = '1'
 $env:POLYVISION_INFO_MODE = 'fast'
 python py_rl/cleanrl/cleanrl/ppo.py `
-    --actor-mode legal_features `
     --total-timesteps 500000 `
     --num-envs 12 `
     --num-steps 128 `
@@ -45,7 +58,14 @@ python py_rl/cleanrl/cleanrl/ppo.py `
     --save-frequency 100000
 ```
 
-The trainer defaults to `legal_only`, 500,000 timesteps, 12 environments, 128 rollout steps, 256 legal slots, and strict 10,000-state preflight validation. `legal_features` uses the current 42-feature representation. `dense_debug` is available for equivalence/debug work but materializes logits over the full global action space.
+Standard Phase-1 training automatically uses the `legal_features` actor mode (42-dimensional semantic action features) and the Terminal-SPT reward bonus ($w_{\text{base}}=1.0, w_{>10}=2.0, w_{>15}=3.0$) without requiring explicit CLI flags or reward environment variables.
+
+### Experimental Ablations and Overrides
+
+For controlled ablations and backward comparison experiments:
+- **`legal_only` actor mode:** Pass `--actor-mode legal_only` to score legal slots with learned global ID embeddings only (disabling the 42-d feature encoder).
+- **Disabled Terminal-SPT:** Set `$env:POLYVISION_TERMINAL_SPT_REWARD_ENABLED='0'` to disable the Turn-10 terminal reward bonus and train exclusively on step-level shaping terms.
+- **`dense_debug` mode:** Pass `--actor-mode dense_debug` to evaluate the dense 63,913-logit mask for debugging.
 
 The wrapper also defaults to `levels/phase1_pool_bardur_real/train/*.csv` when the environment variable is absent. Training must never use `validation`, `test`, or `human_benchmark`; explicit pool overrides exist for evaluation, not PPO gradient runs. Record the training glob and aggregate pool identity with every experiment.
 
@@ -55,7 +75,7 @@ Checkpoints record `phase1_environment_version=v3_corrected_turn_economy` and `p
 
 | Argument | Current default | Meaning |
 |---|---:|---|
-| `--actor-mode` | `legal_only` | `legal_only`, `legal_features`, or `dense_debug`. |
+| `--actor-mode` | `legal_features` | `legal_features` (default), `legal_only`, or `dense_debug`. |
 | `--total-timesteps` | 500,000 | Scheduled environment transitions. |
 | `--num-envs` | 12 | Parallel spawned processes/JVMs. |
 | `--num-steps` | 128 | Rollout length per environment. |

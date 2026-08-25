@@ -169,7 +169,7 @@ class TribesGymWrapper(gym.Env):
     PHASE1_LEVEL_FILE = "levels/phase1_pool_bardur_real/train/map_000001.csv"
     DEFAULT_LEVEL_POOL_GLOB = "levels/phase1_pool_bardur_real/train/*.csv"
     MAX_TURNS = 10
-    TERMINAL_SPT_REWARD_ENABLED_DEFAULT = False
+    TERMINAL_SPT_REWARD_ENABLED_DEFAULT = True
     TERMINAL_SPT_BASE_WEIGHT_DEFAULT = 1.0
     TERMINAL_SPT_OVER_10_WEIGHT_DEFAULT = 2.0
     TERMINAL_SPT_OVER_15_WEIGHT_DEFAULT = 3.0

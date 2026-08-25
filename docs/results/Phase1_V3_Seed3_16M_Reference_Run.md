@@ -1,13 +1,18 @@
-# Phase 1 v3 Seed3 16M Frozen Reference Benchmark Run Card
+# Phase 1 v3 Seed3 16M Frozen Reference Benchmark Run Card (Superseded)
+
+> [!NOTE]
+> **Superseded Reference Notice:**
+> This run was the previous frozen Phase-1 v3 Seed3 16M reference benchmark (`Phase1-Scientific-Train-V3-Seed3.cleanrl_model`, 16.88 test argmax SPT). It has now been **superseded as the active reference benchmark** by the [Phase 1 v3 Seed3 16M Terminal-SPT Reference Run](Phase1_V3_Seed3_16M_TerminalSPT_Reference_Run.md) (19.34 test argmax SPT). Its results remain fully valid historical evidence for its original reward configuration.
 
 ## Overview and Status
 
-- **Status:** Phase 1 v3 Seed3 16M frozen reference benchmark
-- **Disposition:** Frozen reference benchmark while Phase 1 optimization continues (Phase 1 is **not** complete; this run establishes the baseline to beat)
+- **Status:** SUPERSEDED FROZEN REFERENCE (Preserved Historical Benchmark)
+- **Active Reference:** [Phase 1 v3 Seed3 16M Terminal-SPT Reference Run](Phase1_V3_Seed3_16M_TerminalSPT_Reference_Run.md)
+- **Disposition:** Historical frozen reference benchmark for the original non-terminal reward configuration; preserved for comparative baseline integrity
 - **Primary Metric:** Final Turn-10 stars per turn (SPT)
 
 > [!IMPORTANT]
-> **Preferred Scientific Headline:**
+> **Historical Scientific Headline:**
 > "On 250 held-out test maps, deterministic PPO achieved 16.88 mean Turn-10 SPT (95% CI 16.46–17.31), compared with 7.96 for the policy-visible greedy baseline. PPO beat greedy on all 250 maps, with a mean advantage of +8.93 SPT."
 
 ## Authoritative Run Identity & Provenance
@@ -140,7 +145,7 @@ The slight drop of $-0.30$ SPT from validation to test confirms strong out-of-di
    Performance differences between historical V1/V2 runs and this V3 run must **not** be interpreted as a controlled algorithmic improvement. The underlying environment mechanics changed materially (monotonic tick advancement, accumulating star economy, and Drylands Fishing masking) and the training budget was expanded to 16M steps.
 4. **Historical Evidence:**
    Historical V1 and V2 results remain documented and valid exclusively within their respective historical task definitions.
-5. **Active Status:**
-   This run serves as the **frozen reference benchmark** for Phase 1. Phase 1 is **not** complete; active optimization continues to target higher Turn-10 SPT efficiency.
+5. **Superseded Status:**
+   This run served as the previous **frozen reference benchmark** for Phase 1 and has been superseded by the [Phase 1 v3 Seed3 16M Terminal-SPT Reference Run](Phase1_V3_Seed3_16M_TerminalSPT_Reference_Run.md). Phase 1 is **not** complete; active optimization continues.
 6. **Behavioral Failure Analysis:**
    A detailed behavioral analysis and hypothesis audit is documented in [Phase 1 v3 Seed3 16M Behavioral Failure Analysis](Phase1_V3_Seed3_16M_Behavioral_Failure_Analysis.md). Key findings establish that deterministic argmax exhibits 0.0% explicit Forestry adoption across all 250 validation maps, while stochastic sampled replicates with Forestry achieve a +2.533 mean paired SPT advantage across 237 within-map comparisons (descriptive association).

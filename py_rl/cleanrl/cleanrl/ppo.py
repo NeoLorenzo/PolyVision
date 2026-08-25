@@ -135,11 +135,11 @@ class Args:
     """abort training if illegal_sample_rate exceeds this threshold (0.0001 = 0.01%)"""
     max_fallback_end_turn_rate: float = 0.0001
     """abort training if fallback_end_turn_rate exceeds this threshold (0.0001 = 0.01%)"""
-    actor_mode: str = "legal_only"
-    """policy actor mode: legal_only (default), legal_features, or dense_debug"""
+    actor_mode: str = "legal_features"
+    """policy actor mode: legal_features (default), legal_only, or dense_debug"""
     max_legal_actions: int = 256
-    """fixed legal-action slot tensor length for legal_only actor mode"""
-    legal_action_feature_dim: int = int(getattr(TribesGymWrapper, "ACTION_FEATURE_DIM", 22))
+    """fixed legal-action slot tensor length for legal-action actor modes"""
+    legal_action_feature_dim: int = int(getattr(TribesGymWrapper, "ACTION_FEATURE_DIM", 42))
     """per-legal-slot feature width for legal_features actor mode"""
     old_logprob_recompute_tol: float = 1e-5
     """absolute tolerance for pre-update old_logprob recomputation invariant"""
@@ -463,9 +463,9 @@ class Agent(nn.Module):
     def __init__(
         self,
         envs,
-        actor_mode: str = "legal_only",
+        actor_mode: str = "legal_features",
         max_legal_actions: int = 256,
-        legal_action_feature_dim: int = int(getattr(TribesGymWrapper, "ACTION_FEATURE_DIM", 22)),
+        legal_action_feature_dim: int = int(getattr(TribesGymWrapper, "ACTION_FEATURE_DIM", 42)),
     ):
         super().__init__()
         self.actor_mode = str(actor_mode).strip().lower()

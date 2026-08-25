@@ -2,6 +2,60 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Defaults_TerminalSPT_and_LegalFeatures_Promotion-039] - (2026-08-25)
+
+### Scope
+- Promoted Terminal-SPT reward shaping to become a core default reward term in `TribesGymWrapper` (`TERMINAL_SPT_REWARD_ENABLED_DEFAULT = True`).
+- Promoted `legal_features` to become the default PPO actor mode in `py_rl/cleanrl/cleanrl/ppo.py` (`actor_mode = "legal_features"` in `Args` and `Agent.__init__`).
+- Preserved full backward compatibility for `legal_only` and `dense_debug` actor modes as explicit CLI/adapter arguments.
+- Preserved full configurability and explicit environment variable override (`POLYVISION_TERMINAL_SPT_REWARD_ENABLED=0`) to disable Terminal-SPT for controlled ablations and backward comparisons.
+- Enforced authoritative checkpoint metadata loading across all evaluators and diagnostic tools (older `legal_only` checkpoints load as `legal_only`; the frozen Terminal-SPT reference checkpoint loads as `legal_features`).
+- Preserved frozen checkpoint weights, sidecars, and canonical evaluation artifacts without alteration.
+- Added comprehensive regression tests in `tools/tests/test_phase1_defaults_and_compatibility.py`.
+
+### Rationale
+- Following the empirical validation of the Phase 1 v3 Seed3 16M Terminal-SPT reference experiment (+2.46 test argmax SPT, 99.2% Forestry adoption), Terminal-SPT shaping and 42-dimensional semantic action features define the standard Phase-1 optimization configuration going forward.
+- Promoting these defaults establishes a single coherent default story across the codebase while preserving explicit overrides for controlled ablations.
+
+## [Phase1-V3_Seed3_16M_TerminalSPT_Reference_Run_and_Freeze-038] - (2026-08-25)
+
+### Scope
+- Finalized and froze the completed PolyVision Phase 1 v3 Seed3 16M Terminal-SPT training run (`model_checkpoint_16000000.cleanrl_model`, SHA-256 `853bc4b1d60cf114a715da0ae7a253af357cfded78f5ef9cc7422182b976889a`) as the active CURRENT PHASE-1 REFERENCE BENCHMARK.
+- Preserved historical validity of the previous reference run (`Phase1-Scientific-Train-V3-Seed3.cleanrl_model`) and its behavioral failure analysis.
+- Created the authoritative run card `docs/results/Phase1_V3_Seed3_16M_TerminalSPT_Reference_Run.md`.
+- Updated repository documentation (`README.md`, `docs/evaluation.md`, `docs/rewards.md`, `docs/training.md`, `docs/reproducibility.md`, and previous run card) with complete provenance, metric verifications, and single-seed context without modifying environment code, rewards, PPO, or model weights.
+
+### Rationale
+- The Terminal-SPT reward formulation was introduced to address the delayed economic credit assignment failure identified in the historical reference model (0.0% deterministic Forestry adoption).
+- Canonical validation (250 maps, 3,000 episodes) and pristine-test evaluation (250 maps, 3,000 episodes) demonstrated substantial performance gains (+2.46 test argmax SPT improvement over the previous reference) and resolved the deterministic tech adoption bottleneck (99.2% Forestry adoption).
+- Freezing this run establishes a new, durable, reproducible reference benchmark (19.34 test argmax SPT) for ongoing Phase 1 optimization.
+
+### Key Results
+- **Validation (250 maps, 3,000 episodes):**
+  - PPO argmax: Mean 19.87 Turn-10 SPT (95% CI [19.46, 20.29]), Median 20.00
+  - PPO sampled: Mean 19.53 Turn-10 SPT (95% CI [19.25, 19.82]), Median 19.60
+  - Visible greedy: Mean 7.93 Turn-10 SPT (95% CI [7.78, 8.09]), Median 8.00
+  - Random legal: Mean 6.67 Turn-10 SPT (95% CI [6.58, 6.75]), Median 6.60
+  - Paired comparisons: PPO argmax vs visible greedy 250 W / 0 T / 0 L (+11.94 SPT); PPO sampled vs random legal 250 W / 0 T / 0 L (+12.86 SPT); PPO argmax vs random legal 250 W / 0 T / 0 L (+13.20 SPT).
+- **Pristine Test (250 maps, 3,000 episodes):**
+  - PPO argmax: Mean 19.34 Turn-10 SPT (95% CI [18.95, 19.75]), Median 19.00
+  - PPO sampled: Mean 18.96 Turn-10 SPT (95% CI [18.64, 19.27]), Median 19.00
+  - Visible greedy: Mean 7.96 Turn-10 SPT (95% CI [7.82, 8.10]), Median 8.00
+  - Random legal: Mean 6.70 Turn-10 SPT (95% CI [6.62, 6.79]), Median 6.60
+  - Paired comparisons: PPO argmax vs visible greedy 250 W / 0 T / 0 L (+11.39 SPT); PPO sampled vs random legal 250 W / 0 T / 0 L (+12.25 SPT); PPO argmax vs random legal 250 W / 0 T / 0 L (+12.64 SPT).
+- **Generalization:**
+  - Validation-to-test drop: $-0.53$ SPT for argmax, $-0.58$ SPT for sampled.
+
+### Implemented
+- Created `docs/results/Phase1_V3_Seed3_16M_TerminalSPT_Reference_Run.md` with complete provenance, training hyperparameters, exact Terminal-SPT reward weights ($w_{\text{base}}=1.0, w_{>10}=2.0, w_{>15}=3.0$), validation and test metrics, paired analysis, and secondary diagnostic distributions.
+- Updated `docs/results/Phase1_V3_Seed3_16M_Reference_Run.md` with a superseded notice and cross-reference to the new reference run.
+- Updated `docs/results/Phase1_V3_Seed3_16M_Behavioral_Failure_Analysis.md` with a notice confirming its scope applies to the historical non-terminal reference model.
+- Updated `docs/evaluation.md` setting the Terminal-SPT run as active reference, preserving previous reference results in a dedicated historical section.
+- Updated `docs/rewards.md` documenting the Terminal-SPT formulation, exact weights, distinguishing training reward from evaluation metrics, and providing single-seed context.
+- Updated `docs/training.md` documenting the Terminal-SPT 16M training run specifications and launch command.
+- Updated `docs/reproducibility.md` updating the active frozen reference provenance table.
+- Updated `README.md` to feature the new active reference benchmark (19.34 test argmax SPT, 19.87 validation).
+
 ## [Phase1-V3_Seed3_16M_Behavioral_Failure_Analysis_and_Verification-037] - (2026-08-24)
 
 ### Scope

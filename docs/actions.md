@@ -29,8 +29,8 @@ The wrapper also contains active curriculum filters: before two cities it priori
 
 | Mode | Policy scoring path | Intended use |
 |---|---|---|
-| `legal_only` | Scores only current legal slots using learned embeddings of stable global IDs. | Current default and efficient baseline. |
-| `legal_features` | Adds a learned encoding of per-action semantic/economic features to legal-slot scoring. | Current richer legality-aware actor. |
+| `legal_features` | Adds a learned encoding of per-action semantic/economic features to legal-slot scoring. | Standard Phase-1 default actor. |
+| `legal_only` | Scores only current legal slots using learned embeddings of stable global IDs. | Ablations and backward comparisons. |
 | `dense_debug` | Produces logits for all 63,913 global IDs, then applies a dense legality mask. | Debugging and equivalence checks, not the efficient path. |
 
 The fixed legal-slot capacity defaults to **256** (`POLYVISION_MAX_LEGAL_ACTIONS` / `--max-legal-actions`). Exceeding it is a hard error, not silent truncation.

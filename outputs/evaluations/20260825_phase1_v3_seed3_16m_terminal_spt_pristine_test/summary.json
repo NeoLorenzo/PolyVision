@@ -1,0 +1,208 @@
+{
+  "bootstrap": {
+    "method": "fixed-seed nonparametric percentile bootstrap; stochastic headline bootstraps per-map replicate means",
+    "samples": 5000
+  },
+  "canonical": true,
+  "evaluation_id": "20260825_phase1_v3_seed3_16m_terminal_spt_pristine_test",
+  "evaluation_schema_version": "polyvision-phase1-evaluation-v1",
+  "paired": {
+    "ppo_argmax_vs_random_legal": {
+      "left": "ppo_argmax",
+      "losses": 0,
+      "maps": 250,
+      "mean_difference": 12.642400000000002,
+      "mean_difference_ci95": [
+        12.224,
+        13.0544
+      ],
+      "median_difference": 12.6,
+      "right": "random_legal",
+      "ties": 0,
+      "win_rate": 1.0,
+      "wins": 250
+    },
+    "ppo_argmax_vs_visible_greedy": {
+      "left": "ppo_argmax",
+      "losses": 0,
+      "maps": 250,
+      "mean_difference": 11.388,
+      "mean_difference_ci95": [
+        10.98,
+        11.788
+      ],
+      "median_difference": 11.0,
+      "right": "visible_greedy",
+      "ties": 0,
+      "win_rate": 1.0,
+      "wins": 250
+    },
+    "ppo_sampled_vs_random_legal": {
+      "left": "ppo_sampled",
+      "losses": 0,
+      "maps": 250,
+      "mean_difference": 12.2544,
+      "mean_difference_ci95": [
+        11.9456,
+        12.5472
+      ],
+      "median_difference": 12.2,
+      "right": "random_legal",
+      "ties": 0,
+      "win_rate": 1.0,
+      "wins": 250
+    }
+  },
+  "policies": {
+    "ppo_argmax": {
+      "episode_level": {
+        "count": 250,
+        "max": 29.0,
+        "mean": 19.344,
+        "mean_ci95": [
+          18.928,
+          19.748
+        ],
+        "median": 19.0,
+        "min": 12.0,
+        "p05": 14.0,
+        "p25": 17.0,
+        "p75": 21.0,
+        "p95": 25.0,
+        "stddev": 3.301706994314489
+      },
+      "episodes": 250,
+      "headline_level": "map_level",
+      "map_level": {
+        "count": 250,
+        "max": 29.0,
+        "mean": 19.344,
+        "mean_ci95": [
+          18.9479,
+          19.752
+        ],
+        "median": 19.0,
+        "min": 12.0,
+        "p05": 14.0,
+        "p25": 17.0,
+        "p75": 21.0,
+        "p95": 25.0,
+        "stddev": 3.301706994314489
+      },
+      "maps": 250
+    },
+    "ppo_sampled": {
+      "episode_level": {
+        "count": 1250,
+        "max": 30.0,
+        "mean": 18.956,
+        "mean_ci95": [
+          18.7424,
+          19.16402
+        ],
+        "median": 19.0,
+        "min": 8.0,
+        "p05": 13.0,
+        "p25": 17.0,
+        "p75": 21.0,
+        "p95": 25.0,
+        "stddev": 3.759224576363113
+      },
+      "episodes": 1250,
+      "headline_level": "map_level",
+      "map_level": {
+        "count": 250,
+        "max": 24.6,
+        "mean": 18.956,
+        "mean_ci95": [
+          18.636,
+          19.265639999999998
+        ],
+        "median": 19.0,
+        "min": 11.8,
+        "p05": 14.8,
+        "p25": 17.2,
+        "p75": 20.6,
+        "p95": 23.309999999999995,
+        "stddev": 2.5546209803831283
+      },
+      "maps": 250
+    },
+    "random_legal": {
+      "episode_level": {
+        "count": 1250,
+        "max": 12.0,
+        "mean": 6.7016,
+        "mean_ci95": [
+          6.6304,
+          6.772
+        ],
+        "median": 7.0,
+        "min": 4.0,
+        "p05": 5.0,
+        "p25": 6.0,
+        "p75": 7.0,
+        "p95": 9.0,
+        "stddev": 1.257705409990215
+      },
+      "episodes": 1250,
+      "headline_level": "map_level",
+      "map_level": {
+        "count": 250,
+        "max": 8.4,
+        "mean": 6.7016,
+        "mean_ci95": [
+          6.618399999999999,
+          6.78642
+        ],
+        "median": 6.6,
+        "min": 4.8,
+        "p05": 5.6,
+        "p25": 6.25,
+        "p75": 7.2,
+        "p95": 7.909999999999997,
+        "stddev": 0.675501776905442
+      },
+      "maps": 250
+    },
+    "visible_greedy": {
+      "episode_level": {
+        "count": 250,
+        "max": 11.0,
+        "mean": 7.956,
+        "mean_ci95": [
+          7.808,
+          8.1
+        ],
+        "median": 8.0,
+        "min": 5.0,
+        "p05": 6.0,
+        "p25": 7.0,
+        "p75": 9.0,
+        "p95": 10.0,
+        "stddev": 1.1659768471252456
+      },
+      "episodes": 250,
+      "headline_level": "map_level",
+      "map_level": {
+        "count": 250,
+        "max": 11.0,
+        "mean": 7.956,
+        "mean_ci95": [
+          7.816,
+          8.096
+        ],
+        "median": 8.0,
+        "min": 5.0,
+        "p05": 6.0,
+        "p25": 7.0,
+        "p75": 9.0,
+        "p95": 10.0,
+        "stddev": 1.1659768471252456
+      },
+      "maps": 250
+    }
+  },
+  "pool": "test",
+  "primary_metric": "final Turn-10 stars per turn"
+}

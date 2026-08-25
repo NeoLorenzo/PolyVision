@@ -1,8 +1,8 @@
 # Evaluation
 
-> **Current Reference Benchmark:** The active reference baseline is the **Phase 1 v3 Seed3 16M frozen reference benchmark** (`Phase1-Scientific-Train-V3-Seed3.cleanrl_model`), evaluated under `phase1_environment_version=v3_corrected_turn_economy` and `phase1_opening_version=v2_guaranteed_two_unit`. The model and evaluation protocol were frozen prior to running its canonical pristine test evaluation. Phase 1 is **not** complete; active optimization continues.
+> **Current Reference Benchmark:** The active reference baseline is the **Phase 1 v3 Seed3 16M Terminal-SPT frozen reference benchmark** (`model_checkpoint_16000000.cleanrl_model`, SHA-256 `853bc4b1...`), evaluated under `phase1_environment_version=v3_corrected_turn_economy` and `phase1_opening_version=v2_guaranteed_two_unit` with Terminal-SPT reward shaping enabled. The model and evaluation protocol were frozen prior to running its canonical pristine test evaluation. Phase 1 is **not** complete; active optimization continues.
 >
-> Historical Seed-1 remains shelved and valid only for historical `v1_mixed_capital_regression`.
+> The previous [Phase 1 v3 Seed3 16M Reference Run](results/Phase1_V3_Seed3_16M_Reference_Run.md) (16.88 test argmax SPT) is preserved as a historical benchmark. Historical Seed-1 remains shelved and valid only for historical `v1_mixed_capital_regression`.
 
 PolyVision has checkpoint introspection, a canonical Phase 1 batch evaluator, fair policy-visible baselines, contract validators, and historical comparison artifacts. Current-interface multi-seed evidence remains an active research target.
 
@@ -33,11 +33,53 @@ Final Turn-10 stars per turn is the primary capability metric; shaped return is 
 
 Outputs are written to `outputs/evaluations/<evaluation_id>/`: `config.json`, `episodes.jsonl`, `per_map.csv`, `summary.json`, `summary.csv`, and `comparison.csv`. Configuration records manifest/pool identity, ordered map hashes, schedule/RNG rules, checkpoint and sidecar hashes, interface metadata, Git/runtime provenance, and relevant `POLYVISION_*` settings. `--max-maps` and nonstandard repeats produce an explicitly partial, smoke, noncanonical result.
 
-## Canonical v3 Seed3 16M reference results
+## Active Reference Benchmark Results (Phase 1 v3 Seed3 16M Terminal-SPT)
 
-The authoritative run card is documented in [Phase 1 v3 Seed3 16M Reference Run](results/Phase1_V3_Seed3_16M_Reference_Run.md).
+The authoritative run card is documented in [Phase 1 v3 Seed3 16M Terminal-SPT Reference Run](results/Phase1_V3_Seed3_16M_TerminalSPT_Reference_Run.md).
 
-### Validation evaluation (`outputs/evaluations/20260824_phase1_v3_seed3_16m_validation_canonical`)
+### Validation evaluation (`outputs/evaluations/20260825_phase1_v3_seed3_16m_terminal_spt_validation_canonical`)
+
+Evaluated on 250 held-out validation maps (3,000 episodes total):
+- **PPO argmax:** Mean 19.87 Turn-10 SPT (95% CI [19.46, 20.29]), Median 20.00
+- **PPO sampled:** Mean 19.53 Turn-10 SPT (95% CI [19.25, 19.82]), Median 19.60
+- **Visible greedy:** Mean 7.93 Turn-10 SPT (95% CI [7.78, 8.09]), Median 8.00
+- **Random legal:** Mean 6.67 Turn-10 SPT (95% CI [6.58, 6.75]), Median 6.60
+- **Paired comparisons:**
+  - PPO argmax vs visible greedy: 250 W / 0 T / 0 L (+11.94 SPT mean advantage, 95% CI [11.52, 12.36])
+  - PPO sampled vs random legal: 250 W / 0 T / 0 L (+12.86 SPT mean advantage, 95% CI [12.59, 13.14])
+  - PPO argmax vs random legal: 250 W / 0 T / 0 L (+13.20 SPT mean advantage, 95% CI [12.78, 13.62])
+
+### Pristine test evaluation (`outputs/evaluations/20260825_phase1_v3_seed3_16m_terminal_spt_pristine_test`)
+
+Evaluated on 250 pristine test maps after checkpoint freeze (3,000 episodes total):
+- **PPO argmax:** Mean 19.34 Turn-10 SPT (95% CI [18.95, 19.75]), Median 19.00
+- **PPO sampled:** Mean 18.96 Turn-10 SPT (95% CI [18.64, 19.27]), Median 19.00
+- **Visible greedy:** Mean 7.96 Turn-10 SPT (95% CI [7.82, 8.10]), Median 8.00
+- **Random legal:** Mean 6.70 Turn-10 SPT (95% CI [6.62, 6.79]), Median 6.60
+- **Paired comparisons:**
+  - PPO argmax vs visible greedy: 250 W / 0 T / 0 L (+11.39 SPT mean advantage, 95% CI [10.98, 11.79])
+  - PPO sampled vs random legal: 250 W / 0 T / 0 L (+12.25 SPT mean advantage, 95% CI [11.95, 12.55])
+  - PPO argmax vs random legal: 250 W / 0 T / 0 L (+12.64 SPT mean advantage, 95% CI [12.22, 13.05])
+- **Validation $\rightarrow$ Test deltas:** argmax $-0.53$ SPT, sampled $-0.58$ SPT, greedy $+0.02$ SPT, random $+0.03$ SPT.
+
+### Comparison: Active Terminal-SPT Reference vs. Previous Frozen Reference
+
+| Split / Policy | Previous Reference (No Terminal-SPT) | Active Reference (Terminal-SPT) | Delta |
+|---|---:|---:|---:|
+| **Validation PPO argmax** | 17.18 SPT | **19.87 SPT** | **+2.69 SPT** |
+| **Validation PPO sampled** | 17.70 SPT | **19.53 SPT** | **+1.83 SPT** |
+| **Test PPO argmax** | 16.88 SPT | **19.34 SPT** | **+2.46 SPT** |
+| **Test PPO sampled** | 17.55 SPT | **18.96 SPT** | **+1.41 SPT** |
+
+Notably, under the Terminal-SPT reward, deterministic argmax performance exceeds sampled rollout performance on both validation (19.87 vs 19.53) and test (19.34 vs 18.96), while also adopting deterministic Forestry on 99.2% of maps (compared to 0.0% in the previous reference).
+
+---
+
+## Historical Phase 1 v3 Seed3 16M Reference Results (Superseded)
+
+The original reference run card is documented in [Phase 1 v3 Seed3 16M Reference Run](results/Phase1_V3_Seed3_16M_Reference_Run.md).
+
+### Historical Validation evaluation (`outputs/evaluations/20260824_phase1_v3_seed3_16m_validation_canonical`)
 
 Evaluated on 250 held-out validation maps (3,000 episodes total):
 - **PPO argmax:** Mean 17.18 Turn-10 SPT (95% CI [16.72, 17.66]), Median 17.00
@@ -46,7 +88,7 @@ Evaluated on 250 held-out validation maps (3,000 episodes total):
 - **Random legal:** Mean 6.67 Turn-10 SPT (95% CI [6.58, 6.75]), Median 6.60
 - **Paired comparisons:** PPO argmax beat visible greedy on 249/250 maps (249 W / 0 T / 1 L, +9.25 SPT mean difference). PPO sampled beat random legal on 250/250 maps (+11.03 SPT). PPO argmax beat random legal on 250/250 maps (+10.52 SPT).
 
-### Pristine test evaluation (`outputs/evaluations/20260824_phase1_v3_seed3_16m_pristine_test`)
+### Historical Pristine test evaluation (`outputs/evaluations/20260824_phase1_v3_seed3_16m_pristine_test`)
 
 Evaluated on 250 pristine test maps after checkpoint freeze (3,000 episodes total):
 - **PPO argmax:** Mean 16.88 Turn-10 SPT (95% CI [16.46, 17.31]), Median 17.00
@@ -56,7 +98,7 @@ Evaluated on 250 pristine test maps after checkpoint freeze (3,000 episodes tota
 - **Paired comparisons:** PPO argmax beat visible greedy on all 250 maps (250 W / 0 T / 0 L, +8.93 SPT mean difference). PPO sampled beat random legal on 250/250 maps (+10.84 SPT). PPO argmax beat random legal on 250/250 maps (+10.18 SPT).
 - **Validation $\rightarrow$ Test deltas:** argmax $-0.30$ SPT, sampled $-0.15$ SPT, greedy $+0.03$ SPT, random $+0.03$ SPT.
 
-### Diagnostic 4M Checkpoint Evaluation (`outputs/evaluations/20260824_phase1_v3_seed3_4m_validation_argmax`)
+### Historical Diagnostic 4M Checkpoint Evaluation (`outputs/evaluations/20260824_phase1_v3_seed3_4m_validation_argmax`)
 
 A focused diagnostic evaluation was conducted on the frozen 4,000,000-step checkpoint (`model_checkpoint_4000000.cleanrl_model`) across all 250 validation maps (1 episode per map, deterministic argmax, seed 42) to test the specific hypothesis that PPO learned deterministic Forestry early in training and subsequently forgot it:
 - **Purpose:** Hypothesis testing for behavioral analysis (not checkpoint selection or benchmark ranking).
@@ -124,6 +166,6 @@ Report mean, median, standard deviation/confidence interval, and percentiles for
 
 ## Interpreting existing evidence
 
-The historical W&B export includes the completed 10M training run for Seed-1. Its retained values are training snapshots; canonical evaluation evidence is documented in dedicated validation and test suites. The active reference baseline is the Phase 1 v3 Seed3 16M frozen reference benchmark (`Phase1-Scientific-Train-V3-Seed3.cleanrl_model`), while Phase 1 optimization continues.
+The historical W&B export includes the completed 10M training run for Seed-1. Its retained values are training snapshots; canonical evaluation evidence is documented in dedicated validation and test suites. The active reference baseline is the Phase 1 v3 Seed3 16M Terminal-SPT frozen reference benchmark (`model_checkpoint_16000000.cleanrl_model`), while Phase 1 optimization continues.
 
 The strongest committed repeated-episode comparison from early development is a historical 500-episode PPO-versus-Organization-oracle evaluation. It used an older map/action contract and a map sequence that was not strictly paired between policies. It is useful methodology and milestone evidence but is not directly comparable to current checkpoints. Details live in the clearly marked [historical benchmark registry](history/model-run-benchmark-log.md).
