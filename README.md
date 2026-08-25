@@ -172,6 +172,7 @@ Historical Seed-1, Seed-2, and the previous baseline 16M reference run remain pr
 - [Phase 1 Seed-1 mixed-opening reflection](docs/results/Phase1_Seed1_Mixed_Opening_Validation_Reflection.md)
 - [Phase 1 scripted-opening audit](docs/results/Phase1_Scripted_Opening_Audit.md)
 - [Human benchmark](docs/human-benchmark.md)
+- [Human–AI Information Parity Audit](docs/Human_Information_Parity_Audit.md)
 - [Maps](docs/maps.md)
 - [Reproducibility](docs/reproducibility.md)
 - [Troubleshooting](docs/troubleshooting.md)

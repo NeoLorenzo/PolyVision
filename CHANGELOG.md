@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-Human_AI_Information_Parity_Audit-040] - (2026-08-25)
+
+### Scope
+- Finalized and authored the authoritative Baseline Human–AI Information Parity Audit (`docs/Human_Information_Parity_Audit.md`, Version `1.0.0`) establishing normative specifications for future parity implementations.
+- Audited the full information pipeline across game state (505-dim observation vector), legal-action generation and Phase-1 tactical filtering, legal-action features (42-dim vector across P0–P3 hierarchy), and public game knowledge.
+- Sourced and cited commercial/official Polytopia human-interface evidence (`polytopia.io`, Official Manual, Community Wiki) across all human-visible claims.
+- Corrected the authoritative city unit-capacity rule to $\text{Capacity} = \text{Level} + 1$ based on `City.canAddUnit()` (`unitsID.size() < (level + 1)`).
+- Separated engine state availability from fog-respecting Java POV JSON serialization (`PythonEnv.java`) and whole-policy visibility (state + action identity + action features).
+- Added a comprehensive Whole-Policy Cross-Layer Reconciliation matrix and policy provenance taxonomy (`H0`, `H1`, `H2`, `T`, `P`).
+- Restructured classification taxonomy to enforce strict single primary classifications with modular secondary descriptive flags (`INDIRECT_LEGALITY_SIGNAL`, `CROSS_LAYER_PARTIAL`, etc.).
+- Formulated the core Human-Interface Equivalence Invariant for no-privilege verification.
+- Replaced implementation-prescriptive language with architecture-neutral parity requirements.
+- Documented Phase-1 prioritzed retraining roadmap and open design decisions without modifying environment behavior, neural architecture, rewards, or frozen model weights.
+
 ## [Phase1-Defaults_TerminalSPT_and_LegalFeatures_Promotion-039] - (2026-08-25)
 
 ### Scope
