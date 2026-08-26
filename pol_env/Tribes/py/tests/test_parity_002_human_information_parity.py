@@ -853,7 +853,6 @@ class TestParity002HumanInformationParity(unittest.TestCase):
                 self.assertEqual(tech_costs_1["FORESTRY"], 6)  # 4 + 2*1
                 self.assertEqual(tech_costs_2["FORESTRY"], 8)  # 4 + 2*2
 
-            # --- Part 3: Static Costs for SPAWN, BUILD, RESOURCE_GATHERING, GROW_FOREST ---
             # Place ANIMAL resource in City 2 territory (5, 6) to make RESOURCE_GATHERING reachable (Bardur starts with HUNTING)
             gs.getBoard().setCityIdAt(5, 6, c2_id)
             gs.getBoard().setResourceAt(5, 6, jvm.core.Types.RESOURCE.ANIMAL)
@@ -868,19 +867,33 @@ class TestParity002HumanInformationParity(unittest.TestCase):
                     r_enum = getattr(jvm.core.Types.RESOURCE, r_name)
                     self.assertEqual(a.get("star_cost"), r_enum.getCost())
 
-            # Research FORESTRY to make GROW_FOREST / BUILD LUMBER_HUT reachable
+            # Research FORESTRY and place a FOREST tile in City 2 territory (5, 7) to make BUILD LUMBER_HUT reachable
+            gs.getBoard().setCityIdAt(5, 7, c2_id)
+            gs.getBoard().setTerrainAt(5, 7, jvm.core.Types.TERRAIN.FOREST)
             t0.getTechTree().doResearchInit(jvm.core.Types.TECHNOLOGY.FORESTRY)
+            t0.setStars(20)
             env.tribes_env._env.recomputePlayerActions(0)
             raw_actions_forestry = env.tribes_env.list_actions()
             for a in raw_actions_forestry:
                 a_type = a.get("type")
                 observed_families.add(a_type)
-                if a_type == "GROW_FOREST":
-                    self.assertEqual(a.get("star_cost"), jvm.core.TribesConfig.GROW_FOREST_COST)
-                elif a_type == "BUILD":
+                if a_type == "BUILD":
                     b_name = a.get("building_type")
                     b_enum = getattr(jvm.core.Types.BUILDING, b_name)
                     self.assertEqual(a.get("star_cost"), b_enum.getCost())
+
+            # Research SPIRITUALISM and place a PLAIN tile in City 2 territory (5, 8) to make GROW_FOREST reachable
+            gs.getBoard().setCityIdAt(5, 8, c2_id)
+            gs.getBoard().setTerrainAt(5, 8, jvm.core.Types.TERRAIN.PLAIN)
+            t0.getTechTree().doResearchInit(jvm.core.Types.TECHNOLOGY.SPIRITUALISM)
+            t0.setStars(20)
+            env.tribes_env._env.recomputePlayerActions(0)
+            raw_actions_spiritualism = env.tribes_env.list_actions()
+            for a in raw_actions_spiritualism:
+                a_type = a.get("type")
+                observed_families.add(a_type)
+                if a_type == "GROW_FOREST":
+                    self.assertEqual(a.get("star_cost"), jvm.core.TribesConfig.GROW_FOREST_COST)
 
             self.assertEqual(jvm.core.Types.UNIT.WARRIOR.getCost(), 2)
             self.assertEqual(jvm.core.Types.UNIT.RIDER.getCost(), 3)
@@ -904,6 +917,8 @@ class TestParity002HumanInformationParity(unittest.TestCase):
             self.assertIn("RESEARCH_TECH", observed_families)
             self.assertIn("SPAWN", observed_families)
             self.assertIn("RESOURCE_GATHERING", observed_families)
+            self.assertIn("BUILD", observed_families)
+            self.assertIn("GROW_FOREST", observed_families)
         finally:
             env.close()
 

@@ -58,6 +58,10 @@ public class PythonEnv {
         gs.computePlayerActions(t0);
     }
 
+    /**
+     * Diagnostic/test-support API to access the internal GameState instance for test assertions.
+     * Never exposed as a policy-visible observation input.
+     */
     public GameState getGameState() {
         return this.gs;
     }
@@ -73,6 +77,10 @@ public class PythonEnv {
         gs.computePlayerActions(newActiveTribe);
     }
 
+    /**
+     * Diagnostic/test-support API to force action recomputation for a tribe after state modification in tests.
+     * Never exposed as a policy-visible observation input.
+     */
     public void recomputePlayerActions(int tribeId) {
         Tribe t = gs.getTribe(tribeId);
         if (t != null) {

@@ -1042,6 +1042,10 @@ public class Board {
     public Types.BUILDING getBuildingAt(int x, int y){ return buildings[x][y]; }
     public void setUnits(int[][] u){ this.units = u; }
     public int getCityIdAt(int x, int y) { return tileCityId[x][y]; }
+    /**
+     * Diagnostic/test-support API to assign territory ownership to a tile in integration test fixtures.
+     * Never exposed as a policy-visible observation input.
+     */
     public void setCityIdAt(int x, int y, int cityId) { tileCityId[x][y] = cityId; }
     public int[] getCapitalIDs() {return capitalIDs;}
     boolean isNative() { return isNative; }

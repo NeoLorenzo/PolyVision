@@ -44,6 +44,7 @@ The fixed legal-slot capacity defaults to **256** (`POLYVISION_MAX_LEGAL_ACTIONS
 - normalized research, resource, building, and level-up identities (features 24..27);
 - semantic flags for Organization, Forestry, common resources/buildings, and Workshop (features 28..35);
 - predicted population/SPT effects and city-upgrade readiness/progress (features 36..41);
+- **action star cost**: `float(star_cost) / ACTION_STAR_COST_SCALE` (where `ACTION_STAR_COST_SCALE = 50.0`, feature 42, `FEAT-MISS-001`);
 - **action spatial coordinates**: normalized source `(src_x / (width - 1), src_y / (height - 1))` and destination `(target_x / (width - 1), target_y / (height - 1))` across spatial action families (`MOVE`, `CAPTURE`, `SPAWN`, `BUILD`, `RESOURCE_GATHERING`, `CLEAR_FOREST`, `GROW_FOREST`, `LEVEL_UP`, `EXAMINE`) (features 43..46, `FEAT-SPAT-001`). For the 11×11 corpus, width - 1 = height - 1 = 10.0.
 
 Features are derived from policy-visible state plus the legal action's structured metadata. Full-visibility observations are diagnostic-only and are not fed into these features.

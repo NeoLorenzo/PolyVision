@@ -181,6 +181,10 @@ public class GameState {
      * agent's decision time, but agents can use it on their forward models at real expense.
      * @param tribe Tribe for which actions are being computed.
      */
+    /**
+     * Diagnostic/test-support API to bypass action cache and recompute available actions for a tribe.
+     * Never exposed as a policy-visible observation input.
+     */
     public void forceComputePlayerActions(Tribe tribe) {
         this.computedActionTribeIdFlag = -1;
         computePlayerActions(tribe);
