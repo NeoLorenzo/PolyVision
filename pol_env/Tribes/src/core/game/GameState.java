@@ -181,6 +181,11 @@ public class GameState {
      * agent's decision time, but agents can use it on their forward models at real expense.
      * @param tribe Tribe for which actions are being computed.
      */
+    public void forceComputePlayerActions(Tribe tribe) {
+        this.computedActionTribeIdFlag = -1;
+        computePlayerActions(tribe);
+    }
+
     void computePlayerActions(Tribe tribe)
     {
         board.setActiveTribeID(tribe.getTribeId());

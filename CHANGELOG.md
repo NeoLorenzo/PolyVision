@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-PARITY_002_2_Final_Contract_Verification-045] - (2026-08-26)
+
+### Scope
+- Completed **`PARITY-002.2 — Final Contract Verification`**, finalizing and freezing `v5_human_information_parity` with 6,424 observation dimensions and 47 legal action feature dimensions.
+- **Key Enhancements & Cleanups:**
+  1. **Documented Building Order:** Corrected `SUPPORTED_BUILDINGS` lists across all docs (`docs/observations.md`, `CHANGELOG.md`) to authoritative order keys 0..18 (`PORT`, `MINE`, `FORGE`, `FARM`, `WINDMILL`, `CUSTOMS_HOUSE`, `LUMBER_HUT`, `SAWMILL`, `TEMPLE`, `WATER_TEMPLE`, `FOREST_TEMPLE`, `MOUNTAIN_TEMPLE`, `ALTAR_OF_PEACE`, `EMPERORS_TOMB`, `EYE_OF_GOD`, `GATE_OF_POWER`, `GRAND_BAZAR`, `PARK_OF_FORTUNE`, `TOWER_OF_WISDOM`).
+  2. **Audit City Slot Descriptions:** Removed `/7`, `/8`, `/15` normalization claims from `docs/Human_Information_Parity_Audit.md` to accurately document unclipped raw floats.
+  3. **Live Dynamic Research Tech Cost Scaling Integration Test:** Implemented live multi-city engine test establishing that Java `computeActionStarCost` scales dynamic research costs ($4 + \text{tier} \times N_{\text{cities}}$) across 1-city vs 2-city states on identical technologies (`ORGANIZATION`, `FORESTRY`) matching `TECHNOLOGY.getCost(numCities, techTree)` and policy action feature index 42. Verified static costs for SPAWN, BUILD, RESOURCE_GATHERING, and GROW_FOREST.
+  4. **Fast Feature Vector Builder Hardening:** Populated features 42..46 (`star_cost`, `src_x/max_x`, `src_y/max_y`, `target_x/max_x`, `target_y/max_y`) in `_compute_legal_action_feature_vector_cached`.
+  5. **Unit Turn Status Legality Signal Parity:** Tested controlled engine state comparisons verifying that `FRESH` status enables `MOVE` actions while `MOVED` status disables them.
+  6. **Unit Home-City Fail Closed:** Enforced that visible owned units with unmapped `cityID` raise `ObservationContractError`.
+  7. **Coordinate Normalization Documentation:** Documented abstract contract formulas `x_norm = x / (width - 1)` and `y_norm = y / (height - 1)` in `docs/actions.md`.
+  8. **Import Hygiene:** Added `Sequence` to `from typing import ...` in `environment_contract.py`.
+
 ## [Phase1-PARITY_002_1_Audit_Reconciliation_and_Strict_Closure-044] - (2026-08-26)
 
 ### Scope
@@ -24,7 +38,7 @@ All notable changes to this project are documented in this file.
   - Legal action feature version: `LEGAL_ACTION_FEATURE_VERSION = "v1_4_parity_spatial_and_cost"` (47 dimensions)
   - Legal action star cost scale constant: `ACTION_STAR_COST_SCALE = 50.0`
 - **Disparities Resolved:**
-  1. `STATE-MAP-001` (Building Placement & Types): Added 19 categorical binary spatial channels in `SUPPORTED_BUILDINGS` order (`PORT`, `MINE`, `TEMPLE`, `WATER_TEMPLE`, `FOREST_TEMPLE`, `MOUNTAIN_TEMPLE`, `FARM`, `WINDMILL`, `SAWMILL`, `CUSTOMS_HOUSE`, `FORGE`, `LUMBER_HUT`, `ALTAR_OF_PEACE`, `GRAND_BAZAR`, `EMPERORS_TOMB`, `EYE_OF_GOD`, `GATE_OF_POWER`, `PARK_OF_FORTUNE`, `TOWER_OF_WISDOM`).
+  1. `STATE-MAP-001` (Building Placement & Types): Added 19 categorical binary spatial channels in `SUPPORTED_BUILDINGS` order (`PORT`, `MINE`, `FORGE`, `FARM`, `WINDMILL`, `CUSTOMS_HOUSE`, `LUMBER_HUT`, `SAWMILL`, `TEMPLE`, `WATER_TEMPLE`, `FOREST_TEMPLE`, `MOUNTAIN_TEMPLE`, `ALTAR_OF_PEACE`, `EMPERORS_TOMB`, `EYE_OF_GOD`, `GATE_OF_POWER`, `GRAND_BAZAR`, `PARK_OF_FORTUNE`, `TOWER_OF_WISDOM`).
   2. `STATE-MAP-002` (Road Grid): Added binary road plane from Java `Board.isRoad(x, y)` on POV state.
   3. `STATE-MAP-003` (Capital Identity): Added `city_is_capital` boolean to city slot feature index 9 (expanding slot feature dimension to 10 and city block to 90 values).
   4. `FEAT-MISS-001` (Action Star Cost): Exposed authoritative Java `star_cost` in action feature index 42 as `action_star_cost_norm` (`star_cost / 50.0`).

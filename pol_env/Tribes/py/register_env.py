@@ -2163,6 +2163,24 @@ class TribesGymWrapper(gym.Env):
         feat[39] = 1.0 if bool(eco["is_level_up_claim"]) else 0.0
         feat[40] = float(np.clip(float(eco["progress_before"]), 0.0, 1.0))
         feat[41] = 1.0 if bool(eco["ready_before"]) else 0.0
+
+        # Action star cost (FEAT-MISS-001)
+        raw_star_cost = float(action.get("star_cost", 0.0) if isinstance(action, dict) else 0.0)
+        feat[42] = float(raw_star_cost / float(self.ACTION_STAR_COST_SCALE))
+
+        # Spatial source/target coordinates (FEAT-SPAT-001)
+        src_x, src_y, target_x, target_y = self._extract_action_coordinates(action, obs)
+        dims = self._board_dimensions_from_obs(obs)
+        if dims is not None:
+            max_x = max(1.0, float(dims[0] - 1))
+            max_y = max(1.0, float(dims[1] - 1))
+        else:
+            max_x = 1.0
+            max_y = 1.0
+        feat[43] = float(src_x / max_x) if src_x is not None else 0.0
+        feat[44] = float(src_y / max_y) if src_y is not None else 0.0
+        feat[45] = float(target_x / max_x) if target_x is not None else 0.0
+        feat[46] = float(target_y / max_y) if target_y is not None else 0.0
         return feat
 
     def _build_legal_action_features_padded(self, legal_global_ids_padded, legal_action_valid_mask, legal_id_to_raw_index, legal_actions, obs):
@@ -5158,7 +5176,11 @@ class TribesGymWrapper(gym.Env):
                 except Exception:
                     continue
                 if 0 <= ux < width and 0 <= uy < height and u_tribe == controlled_tribe:
-                    if not fog_mask[ux, uy] and u_cid in city_actor_to_slot:
+                    if not fog_mask[ux, uy]:
+                        if u_cid not in city_actor_to_slot:
+                            raise ObservationContractError(
+                                f"Visible owned unit at ({ux}, {uy}) has cityID={u_cid} which cannot be mapped to any owned city slot"
+                            )
                         slot_i = city_actor_to_slot[u_cid]
                         if slot_i < MAX_OWNED_CITIES:
                             unit_home_city_channels[slot_i][ux, uy] = 1.0

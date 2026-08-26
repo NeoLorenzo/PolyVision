@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Sequence
 
 
 class MapGeometryError(RuntimeError):

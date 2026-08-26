@@ -58,6 +58,10 @@ public class PythonEnv {
         gs.computePlayerActions(t0);
     }
 
+    public GameState getGameState() {
+        return this.gs;
+    }
+
     public int getActiveTribeID() {
         return gs.getActiveTribeID();
     }
@@ -67,6 +71,13 @@ public class PythonEnv {
         // Recompute actions for the new active tribe
         Tribe newActiveTribe = gs.getTribe(tribeId);
         gs.computePlayerActions(newActiveTribe);
+    }
+
+    public void recomputePlayerActions(int tribeId) {
+        Tribe t = gs.getTribe(tribeId);
+        if (t != null) {
+            gs.forceComputePlayerActions(t);
+        }
     }
 
     public int getTick() {

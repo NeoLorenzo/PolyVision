@@ -324,12 +324,14 @@ class TestParity002HumanInformationParity(unittest.TestCase):
                 "resource": [[-1] * 11 for _ in range(11)],
             },
             "unit": {
-                "1": {"x": 2, "y": 3, "type": 0, "tribeId": 0},
-                "2": {"x": 4, "y": 5, "type": 1, "tribeId": 0},
-                "3": {"x": 6, "y": 7, "type": 4, "tribeId": 0},
+                "1": {"x": 2, "y": 3, "type": 0, "tribeId": 0, "cityID": 10},
+                "2": {"x": 4, "y": 5, "type": 1, "tribeId": 0, "cityID": 10},
+                "3": {"x": 6, "y": 7, "type": 4, "tribeId": 0, "cityID": 10},
             },
-            "city": {},
-            "tribes": {"0": {"star": 5, "score": 100, "citiesID": [], "nKills": 0}},
+            "city": {
+                "10": {"x": 0, "y": 0, "level": 1, "population": 0, "population_need": 2, "production": 2, "tribeID": 0, "units": [1, 2, 3], "isCapital": True},
+            },
+            "tribes": {"0": {"star": 5, "score": 100, "citiesID": [10], "nKills": 0}},
             "tick": 1,
             "activeTribeID": 0,
         }
@@ -407,6 +409,76 @@ class TestParity002HumanInformationParity(unittest.TestCase):
         for s in range(2, MAX_OWNED_CITIES):
             uhc_slot = tensor[self.layout.unit_home_city_start + s * 121 : self.layout.unit_home_city_start + (s + 1) * 121]
             self.assertEqual(np.sum(uhc_slot), 0.0)
+
+        # Actor-ID invariance: permuting city IDs 100/200 -> 999/888 yields identical observation tensor
+        obs_permuted = {
+            "board": {
+                "terrain": [[0] * 11 for _ in range(11)],
+                "unitID": [[-1] * 11 for _ in range(11)],
+                "cityID": [[-1] * 11 for _ in range(11)],
+                "building": [[-1] * 11 for _ in range(11)],
+                "road": [[0] * 11 for _ in range(11)],
+                "resource": [[-1] * 11 for _ in range(11)],
+            },
+            "unit": {
+                "77": {"x": 3, "y": 3, "type": 0, "tribeId": 0, "cityID": 999},
+                "88": {"x": 6, "y": 6, "type": 0, "tribeId": 0, "cityID": 888},
+            },
+            "city": {
+                "999": {"x": 1, "y": 1, "level": 1, "population": 0, "population_need": 2, "production": 2, "tribeID": 0, "units": [77], "isCapital": True},
+                "888": {"x": 8, "y": 8, "level": 1, "population": 0, "population_need": 2, "production": 2, "tribeID": 0, "units": [88], "isCapital": False},
+            },
+            "tribes": {"0": {"star": 5, "score": 100, "citiesID": [999, 888], "nKills": 0}},
+            "tick": 1,
+            "activeTribeID": 0,
+        }
+        tensor_permuted = wrapper._dict_to_array(obs_permuted)
+        np.testing.assert_array_equal(tensor, tensor_permuted)
+
+        # Fail closed: visible owned unit with unmapped cityID raises ObservationContractError
+        obs_unmapped = {
+            "board": {
+                "terrain": [[0] * 11 for _ in range(11)],
+                "unitID": [[-1] * 11 for _ in range(11)],
+                "cityID": [[-1] * 11 for _ in range(11)],
+                "building": [[-1] * 11 for _ in range(11)],
+                "road": [[0] * 11 for _ in range(11)],
+                "resource": [[-1] * 11 for _ in range(11)],
+            },
+            "unit": {
+                "10": {"x": 3, "y": 3, "type": 0, "tribeId": 0, "cityID": 999},  # 999 not in city dict!
+            },
+            "city": {
+                "100": {"x": 1, "y": 1, "level": 1, "population": 0, "population_need": 2, "production": 2, "tribeID": 0, "units": [10], "isCapital": True},
+            },
+            "tribes": {"0": {"star": 5, "score": 100, "citiesID": [100], "nKills": 0}},
+            "tick": 1,
+            "activeTribeID": 0,
+        }
+        with self.assertRaises(ObservationContractError):
+            wrapper._dict_to_array(obs_unmapped)
+
+        # Fog defense-in-depth: unit under fog does not raise and its channels remain 0.0
+        obs_fogged = {
+            "board": {
+                "terrain": [[7] * 11 for _ in range(11)],  # all fog
+                "unitID": [[-1] * 11 for _ in range(11)],
+                "cityID": [[-1] * 11 for _ in range(11)],
+                "building": [[-1] * 11 for _ in range(11)],
+                "road": [[0] * 11 for _ in range(11)],
+                "resource": [[-1] * 11 for _ in range(11)],
+            },
+            "unit": {
+                "10": {"x": 3, "y": 3, "type": 0, "tribeId": 0, "cityID": 999},
+            },
+            "city": {},
+            "tribes": {"0": {"star": 5, "score": 100, "citiesID": [], "nKills": 0}},
+            "tick": 1,
+            "activeTribeID": 0,
+        }
+        tensor_fogged = wrapper._dict_to_array(obs_fogged)
+        uhc_all_fog = tensor_fogged[self.layout.unit_home_city_start : self.layout.unit_home_city_end]
+        self.assertEqual(np.sum(uhc_all_fog), 0.0)
 
     # --- Test 7: Strict City Territory Association ---
     def test_07_strict_city_territory_association_and_unmapped_assertion(self):
@@ -616,7 +688,7 @@ class TestParity002HumanInformationParity(unittest.TestCase):
 
     # --- Test 10: Unit Turn Status Legality Signal Parity ---
     def test_10_unit_turn_status_legality_signal_parity(self):
-        """Two otherwise identical states differing only in unit turn status (FRESH vs MOVED) produce distinct legal action sets."""
+        """In Phase 1, unit turn status (FRESH vs non-FRESH) is losslessly recoverable from the complete legal-action interface."""
         map_files = sorted(Path(REPO_ROOT / "pol_env" / "Tribes" / "levels" / "phase1_pool_bardur_real").glob("**/*.csv"))
         if not map_files:
             self.skipTest("No levels found in levels/phase1_pool_bardur_real")
@@ -629,30 +701,60 @@ class TestParity002HumanInformationParity(unittest.TestCase):
         env = TribesGymWrapper()
         try:
             obs, info = env.reset(seed=42)
-            # Turn 1/2: starting unit is FRESH, legal MOVE actions exist
+            jvm = env.tribes_env._jvm
+            gs = env.tribes_env._env.getGameState()
+
+            # Step 1: Initial state (FRESH unit): legal MOVE actions exist
             raw_actions_fresh = env.tribes_env.list_actions()
             move_actions_fresh = [a for a in raw_actions_fresh if a.get("type") == "MOVE"]
             self.assertGreater(len(move_actions_fresh), 0, "Fresh unit must have legal MOVE actions")
 
-            # Execute the first MOVE action
+            # Step 2: Controlled engine comparison: setting target unit's status to MOVED disables MOVE actions for that unit
+            t0 = gs.getTribe(0)
+            units = list(gs.getUnits(0))
+            self.assertGreater(len(units), 0)
+            target_unit = units[0]
+            target_x = int(move_actions_fresh[0]["src_x"])
+            target_y = int(move_actions_fresh[0]["src_y"])
+            orig_status = target_unit.getStatus()
+            self.assertEqual(str(orig_status), "FRESH")
+
+            # Change status to MOVED in Java engine and recompute available player actions
+            target_unit.setStatus(jvm.core.Types.TURN_STATUS.MOVED)
+            env.tribes_env._env.recomputePlayerActions(0)
+            raw_actions_moved = env.tribes_env.list_actions()
+            move_actions_target = [a for a in raw_actions_moved if a.get("type") == "MOVE" and int(a.get("src_x", -1)) == target_x and int(a.get("src_y", -1)) == target_y]
+            self.assertEqual(len(move_actions_target), 0, "Controlled MOVED status must produce zero legal MOVE actions for that unit")
+
+            # Non-move actions (e.g. END_TURN, RESEARCH_TECH, SPAWN) remain legal
+            end_turn_actions = [a for a in raw_actions_moved if a.get("type") == "END_TURN"]
+            self.assertEqual(len(end_turn_actions), 1)
+
+            # Restore FRESH status and verify MOVE actions return
+            target_unit.setStatus(orig_status)
+            env.tribes_env._env.recomputePlayerActions(0)
+            raw_actions_restored = env.tribes_env.list_actions()
+            move_actions_restored = [a for a in raw_actions_restored if a.get("type") == "MOVE" and int(a.get("src_x", -1)) == target_x and int(a.get("src_y", -1)) == target_y]
+            self.assertGreater(len(move_actions_restored), 0, "Restored FRESH status must restore legal MOVE actions")
+
+            # Step 3: Natural execution transition: executing a MOVE transitions unit to MOVED/FINISHED
             first_move = move_actions_fresh[0]
             res = env._canonicalize_action_to_global_id(first_move, env.tribes_env._last_obs)
             move_gid = int(res[0] if isinstance(res, tuple) else res)
             self.assertIsNotNone(move_gid)
             obs_after, rew, done, trun, info_after = env.step(move_gid)
 
-            # In the same turn, that moved unit cannot move again
-            raw_actions_moved = env.tribes_env.list_actions()
+            raw_actions_stepped = env.tribes_env.list_actions()
             unit_map = env.tribes_env._last_obs.get("unit", {})
             for u in unit_map.values():
                 if u.get("status") in ("MOVED", "FINISHED"):
-                    moved_unit_moves = [a for a in raw_actions_moved if a.get("type") == "MOVE" and a.get("src_x") == u.get("x") and a.get("src_y") == u.get("y")]
-                    self.assertEqual(len(moved_unit_moves), 0, "Unit with MOVED/FINISHED status must generate zero legal MOVE actions")
+                    moved_unit_moves = [a for a in raw_actions_stepped if a.get("type") == "MOVE" and a.get("src_x") == u.get("x") and a.get("src_y") == u.get("y")]
+                    self.assertEqual(len(moved_unit_moves), 0, "Stepped MOVED unit must generate zero legal MOVE actions")
         finally:
             env.close()
 
     # --- Test 11: Java Engine Authoritative Star Cost & Dynamic Research Cost Integration ---
-    def test_11_java_engine_authoritative_star_cost_integration(self):
+    def test_11_java_engine_authoritative_star_cost_dynamic_and_static_integration(self):
         """Verify Java computeActionStarCost emits exact dynamic cost for RESEARCH_TECH (scaling with city count) and static costs."""
         map_files = sorted(Path(REPO_ROOT / "pol_env" / "Tribes" / "levels" / "phase1_pool_bardur_real").glob("**/*.csv"))
         if not map_files:
@@ -666,40 +768,142 @@ class TestParity002HumanInformationParity(unittest.TestCase):
         env = TribesGymWrapper()
         try:
             obs, info = env.reset(seed=42)
-            raw_actions = env.tribes_env.list_actions()
+            jvm = env.tribes_env._jvm
+            gs = env.tribes_env._env.getGameState()
+            t0 = gs.getTribe(0)
+            tech_tree = t0.getTechTree()
 
-            for a in raw_actions:
+            # --- Part 1: 1-City State Dynamic Tech Cost ---
+            num_cities_1 = t0.getNumCities()
+            self.assertEqual(num_cities_1, 1)
+            raw_actions_1 = env.tribes_env.list_actions()
+
+            observed_families = set()
+            tech_costs_1 = {}
+            for a in raw_actions_1:
                 a_type = a.get("type")
+                observed_families.add(a_type)
                 if a_type == "RESEARCH_TECH":
-                    tech = a.get("tech_type")
-                    star_cost = a.get("star_cost")
-                    # With 1 city (starting state), Tier 1 tech costs 4 + 1*1 = 5, Tier 2 costs 4 + 2*1 = 6
-                    if tech in ("FORESTRY", "ARCHERY"):
-                        self.assertEqual(star_cost, 6)
-                    elif tech in ("ORGANIZATION", "CLIMBING", "RIDING", "FISHING"):
-                        self.assertEqual(star_cost, 5)
-
+                    t_name = a.get("tech_type")
+                    tech_enum = getattr(jvm.core.Types.TECHNOLOGY, t_name)
+                    expected_cost = tech_enum.getCost(num_cities_1, tech_tree)
+                    actual_cost = a.get("star_cost")
+                    self.assertEqual(actual_cost, expected_cost)
+                    tech_costs_1[t_name] = actual_cost
                 elif a_type == "SPAWN":
-                    u_type = a.get("unit_type")
-                    star_cost = a.get("star_cost")
-                    if u_type == "WARRIOR":
-                        self.assertEqual(star_cost, 2)
-                    elif u_type == "RIDER":
-                        self.assertEqual(star_cost, 3)
-
+                    u_name = a.get("unit_type")
+                    u_enum = getattr(jvm.core.Types.UNIT, u_name)
+                    self.assertEqual(a.get("star_cost"), u_enum.getCost())
                 elif a_type == "RESOURCE_GATHERING":
-                    r_type = a.get("resource_type")
-                    star_cost = a.get("star_cost")
-                    if r_type in ("ANIMAL", "FRUIT", "FISH", "CROPS"):
-                        self.assertEqual(star_cost, 2)
-                    elif r_type in ("ORE", "WHALES"):
-                        self.assertEqual(star_cost, 0)
+                    r_name = a.get("resource_type")
+                    r_enum = getattr(jvm.core.Types.RESOURCE, r_name)
+                    self.assertEqual(a.get("star_cost"), r_enum.getCost())
 
-            # Verify action feature index 42 reconstructs exact star cost
-            legal_feats = info["legal_action_features_padded"][:info["legal_action_count"]]
-            for idx, feat in enumerate(legal_feats):
-                reconstructed_cost = round(feat[42] * ACTION_STAR_COST_SCALE)
-                self.assertGreaterEqual(reconstructed_cost, 0)
+            self.assertIn("ORGANIZATION", tech_costs_1)
+            self.assertEqual(tech_costs_1["ORGANIZATION"], jvm.core.Types.TECHNOLOGY.ORGANIZATION.getCost(1, tech_tree))
+
+            # Verify action feature index 42 matches exact serialized star cost for all legal slots
+            legal_feats_1 = info["legal_action_features_padded"][:info["legal_action_count"]]
+            legal_gids_1 = info["legal_global_ids_padded"][:info["legal_action_count"]]
+            for slot_idx, feat in enumerate(legal_feats_1):
+                gid = int(legal_gids_1[slot_idx])
+                matching = [a for a in raw_actions_1 if env._canonicalize_action_to_global_id(a, env.tribes_env._last_obs)[0] == gid]
+                if matching:
+                    expected_star_cost = float(matching[0].get("star_cost", 0))
+                    reconstructed_cost = feat[42] * ACTION_STAR_COST_SCALE
+                    self.assertAlmostEqual(
+                        reconstructed_cost,
+                        expected_star_cost,
+                        places=4,
+                        msg=f"Feature 42 cost {reconstructed_cost} != serialized cost {expected_star_cost} for action {matching[0]}",
+                    )
+
+            # --- Part 2: 2-City State Dynamic Tech Cost Scaling ---
+            # Construct a legitimate 2nd city in GameState for Tribe 0
+            c2 = jvm.core.actors.City(5, 5, 0)
+            c2_id = 9999
+            gs.getBoard().addActor(c2, c2_id)
+            t0.addCity(c2_id)
+            env.tribes_env._env.recomputePlayerActions(0)
+
+            num_cities_2 = t0.getNumCities()
+            self.assertEqual(num_cities_2, 2)
+
+            raw_actions_2 = env.tribes_env.list_actions()
+            tech_costs_2 = {}
+            for a in raw_actions_2:
+                a_type = a.get("type")
+                observed_families.add(a_type)
+                if a_type == "RESEARCH_TECH":
+                    t_name = a.get("tech_type")
+                    tech_enum = getattr(jvm.core.Types.TECHNOLOGY, t_name)
+                    expected_cost = tech_enum.getCost(num_cities_2, tech_tree)
+                    actual_cost = a.get("star_cost")
+                    self.assertEqual(actual_cost, expected_cost)
+                    tech_costs_2[t_name] = actual_cost
+
+            self.assertIn("ORGANIZATION", tech_costs_2)
+            self.assertEqual(tech_costs_2["ORGANIZATION"], jvm.core.Types.TECHNOLOGY.ORGANIZATION.getCost(2, tech_tree))
+
+            # Assert dynamic scaling on the SAME technology
+            self.assertNotEqual(tech_costs_1["ORGANIZATION"], tech_costs_2["ORGANIZATION"])
+            self.assertEqual(tech_costs_1["ORGANIZATION"], 5)  # 4 + 1*1
+            self.assertEqual(tech_costs_2["ORGANIZATION"], 6)  # 4 + 1*2
+            if "FORESTRY" in tech_costs_1 and "FORESTRY" in tech_costs_2:
+                self.assertEqual(tech_costs_1["FORESTRY"], 6)  # 4 + 2*1
+                self.assertEqual(tech_costs_2["FORESTRY"], 8)  # 4 + 2*2
+
+            # --- Part 3: Static Costs for SPAWN, BUILD, RESOURCE_GATHERING, GROW_FOREST ---
+            # Place ANIMAL resource in City 2 territory (5, 6) to make RESOURCE_GATHERING reachable (Bardur starts with HUNTING)
+            gs.getBoard().setCityIdAt(5, 6, c2_id)
+            gs.getBoard().setResourceAt(5, 6, jvm.core.Types.RESOURCE.ANIMAL)
+            t0.setStars(20)
+            env.tribes_env._env.recomputePlayerActions(0)
+            raw_actions_rg = env.tribes_env.list_actions()
+            for a in raw_actions_rg:
+                a_type = a.get("type")
+                observed_families.add(a_type)
+                if a_type == "RESOURCE_GATHERING":
+                    r_name = a.get("resource_type")
+                    r_enum = getattr(jvm.core.Types.RESOURCE, r_name)
+                    self.assertEqual(a.get("star_cost"), r_enum.getCost())
+
+            # Research FORESTRY to make GROW_FOREST / BUILD LUMBER_HUT reachable
+            t0.getTechTree().doResearchInit(jvm.core.Types.TECHNOLOGY.FORESTRY)
+            env.tribes_env._env.recomputePlayerActions(0)
+            raw_actions_forestry = env.tribes_env.list_actions()
+            for a in raw_actions_forestry:
+                a_type = a.get("type")
+                observed_families.add(a_type)
+                if a_type == "GROW_FOREST":
+                    self.assertEqual(a.get("star_cost"), jvm.core.TribesConfig.GROW_FOREST_COST)
+                elif a_type == "BUILD":
+                    b_name = a.get("building_type")
+                    b_enum = getattr(jvm.core.Types.BUILDING, b_name)
+                    self.assertEqual(a.get("star_cost"), b_enum.getCost())
+
+            self.assertEqual(jvm.core.Types.UNIT.WARRIOR.getCost(), 2)
+            self.assertEqual(jvm.core.Types.UNIT.RIDER.getCost(), 3)
+            self.assertEqual(jvm.core.Types.RESOURCE.FRUIT.getCost(), 2)
+            self.assertEqual(jvm.core.Types.RESOURCE.ANIMAL.getCost(), 2)
+            self.assertEqual(jvm.core.Types.RESOURCE.ORE.getCost(), 0)
+            self.assertEqual(jvm.core.TribesConfig.GROW_FOREST_COST, 5)
+            self.assertEqual(jvm.core.TribesConfig.BURN_FOREST_COST, 5)
+            self.assertEqual(jvm.core.TribesConfig.ROAD_COST, 2)
+            self.assertEqual(jvm.core.Types.BUILDING.PORT.getCost(), 10)
+            self.assertEqual(jvm.core.Types.BUILDING.MINE.getCost(), 5)
+            self.assertEqual(jvm.core.Types.BUILDING.LUMBER_HUT.getCost(), 2)
+            self.assertEqual(jvm.core.Types.BUILDING.SAWMILL.getCost(), 5)
+            self.assertEqual(jvm.core.Types.BUILDING.FORGE.getCost(), 5)
+            self.assertEqual(jvm.core.Types.BUILDING.FARM.getCost(), 5)
+            self.assertEqual(jvm.core.Types.BUILDING.WINDMILL.getCost(), 5)
+            self.assertEqual(jvm.core.Types.BUILDING.CUSTOMS_HOUSE.getCost(), 5)
+            self.assertEqual(jvm.core.Types.BUILDING.TEMPLE.getCost(), 20)
+
+            # Confirm observed required action families in state
+            self.assertIn("RESEARCH_TECH", observed_families)
+            self.assertIn("SPAWN", observed_families)
+            self.assertIn("RESOURCE_GATHERING", observed_families)
         finally:
             env.close()
 
