@@ -109,6 +109,7 @@ TECHNOLOGY_ORDER = (
 NUM_TECHNOLOGIES = len(TECHNOLOGY_ORDER)  # 24
 
 NUM_CITY_TERRITORY_CHANNELS = MAX_OWNED_CITIES  # 9
+NUM_UNIT_HOME_CITY_CHANNELS = MAX_OWNED_CITIES  # 9
 LEGACY_SCALAR_DIM = 6
 ECONOMY_SCALAR_DIM = 12
 
@@ -133,41 +134,38 @@ def extract_owned_cities(
     """Extract canonical owned-city states from fog-respecting POV observation dictionary.
 
     Cities are deterministically sorted by spatial coordinates (x, y) ascending.
-    Raw actor IDs are never exposed in the returned records.
     """
-    if not isinstance(obs_dict, Mapping):
-        raise ObservationContractError(f"obs_dict must be a Mapping, got {type(obs_dict).__name__}")
-    tribe_id = int(tribe_id)
-    city_map = obs_dict.get("city", {})
-    if not isinstance(city_map, Mapping):
+    controlled_tribe_id = int(tribe_id)
+    cities_map = obs_dict.get("city", {})
+    if not isinstance(cities_map, dict):
         return []
-    owned: list[OwnedCityState] = []
-    for raw_actor_id, city_info in city_map.items():
-        if not isinstance(city_info, Mapping):
-            continue
-        try:
-            c_tribe = int(city_info.get("tribeID", -1))
-        except Exception:
-            continue
-        if c_tribe != tribe_id:
-            continue
-        try:
-            x = int(city_info.get("x", -1))
-            y = int(city_info.get("y", -1))
-            level = int(city_info.get("level", 1))
-            population = int(city_info.get("population", 0))
-            population_need = int(city_info.get("population_need", level + 1))
-            production = int(city_info.get("production", 1))
-            units = city_info.get("units", [])
-            supported_unit_count = len(units) if isinstance(units, (list, tuple)) else 0
-            unit_capacity = level + 1
-            is_capital = bool(city_info.get("isCapital", False))
-        except Exception as exc:
-            raise ObservationContractError(
-                f"Malformed city record for actor {raw_actor_id}: {exc}"
-            ) from exc
 
-        owned.append(
+    collected: list[OwnedCityState] = []
+    for _key, city_data in cities_map.items():
+        if not isinstance(city_data, dict):
+            continue
+        try:
+            city_tribe_id = int(city_data.get("tribeID", -1))
+        except (TypeError, ValueError):
+            continue
+        if city_tribe_id != controlled_tribe_id:
+            continue
+
+        try:
+            x = int(city_data["x"])
+            y = int(city_data["y"])
+            level = int(city_data["level"])
+            population = int(city_data["population"])
+            population_need = int(city_data["population_need"])
+            production = int(city_data["production"])
+            units_list = city_data.get("units", [])
+            supported_unit_count = len(units_list) if isinstance(units_list, (list, tuple)) else 0
+            unit_capacity = level + 1
+            is_capital = bool(city_data.get("isCapital", False))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ObservationContractError(f"Malformed city payload in observation: {city_data}") from exc
+
+        collected.append(
             OwnedCityState(
                 x=x,
                 y=y,
@@ -180,73 +178,71 @@ def extract_owned_cities(
                 is_capital=is_capital,
             )
         )
-    # Sort deterministically by spatial coordinates (x, y) ascending: primary key x, secondary key y
-    owned.sort(key=lambda c: (c.x, c.y))
-    return owned
+
+    # Sort strictly by (x, y) ascending for deterministic, actor-ID-independent slot mapping
+    collected.sort(key=lambda c: (c.x, c.y))
+    return collected
 
 
 def encode_owned_city_slots(
-    owned_cities: list[OwnedCityState],
+    owned_cities: Sequence[OwnedCityState],
+    *,
     width: int,
     height: int,
     max_cities: int = MAX_OWNED_CITIES,
 ) -> list[float]:
-    """Encode owned cities into a fixed-width, exact, non-clipping 1D feature list.
-
-    Raises ObservationContractError if owned city count exceeds max_cities or coordinates
-    are out of bounds.
-    """
+    """Encode owned cities into a fixed-size normalized flat float vector of length max_cities * CITY_SLOT_FEATURE_DIM."""
     if len(owned_cities) > max_cities:
         raise ObservationContractError(
-            f"Owned city count {len(owned_cities)} exceeds MAX_OWNED_CITIES={max_cities}"
+            f"Observed {len(owned_cities)} owned cities, exceeding maximum slot capacity of {max_cities}"
         )
-    max_x = max(1, width - 1)
-    max_y = max(1, height - 1)
-    features: list[float] = []
+
+    max_x = float(max(1, width - 1))
+    max_y = float(max(1, height - 1))
+    encoded: list[float] = []
+
     for i in range(max_cities):
         if i < len(owned_cities):
-            city = owned_cities[i]
-            if city.x < 0 or city.x >= width or city.y < 0 or city.y >= height:
-                raise ObservationContractError(
-                    f"City coordinates ({city.x}, {city.y}) out of bounds for board {width}x{height}"
-                )
-            features.extend([
-                1.0,  # city_present
-                float(city.x) / float(max_x),
-                float(city.y) / float(max_y),
-                float(city.level),
-                float(city.population),
-                float(city.population_need),
-                float(city.production),
-                float(city.supported_unit_count),
-                float(city.unit_capacity),
-                1.0 if city.is_capital else 0.0,
-            ])
+            c = owned_cities[i]
+            encoded.extend(
+                [
+                    1.0,  # city_present
+                    float(c.x) / max_x,  # city_x
+                    float(c.y) / max_y,  # city_y
+                    float(c.level),  # city_level
+                    float(c.population),  # city_population
+                    float(c.population_need),  # city_population_need
+                    float(c.production),  # city_production
+                    float(c.supported_unit_count),  # city_supported_unit_count
+                    float(c.unit_capacity),  # city_unit_capacity
+                    1.0 if c.is_capital else 0.0,  # city_is_capital
+                ]
+            )
         else:
-            features.extend([0.0] * CITY_SLOT_FEATURE_DIM)
-    return features
+            encoded.extend([0.0] * CITY_SLOT_FEATURE_DIM)
+
+    return encoded
 
 
 def decode_owned_city_slots(
-    city_block: Iterable[float],
+    city_block: Sequence[float],
+    *,
     width: int,
     height: int,
     max_cities: int = MAX_OWNED_CITIES,
 ) -> list[dict]:
-    """Decode exact integer city primitives from a flattened city-slot feature block."""
-    import numpy as np
+    """Decode a fixed-size city slot tensor back into human-interpretable city dictionaries."""
+    expected_dim = max_cities * CITY_SLOT_FEATURE_DIM
+    if len(city_block) != expected_dim:
+        raise ValueError(f"Expected city block of length {expected_dim}, got {len(city_block)}")
 
-    block = np.asarray(city_block, dtype=np.float32).reshape(-1)
-    expected_size = max_cities * CITY_SLOT_FEATURE_DIM
-    if block.size != expected_size:
-        raise ObservationContractError(
-            f"Expected city block size {expected_size}, got {block.size}"
-        )
-    max_x = max(1, width - 1)
-    max_y = max(1, height - 1)
+    max_x = float(max(1, width - 1))
+    max_y = float(max(1, height - 1))
     cities: list[dict] = []
+
     for i in range(max_cities):
         offset = i * CITY_SLOT_FEATURE_DIM
+        block = city_block
         present = bool(block[offset + 0] >= 0.5)
         if not present:
             continue
@@ -287,6 +283,8 @@ class ObservationLayout:
     unit_types_end: int
     city_territory_start: int
     city_territory_end: int
+    unit_home_city_start: int
+    unit_home_city_end: int
     road_start: int
     road_end: int
     buildings_start: int
@@ -325,6 +323,10 @@ def observation_layout(width: int, height: int) -> ObservationLayout:
     city_territory_start = cur
     cur += NUM_CITY_TERRITORY_CHANNELS * n_tiles
     city_territory_end = cur
+
+    unit_home_city_start = cur
+    cur += NUM_UNIT_HOME_CITY_CHANNELS * n_tiles
+    unit_home_city_end = cur
 
     road_start = cur
     cur += n_tiles
@@ -366,6 +368,8 @@ def observation_layout(width: int, height: int) -> ObservationLayout:
         unit_types_end=unit_types_end,
         city_territory_start=city_territory_start,
         city_territory_end=city_territory_end,
+        unit_home_city_start=unit_home_city_start,
+        unit_home_city_end=unit_home_city_end,
         road_start=road_start,
         road_end=road_end,
         buildings_start=buildings_start,

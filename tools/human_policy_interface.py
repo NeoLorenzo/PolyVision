@@ -483,6 +483,7 @@ def visible_state(observation: np.ndarray, info: dict[str, Any]) -> dict[str, An
     terrain = np.rint(obs[layout.terrain_start : layout.terrain_end]).astype(np.int16)
     unit_types_block = obs[layout.unit_types_start : layout.unit_types_end].reshape(len(SUPPORTED_UNIT_TYPES), n)
     city_territory_block = obs[layout.city_territory_start : layout.city_territory_end].reshape(layout.city_slots, n)
+    unit_home_city_block = obs[layout.unit_home_city_start : layout.unit_home_city_end].reshape(layout.city_slots, n)
     roads = np.rint(obs[layout.road_start : layout.road_end]).astype(np.int16)
     buildings_block = obs[layout.buildings_start : layout.buildings_end].reshape(len(SUPPORTED_BUILDINGS), n)
     resources = np.rint(obs[layout.resource_start : layout.resource_end] * 8.0 - 1.0).astype(np.int16)
@@ -508,6 +509,7 @@ def visible_state(observation: np.ndarray, info: dict[str, Any]) -> dict[str, An
         "terrain": terrain,
         "unit_types_block": unit_types_block,
         "city_territory_block": city_territory_block,
+        "unit_home_city_block": unit_home_city_block,
         "roads": roads,
         "buildings_block": buildings_block,
         "resources": resources,

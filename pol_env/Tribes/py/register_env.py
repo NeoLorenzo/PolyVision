@@ -5144,7 +5144,30 @@ class TribesGymWrapper(gym.Env):
             t_chan[fog_mask] = 0.0  # explicit fog defense
             features.extend(t_chan.flatten())
 
-        # 4. Road Grid (1 channel: width x height) (STATE-MAP-002)
+        # 4. Unit Home-City Channels (9 channels: 9 x width x height) (STATE-UNIT-003)
+        unit_home_city_channels = [np.zeros((width, height), dtype=np.float32) for _ in range(MAX_OWNED_CITIES)]
+        if isinstance(unit_map, dict):
+            for u_rec in unit_map.values():
+                if not isinstance(u_rec, dict):
+                    continue
+                try:
+                    ux = int(u_rec.get("x", -1))
+                    uy = int(u_rec.get("y", -1))
+                    u_cid = int(u_rec.get("cityID", -1))
+                    u_tribe = int(u_rec.get("tribeId", -1))
+                except Exception:
+                    continue
+                if 0 <= ux < width and 0 <= uy < height and u_tribe == controlled_tribe:
+                    if not fog_mask[ux, uy] and u_cid in city_actor_to_slot:
+                        slot_i = city_actor_to_slot[u_cid]
+                        if slot_i < MAX_OWNED_CITIES:
+                            unit_home_city_channels[slot_i][ux, uy] = 1.0
+        for i in range(MAX_OWNED_CITIES):
+            uhc_chan = unit_home_city_channels[i]
+            uhc_chan[fog_mask] = 0.0  # explicit fog defense
+            features.extend(uhc_chan.flatten())
+
+        # 5. Road Grid (1 channel: width x height) (STATE-MAP-002)
         road_raw = np.asarray(board.get("road", []), dtype=np.float32)
         if road_raw.shape == (width, height):
             road_arr = (road_raw > 0.5).astype(np.float32)
@@ -5153,7 +5176,7 @@ class TribesGymWrapper(gym.Env):
         road_arr[fog_mask] = 0.0  # explicit fog defense
         features.extend(road_arr.flatten())
 
-        # 5. Categorical Building Channels (19 channels: 19 x width x height) (STATE-MAP-001)
+        # 6. Categorical Building Channels (19 channels: 19 x width x height) (STATE-MAP-001)
         building_raw = np.asarray(board.get("building", []), dtype=np.int16)
         building_channels = {b_name: np.zeros((width, height), dtype=np.float32) for b_name in SUPPORTED_BUILDINGS}
         if building_raw.shape == (width, height):

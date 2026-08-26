@@ -57,7 +57,7 @@ All files selected by one pool glob must be square and have identical dimensions
 
 ## Observation or action dimensions differ
 
-On the current corpus under `v5_human_information_parity`, expected values are observation shape `(5335,)`, action space `63913`, legal capacity `256`, and action-feature dimension `47`. A fallback warning followed by placeholder dimensions means initialization failed earlier; fix the preceding JVM/map error rather than training with the placeholders.
+On the current corpus under `v5_human_information_parity`, expected values are observation shape `(6424,)`, action space `63913`, legal capacity `256`, and action-feature dimension `47`. A fallback warning followed by placeholder dimensions means initialization failed earlier; fix the preceding JVM/map error rather than training with the placeholders.
 
 ## Legal-action capacity exceeded
 

@@ -81,7 +81,7 @@ Checkpoints record `phase1_environment_version=v5_human_information_parity` and 
 | `--num-envs` | 12 | Parallel spawned processes/JVMs. |
 | `--num-steps` | 128 | Rollout length per environment. |
 | `--max-legal-actions` | 256 | Fixed legal-slot tensor capacity. |
-| `--legal-action-feature-dim` | 42 | Must match the wrapper for `legal_features`. |
+| `--legal-action-feature-dim` | 47 | Must match the wrapper for `legal_features`. |
 | `--validation-states` | 10,000 | Strict pre-training decision states. |
 | `--save-model` | false | Enables periodic and final checkpoint writes. |
 | `--track` | false | Enables W&B in addition to local TensorBoard logs. |

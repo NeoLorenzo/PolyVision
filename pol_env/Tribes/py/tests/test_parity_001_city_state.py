@@ -216,7 +216,7 @@ class TestParity001CityState(unittest.TestCase):
 
     # --- Test H: Observation Dimension Contract Test ---
     def test_h_observation_dimension_contract(self):
-        """Assert exact 5335 observation dimensions for 11x11 Phase-1 contract."""
+        """Assert exact 6424 observation dimensions for 11x11 Phase-1 contract."""
         layout = observation_layout(11, 11)
         self.assertEqual(layout.terrain_start, 0)
         self.assertEqual(layout.terrain_end, 121)
@@ -224,21 +224,23 @@ class TestParity001CityState(unittest.TestCase):
         self.assertEqual(layout.unit_types_end, 1573)
         self.assertEqual(layout.city_territory_start, 1573)
         self.assertEqual(layout.city_territory_end, 2662)
-        self.assertEqual(layout.road_start, 2662)
-        self.assertEqual(layout.road_end, 2783)
-        self.assertEqual(layout.buildings_start, 2783)
-        self.assertEqual(layout.buildings_end, 5082)
-        self.assertEqual(layout.resource_start, 5082)
-        self.assertEqual(layout.resource_end, 5203)
-        self.assertEqual(layout.legacy_scalar_start, 5203)
-        self.assertEqual(layout.legacy_scalar_end, 5209)
-        self.assertEqual(layout.economy_scalar_start, 5209)
-        self.assertEqual(layout.economy_scalar_end, 5221)
-        self.assertEqual(layout.tech_vector_start, 5221)
-        self.assertEqual(layout.tech_vector_end, 5245)
-        self.assertEqual(layout.city_block_start, 5245)
-        self.assertEqual(layout.city_block_end, 5335)
-        self.assertEqual(layout.expected_obs_dim, 5335)
+        self.assertEqual(layout.unit_home_city_start, 2662)
+        self.assertEqual(layout.unit_home_city_end, 3751)
+        self.assertEqual(layout.road_start, 3751)
+        self.assertEqual(layout.road_end, 3872)
+        self.assertEqual(layout.buildings_start, 3872)
+        self.assertEqual(layout.buildings_end, 6171)
+        self.assertEqual(layout.resource_start, 6171)
+        self.assertEqual(layout.resource_end, 6292)
+        self.assertEqual(layout.legacy_scalar_start, 6292)
+        self.assertEqual(layout.legacy_scalar_end, 6298)
+        self.assertEqual(layout.economy_scalar_start, 6298)
+        self.assertEqual(layout.economy_scalar_end, 6310)
+        self.assertEqual(layout.tech_vector_start, 6310)
+        self.assertEqual(layout.tech_vector_end, 6334)
+        self.assertEqual(layout.city_block_start, 6334)
+        self.assertEqual(layout.city_block_end, 6424)
+        self.assertEqual(layout.expected_obs_dim, 6424)
         self.assertEqual(CITY_BLOCK_DIM, 90)
         self.assertEqual(len(CITY_SLOT_FEATURE_NAMES), 10)
 
@@ -262,7 +264,7 @@ class TestParity001CityState(unittest.TestCase):
         }
 
         v5_env_meta = dict(historical_meta)
-        v5_env_meta["observation_dim"] = 5335
+        v5_env_meta["observation_dim"] = 6424
         v5_env_meta["phase1_environment_version"] = "v5_human_information_parity"
         v5_env_meta["legal_action_feature_version"] = "v1_4_parity_spatial_and_cost"
         v5_env_meta["legal_action_feature_dim"] = 47
@@ -300,28 +302,28 @@ class TestParity001CityState(unittest.TestCase):
         env = FakeEnv()
         # Put 2 cities in the FakeEnv observation:
         # Slot 0: (3, 4), Lv 1, pop 0/2, prod 2, units 1/2, is_capital=True
-        env.obs[5245] = 1.0
-        env.obs[5246] = 3.0 / 10.0
-        env.obs[5247] = 4.0 / 10.0
-        env.obs[5248] = 1.0
-        env.obs[5249] = 0.0
-        env.obs[5250] = 2.0
-        env.obs[5251] = 2.0
-        env.obs[5252] = 1.0
-        env.obs[5253] = 2.0
-        env.obs[5254] = 1.0
+        env.obs[6334] = 1.0
+        env.obs[6335] = 3.0 / 10.0
+        env.obs[6336] = 4.0 / 10.0
+        env.obs[6337] = 1.0
+        env.obs[6338] = 0.0
+        env.obs[6339] = 2.0
+        env.obs[6340] = 2.0
+        env.obs[6341] = 1.0
+        env.obs[6342] = 2.0
+        env.obs[6343] = 1.0
 
         # Slot 1: (6, 8), Lv 2, pop 2/3, prod 3, units 2/3, is_capital=False
-        env.obs[5255] = 1.0
-        env.obs[5256] = 6.0 / 10.0
-        env.obs[5257] = 8.0 / 10.0
-        env.obs[5258] = 2.0
-        env.obs[5259] = 2.0
-        env.obs[5260] = 3.0
-        env.obs[5261] = 3.0
-        env.obs[5262] = 2.0
-        env.obs[5263] = 3.0
-        env.obs[5264] = 0.0
+        env.obs[6344] = 1.0
+        env.obs[6345] = 6.0 / 10.0
+        env.obs[6346] = 8.0 / 10.0
+        env.obs[6347] = 2.0
+        env.obs[6348] = 2.0
+        env.obs[6349] = 3.0
+        env.obs[6350] = 3.0
+        env.obs[6351] = 2.0
+        env.obs[6352] = 3.0
+        env.obs[6353] = 0.0
 
         captured_lines: list[str] = []
         observed_states: list[dict] = []

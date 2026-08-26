@@ -91,7 +91,7 @@ class TestPPOActorDefaults(unittest.TestCase):
 
 
 class TestCheckpointMetadataCompatibility(unittest.TestCase):
-    def _make_dummy_env_adapter(self, action_n: int = 63913, obs_dim: int = 5335):
+    def _make_dummy_env_adapter(self, action_n: int = 63913, obs_dim: int = 6424):
         return SimpleNamespace(
             single_observation_space=gym.spaces.Box(low=-1e5, high=1e5, shape=(obs_dim,)),
             single_action_space=gym.spaces.Discrete(action_n),
@@ -112,10 +112,10 @@ class TestCheckpointMetadataCompatibility(unittest.TestCase):
         self.assertEqual(int(meta.get("observation_dim")), 505)
         self.assertEqual(meta.get("phase1_environment_version"), "v3_corrected_turn_economy")
 
-        # Current v5 environment metadata has observation_dim=5335 and phase1_environment_version=v5_human_information_parity
+        # Current v5 environment metadata has observation_dim=6424 and phase1_environment_version=v5_human_information_parity
         wrapper = object.__new__(TribesGymWrapper)
         wrapper._catalog = SimpleNamespace(width=11, height=11)
-        wrapper.observation_space = gym.spaces.Box(low=-1e5, high=1e5, shape=(5335,))
+        wrapper.observation_space = gym.spaces.Box(low=-1e5, high=1e5, shape=(6424,))
         wrapper.action_space = gym.spaces.Discrete(63913)
         wrapper._catalog_fingerprint = meta["action_catalog_fingerprint"]
         wrapper._max_legal_actions = 256

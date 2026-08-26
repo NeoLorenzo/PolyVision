@@ -2,24 +2,36 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-PARITY_002_1_Audit_Reconciliation_and_Strict_Closure-044] - (2026-08-26)
+
+### Scope
+- Executed **`PARITY-002.1 — Audit Reconciliation & Strict Closure Review`**, completing strict audit reconciliation, interface hardening, and deficit closure for `v5_human_information_parity`.
+- **Key Enhancements & Corrections:**
+  1. **Unit Home-City Association Channels (`STATE-UNIT-003`):** Implemented 9 binary spatial channels (`unit_home_city_slot_0..8`, $9 \times 121 = 1,089$ floats) mapping visible owned units directly to the deterministic city slot index of their supporting city. Resolved multi-city ambiguity without exposing raw actor IDs.
+  2. **Observation Layout Math & Dimension Update:** Updated `ObservationLayout` for the 11×11 corpus to **6,424 total floats** (52 spatial channels × 121 tiles = 6,292 + 132 scalar/city features).
+  3. **Authoritative Java Enum Vocabulary Matching:** Replaced `MONUMENT` with `ALTAR_OF_PEACE` in building vocabularies across documentation, matching Java `Types.java:BUILDING` 1:1. Hardened unit tests to verify exact counts (`len == 19, 12, 24`), enum order, and key equality.
+  4. **Dynamic Star Cost Integration Testing:** Added live engine tests asserting that Java `computeActionStarCost` calculates exact dynamic tech costs ($4 + \text{tier} \times N_{\text{cities}}$) and static unit/building/gathering costs.
+  5. **Spatial Action Coordinate Normalization:** Formally tested normalized source `(src_x / 10.0, src_y / 10.0)` and destination `(target_x / 10.0, target_y / 10.0)` coordinates across all 9 spatial action families (`MOVE`, `CAPTURE`, `EXAMINE`, `SPAWN`, `RESOURCE_GATHERING`, `CLEAR_FOREST`, `GROW_FOREST`, `LEVEL_UP`, `BUILD`).
+  6. **Unit Turn Status Legality Signal Parity:** Empirically verified that sequential step execution transitions units from `FRESH` to `MOVED`/`FINISHED` and that `MoveFactory` generates zero `MOVE` actions for moved units, providing complete legality signal parity.
+  7. **Comprehensive Audit Reconciliations:** Fully reconciled `docs/Human_Information_Parity_Audit.md` across all sections, establishing that Phase-1 Human Information Parity is completely closed and deficit-free.
+
 ## [Phase1-PARITY_002_Human_Information_Parity-043] - (2026-08-26)
 
 ### Scope
-- Implemented **`PARITY-002 — Phase-1 Human Information Parity`**, closing all 8 confirmed Phase-1 information and representation disparities identified in the Human–AI Information Parity Audit.
-- Defined and froze the new Phase-1 environment contract:
+- Implemented **`PARITY-002 — Phase-1 Human Information Parity`**, closing all confirmed Phase-1 information and representation disparities identified in the Human–AI Information Parity Audit.
+- Defined the Phase-1 environment contract:
   - `PHASE1_ENVIRONMENT_VERSION = "v5_human_information_parity"`
-  - Observation dimension: **5,335 values** (43 fog-masked spatial channels × 121 tiles + 132 scalar/structured features)
   - Legal action feature version: `LEGAL_ACTION_FEATURE_VERSION = "v1_4_parity_spatial_and_cost"` (47 dimensions)
   - Legal action star cost scale constant: `ACTION_STAR_COST_SCALE = 50.0`
 - **Disparities Resolved:**
-  1. `STATE-MAP-001` (Building Placement & Types): Added 19 categorical binary spatial channels in `SUPPORTED_BUILDINGS` order (`PORT`, `MINE`, `TEMPLE`, `WATER_TEMPLE`, `FOREST_TEMPLE`, `MOUNTAIN_TEMPLE`, `FARM`, `WINDMILL`, `SAWMILL`, `CUSTOMS_HOUSE`, `FORGE`, `LUMBER_HUT`, `MONUMENT`, `GRAND_BAZAR`, `EMPERORS_TOMB`, `EYE_OF_GOD`, `GATE_OF_POWER`, `PARK_OF_FORTUNE`, `TOWER_OF_WISDOM`).
+  1. `STATE-MAP-001` (Building Placement & Types): Added 19 categorical binary spatial channels in `SUPPORTED_BUILDINGS` order (`PORT`, `MINE`, `TEMPLE`, `WATER_TEMPLE`, `FOREST_TEMPLE`, `MOUNTAIN_TEMPLE`, `FARM`, `WINDMILL`, `SAWMILL`, `CUSTOMS_HOUSE`, `FORGE`, `LUMBER_HUT`, `ALTAR_OF_PEACE`, `GRAND_BAZAR`, `EMPERORS_TOMB`, `EYE_OF_GOD`, `GATE_OF_POWER`, `PARK_OF_FORTUNE`, `TOWER_OF_WISDOM`).
   2. `STATE-MAP-002` (Road Grid): Added binary road plane from Java `Board.isRoad(x, y)` on POV state.
   3. `STATE-MAP-003` (Capital Identity): Added `city_is_capital` boolean to city slot feature index 9 (expanding slot feature dimension to 10 and city block to 90 values).
   4. `FEAT-MISS-001` (Action Star Cost): Exposed authoritative Java `star_cost` in action feature index 42 as `action_star_cost_norm` (`star_cost / 50.0`).
   5. `STATE-TECH-001` (Full 24-Tech Researched Vector): Added 24 binary researched flags in `TECHNOLOGY_ORDER` order.
   6. `STATE-ID-001` (Eliminate Raw Actor IDs): Completely removed raw continuous actor ID floats (`unitID`, `cityID`, `actorIDcounter`) from the observation vector; policy observation is 100% actor-ID invariant.
   7. `STATE-UNIT-001` (Categorical Unit Types): Replaced unit presence with 12 categorical binary spatial channels matching `SUPPORTED_UNIT_TYPES` (`WARRIOR`, `RIDER`, `DEFENDER`, `SWORDMAN`, `ARCHER`, `CATAPULT`, `KNIGHT`, `MIND_BENDER`, `BOAT`, `SHIP`, `BATTLESHIP`, `SUPERUNIT`).
-  8. `FEAT-SPAT-001` (Action Spatial Coordinates): Exposed normalized source `(src_x / 10.0, src_y / 10.0)` and destination `(target_x / 10.0, target_y / 10.0)` in action feature indices 43..46 across all spatial action families.
+  8. `FEAT-SPAT-001` (Action Spatial Coordinates): Exposed normalized source and destination coordinates in action feature indices 43..46 across all spatial action families.
 - **Architectural & Safety Hardening:**
   - Applied defense-in-depth explicit Python fog mask (`fog_mask = (terrain == 7)`) across all 43 spatial channels.
   - Implemented strict deterministic city territory mapping asserting every visible territory tile corresponds to a deterministic city slot; unmatched territory raises `ObservationContractError`.

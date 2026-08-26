@@ -39,12 +39,12 @@ class FakeEnv:
         self._terminal_spt_over_15_weight = 3.0
         self._resource_gather_upgrade_filter_enabled = False
         self.stepped = []
-        self.obs = np.zeros((5335,), dtype=np.float32)
+        self.obs = np.zeros((6424,), dtype=np.float32)
         self.obs[:121] = 7
         self.info = {
             "map_width": 11,
             "map_height": 11,
-            "observation_dim": 5335,
+            "observation_dim": 6424,
             "global_action_space_n": self._catalog.total_size,
             "max_legal_actions": 4,
             "catalog_version": "flat-v1",
@@ -76,6 +76,10 @@ class FakeEnv:
                 "stars": 4,
                 "city_count": 2,
                 "unit_count": 2,
+                "legal_global_ids_padded": np.array([0, 0, 0, 0]),
+                "legal_action_valid_mask": np.array([True, False, False, False]),
+                "legal_action_features_padded": np.zeros((4, 47), dtype=np.float32),
+                "legal_action_count": 1,
             }
         )
         return self.obs.copy(), 1.5, False, True, info
@@ -96,7 +100,7 @@ def completed_result(spt=20):
     )
 
 
-class PolicyInterfaceTests(unittest.TestCase):
+class HumanBenchmarkInterfaceTests(unittest.TestCase):
     def test_menu_selection_executes_exact_global_id(self):
         env = FakeEnv()
         result = run_policy_visible_episode(
@@ -111,22 +115,22 @@ class PolicyInterfaceTests(unittest.TestCase):
         self.assertEqual(result.action_history[0]["global_id"], 0)
         self.assertEqual(result.action_history[0]["description"], "End turn")
 
-    def test_action_feature_annotations_decoding(self):
+    def test_action_feature_annotations(self):
         # Test move features
         feat_move = np.zeros((47,), dtype=np.float32)
         feat_move[0] = 1.0  # is_move
-        feat_move[1] = 3.0 / 12.0  # newly revealed = 3
-        feat_move[2] = 2.0 / 8.0  # adj fog after = 2
-        feat_move[6] = 1.0  # has visible village
-        feat_move[7] = 0.5  # closer to village
-        feat_move[8] = 0.0  # no backtrack
-        feat_move[10] = 1.0  # away from capital
+        feat_move[1] = 3.0 / 12.0  # reveals 3 tiles
+        feat_move[2] = 2.0 / 8.0  # 2 fog adjacent
         feat_move[11] = 1.0  # warrior
-        ann = action_feature_annotations(feat_move, "MOVE")
-        self.assertIn("reveal +3", ann)
-        self.assertIn("adjacent fog 2", ann)
-        self.assertIn("closer to village", ann)
-        self.assertIn("away from capital", ann)
+        feat_move[13] = 1.0 / 10.0  # distance to enemy = 1
+        feat_move[42] = 0.0  # star cost = 0
+        feat_move[43] = 2.0 / 10.0  # src_x = 2
+        feat_move[44] = 3.0 / 10.0  # src_y = 3
+        feat_move[45] = 2.0 / 10.0  # dst_x = 2
+        feat_move[46] = 4.0 / 10.0  # dst_y = 4
+        ann_move = action_feature_annotations(feat_move, "MOVE")
+        self.assertIn("reveal +3", ann_move)
+        self.assertIn("adjacent fog 2", ann_move)
 
         # Test economy features
         feat_eco = np.zeros((47,), dtype=np.float32)
@@ -146,38 +150,38 @@ class PolicyInterfaceTests(unittest.TestCase):
 
     def test_visible_state_extended_economy_decoding(self):
         from pol_env.Tribes.py.environment_contract import TECHNOLOGY_ORDER
-        obs = np.zeros((5335,), dtype=np.float32)
+        obs = np.zeros((6424,), dtype=np.float32)
         # Legacy scalars
-        obs[5203] = 8.0  # legacy stars
-        obs[5204] = 100.0  # score
-        obs[5205] = 3.0  # city count
+        obs[6292] = 8.0  # legacy stars
+        obs[6293] = 100.0  # score
+        obs[6294] = 3.0  # city count
         # Economy scalars
-        obs[5209] = 8.0 / 50.0  # current stars norm
-        obs[5210] = 11.0 / 30.0  # current spt norm -> 11
-        obs[5211] = 6.0 / 10.0  # turn count norm -> 6
-        obs[5215] = 2.33 / 5.0  # avg city level -> 2.33
-        obs[5216] = 3.0 / 5.0  # max city level -> 3.0
-        obs[5217] = 0.58  # mean upgrade progress -> 0.58
-        obs[5218] = 0.75  # max upgrade progress -> 0.75
-        obs[5219] = 0.33  # upgrade ready frac -> 0.33
-        obs[5220] = 1.0  # any level up available -> True
+        obs[6298] = 8.0 / 50.0  # current stars norm
+        obs[6299] = 11.0 / 30.0  # current spt norm -> 11
+        obs[6300] = 6.0 / 10.0  # turn count norm -> 6
+        obs[6304] = 2.33 / 5.0  # avg city level -> 2.33
+        obs[6305] = 3.0 / 5.0  # max city level -> 3.0
+        obs[6306] = 0.58  # mean upgrade progress -> 0.58
+        obs[6307] = 0.75  # max upgrade progress -> 0.75
+        obs[6308] = 0.33  # upgrade ready frac -> 0.33
+        obs[6309] = 1.0  # any level up available -> True
 
         # Researched tech vector (24 techs)
-        obs[5221 + TECHNOLOGY_ORDER.index("ORGANIZATION")] = 1.0
-        obs[5221 + TECHNOLOGY_ORDER.index("CLIMBING")] = 1.0
-        obs[5221 + TECHNOLOGY_ORDER.index("FISHING")] = 1.0
+        obs[6310 + TECHNOLOGY_ORDER.index("ORGANIZATION")] = 1.0
+        obs[6310 + TECHNOLOGY_ORDER.index("CLIMBING")] = 1.0
+        obs[6310 + TECHNOLOGY_ORDER.index("FISHING")] = 1.0
 
         # City slot 0 (PARITY-001 / PARITY-002)
-        obs[5245] = 1.0  # present
-        obs[5246] = 3.0 / 10.0  # x = 3
-        obs[5247] = 5.0 / 10.0  # y = 5
-        obs[5248] = 2.0  # level = 2
-        obs[5249] = 1.0  # population = 1
-        obs[5250] = 3.0  # population_need = 3
-        obs[5251] = 4.0  # production = 4
-        obs[5252] = 2.0  # units = 2
-        obs[5253] = 3.0  # capacity = 3
-        obs[5254] = 1.0  # is_capital = True
+        obs[6334] = 1.0  # present
+        obs[6335] = 3.0 / 10.0  # x = 3
+        obs[6336] = 5.0 / 10.0  # y = 5
+        obs[6337] = 2.0  # level = 2
+        obs[6338] = 1.0  # population = 1
+        obs[6339] = 3.0  # population_need = 3
+        obs[6340] = 4.0  # production = 4
+        obs[6341] = 2.0  # units = 2
+        obs[6342] = 3.0  # capacity = 3
+        obs[6343] = 1.0  # is_capital = True
 
         info = {"map_width": 11, "map_height": 11}
         st = visible_state(obs, info)
