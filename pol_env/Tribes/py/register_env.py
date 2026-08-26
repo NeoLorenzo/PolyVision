@@ -18,7 +18,17 @@ from .environment_contract import (
     decode_owned_city_slots,
     MAX_OWNED_CITIES,
     CITY_SLOT_FEATURE_DIM,
+    CITY_SLOT_FEATURE_NAMES,
     CITY_BLOCK_DIM,
+    SUPPORTED_UNIT_TYPES,
+    NUM_UNIT_TYPE_CHANNELS,
+    SUPPORTED_BUILDINGS,
+    NUM_BUILDING_CHANNELS,
+    TECHNOLOGY_ORDER,
+    NUM_TECHNOLOGIES,
+    ACTION_STAR_COST_SCALE,
+    ObservationLayout,
+    observation_layout,
     PHASE1_ENVIRONMENT_VERSION as CONTRACT_PHASE1_ENVIRONMENT_VERSION,
 )
 
@@ -220,9 +230,10 @@ class TribesGymWrapper(gym.Env):
     CATALOG_VERSION = "flat-v1"
     CANONICALIZER_VERSION = "flat-v1-structured"
     PHASE1_OPENING_VERSION = "v2_guaranteed_two_unit"
-    PHASE1_ENVIRONMENT_VERSION = "v4_exact_per_city_state"
+    PHASE1_ENVIRONMENT_VERSION = CONTRACT_PHASE1_ENVIRONMENT_VERSION
     MAX_LEGAL_ACTIONS_DEFAULT = 256
-    LEGAL_ACTION_FEATURE_VERSION = "v1_3_move_focus_plus_semantic_econ"
+    LEGAL_ACTION_FEATURE_VERSION = "v1_4_parity_spatial_and_cost"
+    ACTION_STAR_COST_SCALE = ACTION_STAR_COST_SCALE
     REVEAL_CLIP = 12.0
     ADJ_FOG_MAX = 8.0
     LEGAL_ACTION_FEATURE_NAMES = (
@@ -268,6 +279,11 @@ class TribesGymWrapper(gym.Env):
         "is_level_up_claim",
         "action_city_upgrade_progress_before_norm",
         "action_city_upgrade_ready_before",
+        "action_star_cost_norm",
+        "action_source_x_norm",
+        "action_source_y_norm",
+        "action_target_x_norm",
+        "action_target_y_norm",
     )
     ACTION_FEATURE_DIM = len(LEGAL_ACTION_FEATURE_NAMES)
     TRIBE_STARTING_TECH_BY_TYPE = {
@@ -2384,7 +2400,83 @@ class TribesGymWrapper(gym.Env):
         feat[39] = 1.0 if bool(eco["is_level_up_claim"]) else 0.0
         feat[40] = float(np.clip(float(eco["progress_before"]), 0.0, 1.0))
         feat[41] = 1.0 if bool(eco["ready_before"]) else 0.0
+
+        # Action star cost (FEAT-MISS-001)
+        raw_star_cost = float(action.get("star_cost", 0.0) if isinstance(action, dict) else 0.0)
+        feat[42] = float(raw_star_cost / float(self.ACTION_STAR_COST_SCALE))
+
+        # Spatial source/target coordinates (FEAT-SPAT-001)
+        src_x, src_y, target_x, target_y = self._extract_action_coordinates(action, obs)
+        dims = self._board_dimensions_from_obs(obs)
+        if dims is not None:
+            max_x = max(1.0, float(dims[0] - 1))
+            max_y = max(1.0, float(dims[1] - 1))
+        else:
+            max_x = 1.0
+            max_y = 1.0
+        feat[43] = float(src_x / max_x) if src_x is not None else 0.0
+        feat[44] = float(src_y / max_y) if src_y is not None else 0.0
+        feat[45] = float(target_x / max_x) if target_x is not None else 0.0
+        feat[46] = float(target_y / max_y) if target_y is not None else 0.0
+
         return feat
+
+    def _extract_action_coordinates(self, action, obs):
+        if not isinstance(action, dict):
+            return None, None, None, None
+        a_type = str(action.get("type", "")).upper()
+        if a_type == "MOVE":
+            unit_id, src_x, src_y, dst_x, dst_y = self._extract_move_components(action, obs)
+            return src_x, src_y, dst_x, dst_y
+        if a_type == "CAPTURE":
+            src_x = action.get("src_x")
+            src_y = action.get("src_y")
+            target_x = action.get("target_x")
+            target_y = action.get("target_y")
+            if src_x is None or src_y is None:
+                unit_id = action.get("unit_id")
+                if unit_id is not None:
+                    u = (obs.get("unit", {}) or {}).get(str(int(unit_id)), {})
+                    src_x = u.get("x")
+                    src_y = u.get("y")
+            if target_x is None or target_y is None:
+                target_x = src_x
+                target_y = src_y
+            return src_x, src_y, target_x, target_y
+        if a_type in ("SPAWN", "TRAIN"):
+            city_id = action.get("city_id")
+            city = (obs.get("city", {}) or {}).get(str(int(city_id)), {}) if city_id is not None else {}
+            cx = action.get("city_x", city.get("x", action.get("src_x")))
+            cy = action.get("city_y", city.get("y", action.get("src_y")))
+            return cx, cy, cx, cy
+        if a_type in ("BUILD", "RESOURCE_GATHERING", "CLEAR_FOREST", "GROW_FOREST"):
+            city_id = action.get("city_id")
+            city = (obs.get("city", {}) or {}).get(str(int(city_id)), {}) if city_id is not None else {}
+            cx = action.get("city_x", city.get("x", action.get("src_x")))
+            cy = action.get("city_y", city.get("y", action.get("src_y")))
+            tx = action.get("target_x")
+            ty = action.get("target_y")
+            return cx, cy, tx, ty
+        if a_type == "LEVEL_UP":
+            city_id = action.get("city_id")
+            city = (obs.get("city", {}) or {}).get(str(int(city_id)), {}) if city_id is not None else {}
+            cx = action.get("city_x", city.get("x", action.get("src_x")))
+            cy = action.get("city_y", city.get("y", action.get("src_y")))
+            tx = action.get("target_x", cx)
+            ty = action.get("target_y", cy)
+            return cx, cy, tx, ty
+        if a_type == "EXAMINE":
+            src_x = action.get("src_x")
+            src_y = action.get("src_y")
+            if src_x is None or src_y is None:
+                unit_id = action.get("unit_id")
+                if unit_id is not None:
+                    u = (obs.get("unit", {}) or {}).get(str(int(unit_id)), {})
+                    src_x = u.get("x")
+                    src_y = u.get("y")
+            return src_x, src_y, src_x, src_y
+        # Non-spatial actions (RESEARCH_TECH, END_TURN, etc.)
+        return 0, 0, 0, 0
 
     def _compute_legal_action_feature_vector(self, action, obs):
         return self._compute_legal_action_feature_vector_reference(action, obs)
@@ -4972,95 +5064,149 @@ class TribesGymWrapper(gym.Env):
             )
     
     def _dict_to_array(self, obs_dict):
-        # Preserve the legacy field ordering; its length is 3*n_tiles + 6.
         features = []
         board = obs_dict.get("board", {})
-
-        terrain = board.get("terrain", [])
-        if terrain:
-            features.extend(np.array(terrain).flatten())
-
-        unit_ids = board.get("unitID", [])
-        if unit_ids:
-            features.extend(np.array(unit_ids).flatten())
-
-        city_ids = board.get("cityID", [])
-        if city_ids:
-            features.extend(np.array(city_ids).flatten())
-
-        tribes_info = obs_dict.get("tribes", {})
-        if isinstance(tribes_info, dict):
-            tribe0 = tribes_info.get("0", {})
-            if isinstance(tribe0, dict):
-                features.append(tribe0.get("star", 0))
-                features.append(tribe0.get("score", 0))
-                features.append(len(tribe0.get("citiesID", [])))
-                features.append(tribe0.get("nKills", 0))
-
-        features.append(obs_dict.get("tick", 0))
-        features.append(obs_dict.get("activeTribeID", 0))
-
-        # Append visible-only resource map and normalized economy/state features.
         dims = self._board_dimensions_from_obs(obs_dict)
         if dims is not None:
             width, height = int(dims[0]), int(dims[1])
         else:
             width, height = 0, 0
-        terrain_arr = np.full((width, height), -1, dtype=np.int16)
-        resource_arr = np.full((width, height), -1, dtype=np.int16)
-        try:
-            terrain_raw = np.asarray(board.get("terrain", []), dtype=np.int16)
-            if terrain_raw.shape == (width, height):
-                terrain_arr = terrain_raw
-        except Exception:
-            pass
-        try:
-            resource_raw = np.asarray(board.get("resource", []), dtype=np.int16)
-            if resource_raw.shape == (width, height):
-                resource_arr = resource_raw
-        except Exception:
-            pass
-        if width > 0 and height > 0:
-            fog_mask = terrain_arr == 7
-            masked_resource = np.array(resource_arr, copy=True)
-            masked_resource[fog_mask] = -1
-            resource_norm = np.clip((masked_resource.astype(np.float32) + 1.0) / 8.0, 0.0, 1.0)
-            features.extend(resource_norm.flatten())
+        layout = observation_layout(width, height)
 
+        # 1. Terrain Channel (1 channel: width x height)
+        terrain_raw = np.asarray(board.get("terrain", []), dtype=np.int16)
+        if terrain_raw.shape != (width, height):
+            terrain_arr = np.full((width, height), 7, dtype=np.int16)
+        else:
+            terrain_arr = terrain_raw
+        fog_mask = (terrain_arr == 7)
+        features.extend(terrain_arr.flatten())
+
+        # 2. Categorical Unit-Type Channels (12 channels: 12 x width x height) (STATE-UNIT-001)
+        unit_type_channels = {u_name: np.zeros((width, height), dtype=np.float32) for u_name in SUPPORTED_UNIT_TYPES}
+        unit_map = obs_dict.get("unit", {})
+        if isinstance(unit_map, dict):
+            for u_rec in unit_map.values():
+                if not isinstance(u_rec, dict):
+                    continue
+                try:
+                    ux = int(u_rec.get("x", -1))
+                    uy = int(u_rec.get("y", -1))
+                    ut_key = int(u_rec.get("type", -1))
+                except Exception:
+                    continue
+                if 0 <= ux < width and 0 <= uy < height:
+                    if not fog_mask[ux, uy] and 0 <= ut_key < len(SUPPORTED_UNIT_TYPES):
+                        u_name = SUPPORTED_UNIT_TYPES[ut_key]
+                        unit_type_channels[u_name][ux, uy] = 1.0
+        for u_name in SUPPORTED_UNIT_TYPES:
+            u_chan = unit_type_channels[u_name]
+            u_chan[fog_mask] = 0.0  # explicit fog defense
+            features.extend(u_chan.flatten())
+
+        # 3. Deterministic City Territory Channels (9 channels: 9 x width x height) (STATE-MAP-003 / STATE-ID-001)
+        controlled_tribe = int(getattr(self, "_controlled_tribe_id", 0))
+        canonical_cities = extract_owned_cities(obs_dict, tribe_id=controlled_tribe)
+        city_actor_to_slot = {}
+        city_dict = obs_dict.get("city", {})
+        if isinstance(city_dict, dict):
+            for raw_id, c_info in city_dict.items():
+                if not isinstance(c_info, dict):
+                    continue
+                try:
+                    if int(c_info.get("tribeID", -1)) != controlled_tribe:
+                        continue
+                    cx = int(c_info.get("x", -1))
+                    cy = int(c_info.get("y", -1))
+                    for slot_idx, c_state in enumerate(canonical_cities):
+                        if c_state.x == cx and c_state.y == cy:
+                            city_actor_to_slot[int(raw_id)] = slot_idx
+                            break
+                except Exception:
+                    continue
+        city_id_raw = np.asarray(board.get("cityID", []), dtype=np.int64)
+        territory_channels = [np.zeros((width, height), dtype=np.float32) for _ in range(MAX_OWNED_CITIES)]
+        if city_id_raw.shape == (width, height):
+            for x in range(width):
+                for y in range(height):
+                    if not fog_mask[x, y]:
+                        cid = int(city_id_raw[x, y])
+                        if cid != -1:
+                            if cid not in city_actor_to_slot:
+                                raise ObservationContractError(
+                                    f"Visible city territory with cityID={cid} at ({x}, {y}) could not be mapped to any owned city slot"
+                                )
+                            slot_i = city_actor_to_slot[cid]
+                            if slot_i < MAX_OWNED_CITIES:
+                                territory_channels[slot_i][x, y] = 1.0
+        for i in range(MAX_OWNED_CITIES):
+            t_chan = territory_channels[i]
+            t_chan[fog_mask] = 0.0  # explicit fog defense
+            features.extend(t_chan.flatten())
+
+        # 4. Road Grid (1 channel: width x height) (STATE-MAP-002)
+        road_raw = np.asarray(board.get("road", []), dtype=np.float32)
+        if road_raw.shape == (width, height):
+            road_arr = (road_raw > 0.5).astype(np.float32)
+        else:
+            road_arr = np.zeros((width, height), dtype=np.float32)
+        road_arr[fog_mask] = 0.0  # explicit fog defense
+        features.extend(road_arr.flatten())
+
+        # 5. Categorical Building Channels (19 channels: 19 x width x height) (STATE-MAP-001)
+        building_raw = np.asarray(board.get("building", []), dtype=np.int16)
+        building_channels = {b_name: np.zeros((width, height), dtype=np.float32) for b_name in SUPPORTED_BUILDINGS}
+        if building_raw.shape == (width, height):
+            for x in range(width):
+                for y in range(height):
+                    if not fog_mask[x, y]:
+                        b_key = int(building_raw[x, y])
+                        if 0 <= b_key < len(SUPPORTED_BUILDINGS):
+                            b_name = SUPPORTED_BUILDINGS[b_key]
+                            building_channels[b_name][x, y] = 1.0
+        for b_name in SUPPORTED_BUILDINGS:
+            b_chan = building_channels[b_name]
+            b_chan[fog_mask] = 0.0  # explicit fog defense
+            features.extend(b_chan.flatten())
+
+        # 6. Visible Resources (1 channel: width x height)
+        resource_raw = np.asarray(board.get("resource", []), dtype=np.int16)
+        if resource_raw.shape == (width, height):
+            resource_arr = np.array(resource_raw, copy=True)
+        else:
+            resource_arr = np.full((width, height), -1, dtype=np.int16)
+        resource_arr[fog_mask] = -1
+        resource_norm = np.clip((resource_arr.astype(np.float32) + 1.0) / 8.0, 0.0, 1.0)
+        resource_norm[fog_mask] = 0.0  # explicit fog defense
+        features.extend(resource_norm.flatten())
+
+        # 7. Legacy Scalars (6 values)
+        tribes_info = obs_dict.get("tribes", {})
+        tribe0 = tribes_info.get(str(controlled_tribe), {}) if isinstance(tribes_info, dict) else {}
+        features.append(float(tribe0.get("star", 0)))
+        features.append(float(tribe0.get("score", 0)))
+        features.append(float(len(tribe0.get("citiesID", []))))
+        features.append(float(tribe0.get("nKills", 0)))
+        features.append(float(obs_dict.get("tick", 0)))
+        features.append(float(obs_dict.get("activeTribeID", 0)))
+
+        # 8. Economy / State Scalars (12 values)
         current_stars = float(self._get_bardur_stars(obs_dict))
         current_spt = float(self._compute_bardur_spt(obs_dict))
         turn_count = float(getattr(self, "_turn_count", 0))
         max_turns = float(max(1, int(getattr(self, "MAX_TURNS", 10))))
         turns_remaining_after_current = float(np.clip((max_turns - turn_count) / max_turns, 0.0, 1.0))
         turns_remaining_including_current = float(np.clip((max_turns - turn_count + 1.0) / max_turns, 0.0, 1.0))
-        tech_has_organization = 1.0 if self._has_researched_tech(obs_dict, "ORGANIZATION", tribe_id=0) else 0.0
-        tech_has_forestry = 1.0 if self._has_researched_tech(obs_dict, "FORESTRY", tribe_id=0) else 0.0
-        tech_researched_count = float(self._get_researched_tech_count(obs_dict, tribe_id=0))
-
-        city_map = obs_dict.get("city", {})
-        owned_cities = []
-        if isinstance(city_map, dict):
-            for city in city_map.values():
-                if not isinstance(city, dict):
-                    continue
-                try:
-                    if int(city.get("tribeID", -1)) != 0:
-                        continue
-                except Exception:
-                    continue
-                owned_cities.append(city)
-        city_count = len(owned_cities)
-        city_levels = []
+        city_count = len(canonical_cities)
+        city_levels = [c.level for c in canonical_cities]
         city_progress = []
         ready_count = 0
-        for city in owned_cities:
-            try:
-                city_levels.append(int(city.get("level", 0)))
-            except Exception:
-                city_levels.append(0)
-            progress, ready, _pop, _need = self._city_upgrade_progress_from_city_info(city)
-            city_progress.append(float(progress))
-            if bool(ready):
+        for city_state in canonical_cities:
+            denom = max(1, city_state.population_need)
+            progress = float(np.clip(float(city_state.population) / float(denom), 0.0, 1.0))
+            ready = bool(city_state.population >= city_state.population_need)
+            city_progress.append(progress)
+            if ready:
                 ready_count += 1
 
         avg_city_level = float(np.mean(city_levels)) if city_levels else 0.0
@@ -5075,9 +5221,6 @@ class TribesGymWrapper(gym.Env):
         features.append(float(np.clip(turn_count / max_turns, 0.0, 1.0)))
         features.append(turns_remaining_after_current)
         features.append(turns_remaining_including_current)
-        features.append(tech_has_organization)
-        features.append(tech_has_forestry)
-        features.append(float(np.clip(tech_researched_count / 24.0, 0.0, 1.0)))
         features.append(float(np.clip(float(city_count) / 6.0, 0.0, 1.0)))
         features.append(float(np.clip(avg_city_level / 5.0, 0.0, 1.0)))
         features.append(float(np.clip(max_city_level / 5.0, 0.0, 1.0)))
@@ -5086,11 +5229,19 @@ class TribesGymWrapper(gym.Env):
         features.append(float(np.clip(upgrade_ready_frac, 0.0, 1.0)))
         features.append(any_level_up_available)
 
-        # Append exact per-city state block (PARITY-001)
-        controlled_tribe = int(getattr(self, "_controlled_tribe_id", 0))
-        canonical_cities = extract_owned_cities(obs_dict, tribe_id=controlled_tribe)
+        # 9. Full Researched Tech Vector (24 values) (STATE-TECH-001)
+        effective_techs = self._get_effective_researched_techs(obs_dict, tribe_id=controlled_tribe)
+        for t_name in TECHNOLOGY_ORDER:
+            features.append(1.0 if t_name in effective_techs else 0.0)
+
+        # 10. Exact Per-City State Block (90 values) (PARITY-001 / STATE-MAP-003)
         city_slot_features = encode_owned_city_slots(canonical_cities, width=width, height=height)
         features.extend(city_slot_features)
+
+        if len(features) != layout.expected_obs_dim:
+            raise ObservationContractError(
+                f"Constructed observation vector length {len(features)} != expected {layout.expected_obs_dim}"
+            )
 
         return np.array(features, dtype=np.float32)
     

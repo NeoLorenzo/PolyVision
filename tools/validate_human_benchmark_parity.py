@@ -86,6 +86,7 @@ def assert_live_city_parity(
         "production",
         "supported_unit_count",
         "unit_capacity",
+        "is_capital",
     )
     for idx, (can, dec, hum) in enumerate(zip(canonical, decoded_policy, human_visible)):
         can_dict = {
@@ -97,6 +98,7 @@ def assert_live_city_parity(
             "production": can.production,
             "supported_unit_count": can.supported_unit_count,
             "unit_capacity": can.unit_capacity,
+            "is_capital": can.is_capital,
         }
         for field in CHECK_FIELDS:
             c_val = can_dict[field]

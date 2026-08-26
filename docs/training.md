@@ -59,18 +59,18 @@ python py_rl/cleanrl/cleanrl/ppo.py `
     --save-frequency 100000
 ```
 
-Standard Phase-1 training automatically uses the `legal_features` actor mode (42-dimensional semantic action features) and the Terminal-SPT reward bonus ($w_{\text{base}}=1.0, w_{>10}=2.0, w_{>15}=3.0$) without requiring explicit CLI flags or reward environment variables.
+Standard Phase-1 training automatically uses the `legal_features` actor mode (47-dimensional semantic action features) and the Terminal-SPT reward bonus ($w_{\text{base}}=1.0, w_{>10}=2.0, w_{>15}=3.0$) without requiring explicit CLI flags or reward environment variables.
 
 ### Experimental Ablations and Overrides
 
 For controlled ablations and backward comparison experiments:
-- **`legal_only` actor mode:** Pass `--actor-mode legal_only` to score legal slots with learned global ID embeddings only (disabling the 42-d feature encoder).
+- **`legal_only` actor mode:** Pass `--actor-mode legal_only` to score legal slots with learned global ID embeddings only (disabling the 47-d feature encoder).
 - **Disabled Terminal-SPT:** Set `$env:POLYVISION_TERMINAL_SPT_REWARD_ENABLED='0'` to disable the Turn-10 terminal reward bonus and train exclusively on step-level shaping terms.
 - **`dense_debug` mode:** Pass `--actor-mode dense_debug` to evaluate the dense 63,913-logit mask for debugging.
 
 The wrapper also defaults to `levels/phase1_pool_bardur_real/train/*.csv` when the environment variable is absent. Training must never use `validation`, `test`, or `human_benchmark`; explicit pool overrides exist for evaluation, not PPO gradient runs. Record the training glob and aggregate pool identity with every experiment.
 
-Checkpoints record `phase1_environment_version=v4_exact_per_city_state` and `phase1_opening_version=v2_guaranteed_two_unit`. Do not resume the shelved Seed-1 checkpoint: it was trained under `v1_mixed_capital_regression`, materially differs on approximately 45% of starting states, and fails current compatibility by default. Phase 1 optimization continues actively from scratch.
+Checkpoints record `phase1_environment_version=v5_human_information_parity` and `phase1_opening_version=v2_guaranteed_two_unit`. Do not resume historical checkpoints: they were trained under earlier observation contracts (`v3` or `v4`) and fail current compatibility by default. Phase 1 optimization continues actively from scratch.
 
 ## Important arguments
 

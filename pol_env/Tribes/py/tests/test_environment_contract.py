@@ -29,12 +29,12 @@ def compatibility_metadata(width=11, height=11, **overrides):
         "action_space_n": 63913 if (width, height) == (11, 11) else 89305,
         "action_catalog_fingerprint": f"catalog-{width}x{height}",
         "actor_mode": "legal_features",
-        "legal_action_feature_version": "features-v1",
-        "legal_action_feature_dim": 42,
+        "legal_action_feature_version": "v1_4_parity_spatial_and_cost",
+        "legal_action_feature_dim": 47,
         "catalog_version": "flat-v1",
         "canonicalizer_version": "flat-v1-structured",
         "phase1_opening_version": "v2_guaranteed_two_unit",
-        "phase1_environment_version": "v4_exact_per_city_state",
+        "phase1_environment_version": "v5_human_information_parity",
         "max_legal_actions": 128,
     }
     values.update(overrides)
@@ -44,12 +44,27 @@ def compatibility_metadata(width=11, height=11, **overrides):
 class ObservationLayoutTests(unittest.TestCase):
     def test_dimension_derived_layouts(self):
         layout_11 = observation_layout(11, 11)
-        self.assertEqual(
-            (layout_11.legacy_obs_dim, layout_11.resource_block_dim, layout_11.expected_obs_dim),
-            (369, 121, 586),
-        )
-        self.assertEqual(layout_11.city_block_start, 505)
-        self.assertEqual(layout_11.city_block_end, 586)
+        self.assertEqual(layout_11.expected_obs_dim, 5335)
+        self.assertEqual(layout_11.terrain_start, 0)
+        self.assertEqual(layout_11.terrain_end, 121)
+        self.assertEqual(layout_11.unit_types_start, 121)
+        self.assertEqual(layout_11.unit_types_end, 1573)
+        self.assertEqual(layout_11.city_territory_start, 1573)
+        self.assertEqual(layout_11.city_territory_end, 2662)
+        self.assertEqual(layout_11.road_start, 2662)
+        self.assertEqual(layout_11.road_end, 2783)
+        self.assertEqual(layout_11.buildings_start, 2783)
+        self.assertEqual(layout_11.buildings_end, 5082)
+        self.assertEqual(layout_11.resource_start, 5082)
+        self.assertEqual(layout_11.resource_end, 5203)
+        self.assertEqual(layout_11.legacy_scalar_start, 5203)
+        self.assertEqual(layout_11.legacy_scalar_end, 5209)
+        self.assertEqual(layout_11.economy_scalar_start, 5209)
+        self.assertEqual(layout_11.economy_scalar_end, 5221)
+        self.assertEqual(layout_11.tech_vector_start, 5221)
+        self.assertEqual(layout_11.tech_vector_end, 5245)
+        self.assertEqual(layout_11.city_block_start, 5245)
+        self.assertEqual(layout_11.city_block_end, 5335)
 
 
 class GeometryContractTests(unittest.TestCase):

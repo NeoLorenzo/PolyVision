@@ -159,16 +159,16 @@ To avoid conflating internal engine fields with serialized bridge observations a
 
 | Information Element | Human UI Access | Engine State Has It? | POV JSON Serializes It? | PPO State Observation | Whole-Policy Visibility | Primary Class | Secondary Flags | Evidence / Code Source | Human UI Evidence & Notes |
 |---|---|:---:|:---:|---|---|:---:|---|---|---|
-| **Unit Spatial Position** | Visible on map | Yes (`Unit.position`) | Yes (`unit.x`, `unit.y`) | Corrupted (Raw `unitID` in grid) | Global action ID encodes src/dst | `REPRESENTATION_LOSS` | `REPRESENTATION_HAZARD` | `Unit.java:37`, `PythonEnv.java:369`, `register_env.py:4971` | Unit rendered on tile (`polytopia.io/gameplay`). |
-| **Unit Type** | Distinct 3D sprite | Yes (`Unit.getType()`) | Yes (`unit.type`) | **NO in State** | Action feature 11 has `unit_type_warrior` | `AI_DEFICIT` | `CROSS_LAYER_PARTIAL` | `Unit.java:85`, `PythonEnv.java:361`, `register_env.py:2302` | Sprite clearly shows Warrior, Rider, Archer, etc. |
+| **Unit Spatial Position** | Visible on map | Yes (`Unit.position`) | Yes (`unit.x`, `unit.y`) | Categorical (12 unit channels) | Global action ID encodes src/dst | `PARITY` | — | `Unit.java:37`, `PythonEnv.java:369`, `register_env.py:5075` | Unit rendered on tile (`polytopia.io/gameplay`). |
+| **Unit Type** | Distinct 3D sprite | Yes (`Unit.getType()`) | Yes (`unit.type`) | Yes (12 binary channels) | Action feature 11 has `unit_type_warrior` | `PARITY` | — | `Unit.java:85`, `PythonEnv.java:361`, `register_env.py:5075` | Sprite clearly shows Warrior, Rider, Archer, etc. |
 | **Unit Tribe / Owner** | Tribe color / border | Yes (`Unit.tribeId`) | Yes (`unit.tribeId`) | **NO in State** | None | `AI_DEFICIT` | `DORMANT_PHASE1` | `Unit.java:41`, `PythonEnv.java:374` | Unit color scheme indicates owner. (Dormant in solo Phase 1). |
 | **Unit Current HP** | Health bar / number over unit | Yes (`Unit.currentHP`) | Yes (`unit.currentHP`) | **NO (Discarded)** | None | `AI_DEFICIT` | `DORMANT_PHASE1` | `Unit.java:53`, `PythonEnv.java:375` | Colored bar with numerical HP (e.g. 10/10) (`polytopia.io/gameplay`). |
 | **Unit Max HP** | Health bar segments (10 or 15) | Yes (`Unit.maxHP`) | **NO (Not Serialized!)** | **NO (Discarded)** | None | `AI_DEFICIT` | `DORMANT_PHASE1` | `Unit.java:51`, `PythonEnv.java:358-377` | 10 for standard units, 15 for veteran units. |
 | **Veteran Status** | Crown / medal badge icon | Yes (`Unit.isVeteran`) | Yes (`unit.isVeteran`) | **NO (Discarded)** | None | `AI_DEFICIT` | `DORMANT_PHASE1` | `Unit.java:71`, `PythonEnv.java:372` | Medal/crown icon above health bar (`polytopia.io/gameplay`). |
 | **Unit Kill Count** | Unit info pop-up (3 kills = Vet) | Yes (`Unit.kills`) | Yes (`unit.kill`) | **NO (Discarded)** | None | `AI_DEFICIT` | `DORMANT_PHASE1` | `Unit.java:60`, `PythonEnv.java:371` | Displayed upon inspecting unit details. |
-| **Home City ID** | Selecting unit highlights home city | Yes (`Unit.cityId`) | Yes (`unit.cityID`, hidden for enemy) | **NO (Discarded)** | None | `AI_DEFICIT` | — | `Unit.java:79`, `PythonEnv.java:373` | Selecting unit pulses its home city dot pips. |
-| **Unit Turn Status (Fresh/Moved)** | Dimmed sprite if moved; bright if fresh | Yes (`Unit.status`) | **NO (Not Serialized!)** | **NO in State** | Inferable via MOVE legality | `AI_DEFICIT` | `INDIRECT_LEGALITY_SIGNAL` | `Unit.java:87`, `PythonEnv.java:358-377` | Bright sprite + white ring = fresh; dimmed = moved (`polytopia.io/gameplay`). |
-| **Raw Actor IDs (`unitID`, `cityID`)** | **Invisible to Human** | Yes (`Actor.actorId`) | Yes (`board.unitID`, `cityID`) | **YES (242 floats)** | Full state | `REPRESENTATION_LOSS` | `REPRESENTATION_HAZARD` | `Board.java:887`, `register_env.py:4971-4978` | Continuous float injection of raw integer counter. |
+| **Home City ID** | Selecting unit highlights home city | Yes (`Unit.cityId`) | Yes (`unit.cityID`, hidden for enemy) | **NO (Discarded)** | Inferred via city slot caps | `AI_DEFICIT` | `DORMANT_PHASE1` | `Unit.java:79`, `PythonEnv.java:373` | Selecting unit pulses its home city dot pips. In Phase 1 solo expansion without disbanding, unit caps per city are exact in city slots. |
+| **Unit Turn Status (Fresh/Moved)** | Dimmed sprite if moved; bright if fresh | Yes (`Unit.status`) | Yes (`unit.status`) | Inferred via MOVE candidates | Complete via legal MOVE candidates | `PARITY` | `INDIRECT_LEGALITY_SIGNAL` | `Unit.java:87`, `PythonEnv.java:420` | Bright sprite + white ring = fresh; dimmed = moved. Fully signaled by sequential move generation. |
+| **Raw Actor IDs (`unitID`, `cityID`)** | **Invisible to Human** | Yes (`Actor.actorId`) | Yes (`board.unitID`, `cityID`) | **NO (Eliminated)** | None | `PARITY` | — | `Board.java:887`, `register_env.py:5075-5135` | Completely removed from observation tensor in v5. |
 
 ---
 
@@ -429,23 +429,30 @@ A key methodological question in game RL is deciding which public game rules mus
   Environment contract: v4_exact_per_city_state
   Observation dimension: 586
   ```
-  Closed `STATE-CITY-001` (exact per-city level), `STATE-CITY-002` (exact per-city population & need), `STATE-CITY-003` (exact per-city production), and `STATE-CITY-004` (supported unit count and unit capacity $= \text{level} + 1$).  
-  Implemented via a fixed 9-slot deterministic per-city observation block (81 dimensions, expanding 11×11 observation space to 586 values). Cities are spatially ordered by $(x, y)$ ascending. Raw engine actor IDs are completely excluded. Legacy aggregate city features are retained alongside the exact block for interim interface continuity.
+  Closed `STATE-CITY-001` (exact per-city level), `STATE-CITY-002` (exact per-city population & need), `STATE-CITY-003` (exact per-city production), and `STATE-CITY-004` (supported unit count and unit capacity $= \text{level} + 1$).
 
-### 14.2 Remaining Confirmed Phase-1 Parity Deficits
-- Complete absence of 2D building placement and types on map (`STATE-MAP-001`).
-- Complete absence of road network on map (`STATE-MAP-002`).
-- Absence of action star cost in legal action features (`FEAT-MISS-001`).
-- Absence of explicit capital identity in state vector (`STATE-MAP-003`) — *explicitly retained as UNRESOLVED and outside the PARITY-001 contract*.
+- **PARITY-002 (Phase-1 Human Information Parity — Contract `v5_human_information_parity`):**  
+  ```text
+  PARITY-002 — Phase-1 Human Information Parity
+  Status: CLOSED
+  Environment contract: v5_human_information_parity
+  Observation dimension: 5335
+  Legal action feature version: v1_4_parity_spatial_and_cost (47 dimensions)
+  ```
+  Closed all confirmed Phase-1 information and representation disparities:
+  1. `STATE-MAP-001` (Building Placement & Types): 19 categorical spatial channels matching `SUPPORTED_BUILDINGS`, fog-filtered.
+  2. `STATE-MAP-002` (Road Grid): Binary road plane from `Board.isRoad(x, y)` on POV state, fog-filtered.
+  3. `STATE-MAP-003` (Capital Identity): Explicit `city_is_capital` boolean in city slot index 9 (expanding slot feature dimension to 10).
+  4. `FEAT-MISS-001` (Action Star Cost): Authoritative Java `star_cost` exposed as `action_star_cost_norm` (`star_cost / 50.0`).
+  5. `STATE-TECH-001` (Full 24-Tech Researched Vector): 24 binary researched flags in `TECHNOLOGY_ORDER` enum order.
+  6. `STATE-ID-001` (Eliminate Raw Actor IDs): Zero raw actor IDs reach the policy observation tensor.
+  7. `STATE-UNIT-001` (Categorical Unit Types): 12 binary unit-type spatial channels matching `SUPPORTED_UNIT_TYPES`, fog-filtered.
+  8. `FEAT-SPAT-001` (Action Spatial Coordinates): Explicit normalized source `(src_x, src_y)` and destination `(target_x, target_y)` across all action families (features 43..46).
 
-### 14.3 Remaining Representation Problems
-- Heavy compression of 24-tech research state down to 2 boolean flags and a count scalar (`STATE-TECH-001`).
-- Raw monotonic engine actor IDs injected as continuous float32 inputs in legacy board planes (`STATE-ID-001`).
-- Spatial move destinations encoded as discrete index embeddings rather than explicit $(x, y)$ coordinates (`FEAT-SPAT-001`).
-
-### 14.4 Deferred / Unverified Full-Game Risks
-- Hidden-state dependence in `StepMove.java` (Zone of Control queries hidden units) and `AttackFactory.java` (Attack queries hidden units) — dormant in solo no-combat Phase 1.
-- Unit HP, Max HP, veteran status, and kill count omissions — low priority for solo Phase 1, critical for future combat.
+### 14.2 Remaining Deferred Full-Game & Combat Concerns (Outside Phase-1 Scope)
+- Multi-agent unit combat stats (HP, Max HP, veteran status, kill count) — dormant in solo no-combat Phase 1.
+- Unit home city ID maintenance tracking on disband — dormant in solo Phase 1 (no disband action).
+- Full multi-agent diplomacy / relation matrix.
 
 ---
 

@@ -37,8 +37,8 @@ class Phase1V3TurnEconomyTests(unittest.TestCase):
 
     def test_environment_version_and_handoff_state(self):
         obs, info = self.env.reset(seed=42)
-        self.assertEqual(self.env.PHASE1_ENVIRONMENT_VERSION, "v4_exact_per_city_state")
-        self.assertEqual(info.get("phase1_environment_version"), "v4_exact_per_city_state")
+        self.assertEqual(self.env.PHASE1_ENVIRONMENT_VERSION, "v5_human_information_parity")
+        self.assertEqual(info.get("phase1_environment_version"), "v5_human_information_parity")
         self.assertEqual(info.get("phase1_opening_version"), "v2_guaranteed_two_unit")
         self.assertEqual(info.get("turn_count"), 2)
         self.assertEqual(info.get("stars"), 7)

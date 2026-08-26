@@ -26,8 +26,8 @@ class FakeEnv:
     MAX_TURNS = 10
     MAX_LEGAL_ACTIONS_DEFAULT = 4
     ALLOWED_ACTION_TYPES = {"END_TURN", "MOVE"}
-    ACTION_FEATURE_DIM = 42
-    LEGAL_ACTION_FEATURE_NAMES = tuple(f"feat_{i}" for i in range(42))
+    ACTION_FEATURE_DIM = 47
+    LEGAL_ACTION_FEATURE_NAMES = tuple(f"feat_{i}" for i in range(47))
 
     def __init__(self):
         self.unwrapped = self
@@ -39,25 +39,24 @@ class FakeEnv:
         self._terminal_spt_over_15_weight = 3.0
         self._resource_gather_upgrade_filter_enabled = False
         self.stepped = []
-        self.obs = np.zeros((586,), dtype=np.float32)
+        self.obs = np.zeros((5335,), dtype=np.float32)
         self.obs[:121] = 7
-        self.obs[121:363] = -1
         self.info = {
             "map_width": 11,
             "map_height": 11,
-            "observation_dim": 586,
+            "observation_dim": 5335,
             "global_action_space_n": self._catalog.total_size,
             "max_legal_actions": 4,
             "catalog_version": "flat-v1",
             "phase1_opening_version": "v2_guaranteed_two_unit",
             "action_catalog_fingerprint": "catalog",
             "canonicalizer_version": "flat-v1-structured",
-            "legal_action_feature_version": "features",
-            "legal_action_feature_dim": 42,
+            "legal_action_feature_version": "v1_4_parity_spatial_and_cost",
+            "legal_action_feature_dim": 47,
             "info_mode": "fast",
             "legal_global_ids_padded": np.array([0, 0, 0, 0]),
             "legal_action_valid_mask": np.array([True, False, False, False]),
-            "legal_action_features_padded": np.zeros((4, 42), dtype=np.float32),
+            "legal_action_features_padded": np.zeros((4, 47), dtype=np.float32),
             "legal_action_count": 1,
             "turn_count": 1,
         }
@@ -114,7 +113,7 @@ class PolicyInterfaceTests(unittest.TestCase):
 
     def test_action_feature_annotations_decoding(self):
         # Test move features
-        feat_move = np.zeros((42,), dtype=np.float32)
+        feat_move = np.zeros((47,), dtype=np.float32)
         feat_move[0] = 1.0  # is_move
         feat_move[1] = 3.0 / 12.0  # newly revealed = 3
         feat_move[2] = 2.0 / 8.0  # adj fog after = 2
@@ -130,47 +129,55 @@ class PolicyInterfaceTests(unittest.TestCase):
         self.assertIn("away from capital", ann)
 
         # Test economy features
-        feat_eco = np.zeros((42,), dtype=np.float32)
+        feat_eco = np.zeros((47,), dtype=np.float32)
         feat_eco[16] = 1.0  # is_resource_gathering
         feat_eco[26] = 1.0  # resource_is_animal
         feat_eco[36] = 1.0 / 2.0  # pop_delta = +1
         feat_eco[37] = 0.0  # spt_delta = 0
         feat_eco[38] = 1.0  # makes_level_up_available = True
         feat_eco[40] = 0.67  # progress_before = 67%
+        feat_eco[42] = 2.0 / 50.0  # star_cost = 2
         ann_eco = action_feature_annotations(feat_eco, "RESOURCE_GATHERING")
         self.assertIn("pop +1", ann_eco)
         self.assertIn("city progress 67%", ann_eco)
         self.assertIn("makes level-up ready", ann_eco)
         self.assertIn("resource: ANIMAL", ann_eco)
+        self.assertIn("2*", ann_eco)
 
     def test_visible_state_extended_economy_decoding(self):
-        obs = np.zeros((586,), dtype=np.float32)
-        obs[363] = 8.0  # legacy stars
-        obs[364] = 100.0  # score
-        obs[365] = 3.0  # city count
-        obs[490] = 8.0 / 50.0  # current stars norm
-        obs[491] = 11.0 / 30.0  # current spt norm -> 11
-        obs[492] = 6.0 / 10.0  # turn count norm -> 6
-        obs[495] = 1.0  # tech organization
-        obs[496] = 0.0  # tech forestry
-        obs[497] = 3.0 / 24.0  # tech count -> 3
-        obs[499] = 2.33 / 5.0  # avg city level -> 2.33
-        obs[500] = 3.0 / 5.0  # max city level -> 3.0
-        obs[501] = 0.58  # mean upgrade progress -> 0.58
-        obs[502] = 0.75  # max upgrade progress -> 0.75
-        obs[503] = 0.33  # upgrade ready frac -> 0.33
-        obs[504] = 1.0  # any level up available -> True
+        from pol_env.Tribes.py.environment_contract import TECHNOLOGY_ORDER
+        obs = np.zeros((5335,), dtype=np.float32)
+        # Legacy scalars
+        obs[5203] = 8.0  # legacy stars
+        obs[5204] = 100.0  # score
+        obs[5205] = 3.0  # city count
+        # Economy scalars
+        obs[5209] = 8.0 / 50.0  # current stars norm
+        obs[5210] = 11.0 / 30.0  # current spt norm -> 11
+        obs[5211] = 6.0 / 10.0  # turn count norm -> 6
+        obs[5215] = 2.33 / 5.0  # avg city level -> 2.33
+        obs[5216] = 3.0 / 5.0  # max city level -> 3.0
+        obs[5217] = 0.58  # mean upgrade progress -> 0.58
+        obs[5218] = 0.75  # max upgrade progress -> 0.75
+        obs[5219] = 0.33  # upgrade ready frac -> 0.33
+        obs[5220] = 1.0  # any level up available -> True
 
-        # City slot 0 (PARITY-001)
-        obs[505] = 1.0  # present
-        obs[506] = 3.0 / 10.0  # x = 3
-        obs[507] = 5.0 / 10.0  # y = 5
-        obs[508] = 2.0  # level = 2
-        obs[509] = 1.0  # population = 1
-        obs[510] = 3.0  # population_need = 3
-        obs[511] = 4.0  # production = 4
-        obs[512] = 2.0  # units = 2
-        obs[513] = 3.0  # capacity = 3
+        # Researched tech vector (24 techs)
+        obs[5221 + TECHNOLOGY_ORDER.index("ORGANIZATION")] = 1.0
+        obs[5221 + TECHNOLOGY_ORDER.index("CLIMBING")] = 1.0
+        obs[5221 + TECHNOLOGY_ORDER.index("FISHING")] = 1.0
+
+        # City slot 0 (PARITY-001 / PARITY-002)
+        obs[5245] = 1.0  # present
+        obs[5246] = 3.0 / 10.0  # x = 3
+        obs[5247] = 5.0 / 10.0  # y = 5
+        obs[5248] = 2.0  # level = 2
+        obs[5249] = 1.0  # population = 1
+        obs[5250] = 3.0  # population_need = 3
+        obs[5251] = 4.0  # production = 4
+        obs[5252] = 2.0  # units = 2
+        obs[5253] = 3.0  # capacity = 3
+        obs[5254] = 1.0  # is_capital = True
 
         info = {"map_width": 11, "map_height": 11}
         st = visible_state(obs, info)

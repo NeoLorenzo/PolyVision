@@ -18,12 +18,15 @@ import numpy as np
 
 from pol_env.Tribes.py.environment_contract import (
     MAX_OWNED_CITIES,
+    SUPPORTED_UNIT_TYPES,
+    SUPPORTED_BUILDINGS,
+    TECHNOLOGY_ORDER,
     decode_owned_city_slots,
     observation_layout,
 )
 
 
-HUMAN_INTERFACE_VERSION = "v4_exact_city_terminal"
+HUMAN_INTERFACE_VERSION = "v5_human_information_parity"
 TERRAIN_SYMBOLS = {0: ".", 1: "~", 2: "D", 3: "M", 4: "V", 5: "C", 6: "T", 7: "?"}
 RESOURCE_SYMBOLS = {0: "h", 1: "f", 2: "a", 3: "w", 5: "o", 6: "c", 7: "r"}
 SAFE_INFO_MODE = "fast"
@@ -157,32 +160,30 @@ def extract_visible_units(
     """Extract visible units deterministically in (x, y) spatial tile order from PPO observation."""
     width = int(state["width"])
     height = int(state["height"])
-    unit_ids = state["unit_ids"]
-
-    unit_type_by_pos: dict[tuple[int, int], str] = {}
-    if actions is not None:
-        for action in actions:
-            if action.get("type") == "MOVE":
-                src = action.get("src_xy")
-                if src is not None:
-                    feat = action.get("features")
-                    if feat is not None and len(feat) > 11 and float(feat[11]) >= 0.5:
-                        unit_type_by_pos[src] = "Warrior"
-                    elif src not in unit_type_by_pos:
-                        unit_type_by_pos[src] = "Warrior"
+    unit_block = state.get("unit_types_block")
+    unit_ids = state.get("unit_ids")
 
     units = []
     unit_num = 1
     for x in range(width):
         for y in range(height):
             tile = x * height + y
-            if int(unit_ids[tile]) > 0:
-                pos = (x, y)
-                u_type = unit_type_by_pos.get(pos, "Warrior")
+            if unit_block is not None and unit_block.shape[0] == len(SUPPORTED_UNIT_TYPES):
+                type_idx = int(np.argmax(unit_block[:, tile]))
+                if unit_block[type_idx, tile] > 0.5:
+                    u_type = SUPPORTED_UNIT_TYPES[type_idx].title()
+                    units.append({
+                        "number": unit_num,
+                        "pos": (x, y),
+                        "type": u_type,
+                        "tile": tile,
+                    })
+                    unit_num += 1
+            elif unit_ids is not None and int(unit_ids[tile]) > 0:
                 units.append({
                     "number": unit_num,
-                    "pos": pos,
-                    "type": u_type,
+                    "pos": (x, y),
+                    "type": "Warrior",
                     "tile": tile,
                 })
                 unit_num += 1
@@ -190,12 +191,17 @@ def extract_visible_units(
 
 
 def action_feature_annotations(feature_vector: np.ndarray | Iterable[float], action_type: str | None = None) -> list[str]:
-    """Turn the model-visible 42-feature row into concise, human-readable annotations."""
+    """Turn the model-visible 47-feature row into concise, human-readable annotations."""
     feat = np.asarray(feature_vector, dtype=np.float32).reshape(-1)
-    if feat.shape != (42,):
-        raise RuntimeError(f"action feature row shape mismatch: expected (42,), got {feat.shape}")
+    if feat.shape != (47,):
+        raise RuntimeError(f"action feature row shape mismatch: expected (47,), got {feat.shape}")
 
     lines: list[str] = []
+    if len(feat) > 42:
+        cost = int(round(float(feat[42]) * 50.0))
+        if cost > 0:
+            lines.append(f"{cost}*")
+
     a_type = (action_type or "").upper()
     is_move = a_type == "MOVE" or bool(feat[0] >= 0.5)
 
@@ -473,22 +479,40 @@ def visible_state(observation: np.ndarray, info: dict[str, Any]) -> dict[str, An
     if obs.size != layout.expected_obs_dim:
         raise RuntimeError(f"observation has {obs.size} values; expected {layout.expected_obs_dim}")
     n = layout.n_tiles
-    legacy = 3 * n
-    scalar = layout.scalar_start
-    terrain = np.rint(obs[:n]).astype(np.int16)
-    units = np.rint(obs[n : 2 * n]).astype(np.int64)
-    cities = np.rint(obs[2 * n : 3 * n]).astype(np.int64)
+
+    terrain = np.rint(obs[layout.terrain_start : layout.terrain_end]).astype(np.int16)
+    unit_types_block = obs[layout.unit_types_start : layout.unit_types_end].reshape(len(SUPPORTED_UNIT_TYPES), n)
+    city_territory_block = obs[layout.city_territory_start : layout.city_territory_end].reshape(layout.city_slots, n)
+    roads = np.rint(obs[layout.road_start : layout.road_end]).astype(np.int16)
+    buildings_block = obs[layout.buildings_start : layout.buildings_end].reshape(len(SUPPORTED_BUILDINGS), n)
     resources = np.rint(obs[layout.resource_start : layout.resource_end] * 8.0 - 1.0).astype(np.int16)
+
+    legacy = layout.legacy_scalar_start
+    scalar = layout.economy_scalar_start
+    tech_start = layout.tech_vector_start
+
     city_block = obs[layout.city_block_start : layout.city_block_end]
     owned_cities = decode_owned_city_slots(city_block, width=width, height=height, max_cities=layout.city_slots)
+
+    unit_present = np.any(unit_types_block > 0.5, axis=0)
+    visible_unit_count = int(np.sum(unit_present))
+
+    researched_techs = [
+        tech_name for i, tech_name in enumerate(TECHNOLOGY_ORDER)
+        if obs[tech_start + i] >= 0.5
+    ]
+
     return {
         "width": width,
         "height": height,
         "terrain": terrain,
-        "unit_ids": units,
-        "city_ids": cities,
+        "unit_types_block": unit_types_block,
+        "city_territory_block": city_territory_block,
+        "roads": roads,
+        "buildings_block": buildings_block,
         "resources": resources,
         "owned_cities": owned_cities,
+        "researched_techs": researched_techs,
         "stars": int(round(float(obs[legacy]))),
         "score": int(round(float(obs[legacy + 1]))),
         "city_count": int(round(float(obs[legacy + 2]))),
@@ -497,16 +521,18 @@ def visible_state(observation: np.ndarray, info: dict[str, Any]) -> dict[str, An
         "spt": int(round(float(obs[scalar + 1]) * 30.0)),
         "turns_remaining_after_current": float(obs[scalar + 3]),
         "turns_remaining_including_current": float(obs[scalar + 4]),
-        "tech_organization": bool(obs[scalar + 5] >= 0.5),
-        "tech_forestry": bool(obs[scalar + 6] >= 0.5),
-        "tech_count": int(round(float(obs[scalar + 7]) * 24.0)),
-        "avg_city_level": float(obs[scalar + 9]) * 5.0,
-        "max_city_level": float(obs[scalar + 10]) * 5.0,
-        "mean_upgrade_progress": float(obs[scalar + 11]),
-        "max_upgrade_progress": float(obs[scalar + 12]),
-        "upgrade_ready_frac": float(obs[scalar + 13]),
-        "any_level_up_available": bool(obs[scalar + 14] >= 0.5),
-        "visible_unit_count": int(np.sum(units > 0)),
+        "tech_organization": "ORGANIZATION" in researched_techs,
+        "tech_forestry": "FORESTRY" in researched_techs,
+        "tech_count": len(researched_techs),
+        "avg_city_level": float(obs[scalar + 6]) * 5.0,
+        "max_city_level": float(obs[scalar + 7]) * 5.0,
+        "mean_upgrade_progress": float(obs[scalar + 8]),
+        "max_upgrade_progress": float(obs[scalar + 9]),
+        "upgrade_ready_frac": float(obs[scalar + 10]),
+        "any_level_up_available": bool(obs[scalar + 11] >= 0.5),
+        "visible_unit_count": visible_unit_count,
+        "unit_ids": unit_present.astype(np.int64),
+        "city_ids": np.zeros(n, dtype=np.int64),
     }
 
 
@@ -999,11 +1025,12 @@ def run_policy_visible_episode(
             output_fn(f"Owned Cities ({len(owned_cities)}/{MAX_OWNED_CITIES}):")
             for c in owned_cities:
                 slot_num = c["slot"] + 1
+                cap_suffix = " | Capital" if c.get("is_capital") else ""
                 output_fn(
                     f"  City #{slot_num} @ ({c['x']}, {c['y']}): Level {c['level']} | "
                     f"Pop {c['population']}/{c['population_need']} | "
                     f"Production +{c['production']} SPT | "
-                    f"Units {c['supported_unit_count']}/{c['unit_capacity']}"
+                    f"Units {c['supported_unit_count']}/{c['unit_capacity']}{cap_suffix}"
                 )
         output_fn("Economy & Aggregates:")
         output_fn(

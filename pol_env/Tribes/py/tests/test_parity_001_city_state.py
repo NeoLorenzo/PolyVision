@@ -178,7 +178,7 @@ class TestParity001CityState(unittest.TestCase):
     def test_f_overflow_raises_contract_error_and_no_fallback(self):
         """More than MAX_OWNED_CITIES raises ObservationContractError and wrapper re-raises without fallback."""
         cities = [
-            OwnedCityState(x=i % 10, y=i // 10, level=1, population=0, population_need=2, production=1, supported_unit_count=0, unit_capacity=2)
+            OwnedCityState(x=i % 10, y=i // 10, level=1, population=0, population_need=2, production=1, supported_unit_count=0, unit_capacity=2, is_capital=(i == 0))
             for i in range(MAX_OWNED_CITIES + 1)
         ]
         with self.assertRaises(ObservationContractError):
@@ -193,7 +193,7 @@ class TestParity001CityState(unittest.TestCase):
         overflow_obs = {
             "board": {"terrain": [[0] * 11 for _ in range(11)]},
             "city": {
-                str(i): {"x": i % 10, "y": i // 10, "level": 1, "population": 0, "population_need": 2, "production": 1, "tribeID": 0, "units": []}
+                str(i): {"x": i % 10, "y": i // 10, "level": 1, "population": 0, "population_need": 2, "production": 1, "tribeID": 0, "units": [], "isCapital": (i == 0)}
                 for i in range(MAX_OWNED_CITIES + 1)
             },
         }
@@ -205,31 +205,46 @@ class TestParity001CityState(unittest.TestCase):
         """Enemy cities (tribeID != 0) are excluded from owned city state."""
         obs = {
             "city": {
-                "1": {"x": 2, "y": 2, "level": 1, "population": 0, "population_need": 2, "production": 2, "tribeID": 0, "units": []},
-                "2": {"x": 9, "y": 9, "level": 3, "population": 1, "population_need": 4, "production": 5, "tribeID": 1, "units": [50, 51]},
+                "1": {"x": 2, "y": 2, "level": 1, "population": 0, "population_need": 2, "production": 2, "tribeID": 0, "units": [], "isCapital": True},
+                "2": {"x": 9, "y": 9, "level": 3, "population": 1, "population_need": 4, "production": 5, "tribeID": 1, "units": [50, 51], "isCapital": True},
             }
         }
         owned = extract_owned_cities(obs, tribe_id=0)
         self.assertEqual(len(owned), 1)
         self.assertEqual((owned[0].x, owned[0].y), (2, 2))
+        self.assertTrue(owned[0].is_capital)
 
     # --- Test H: Observation Dimension Contract Test ---
     def test_h_observation_dimension_contract(self):
-        """Assert exact 586 observation dimensions for 11x11 Phase-1 contract."""
+        """Assert exact 5335 observation dimensions for 11x11 Phase-1 contract."""
         layout = observation_layout(11, 11)
-        self.assertEqual(layout.legacy_obs_dim, 369)
-        self.assertEqual(layout.resource_block_dim, 121)
-        self.assertEqual(layout.scalar_start, 490)
-        self.assertEqual(layout.scalar_end, 505)
-        self.assertEqual(layout.city_block_start, 505)
-        self.assertEqual(layout.city_block_end, 586)
-        self.assertEqual(layout.expected_obs_dim, 586)
-        self.assertEqual(CITY_BLOCK_DIM, 81)
-        self.assertEqual(len(CITY_SLOT_FEATURE_NAMES), 9)
+        self.assertEqual(layout.terrain_start, 0)
+        self.assertEqual(layout.terrain_end, 121)
+        self.assertEqual(layout.unit_types_start, 121)
+        self.assertEqual(layout.unit_types_end, 1573)
+        self.assertEqual(layout.city_territory_start, 1573)
+        self.assertEqual(layout.city_territory_end, 2662)
+        self.assertEqual(layout.road_start, 2662)
+        self.assertEqual(layout.road_end, 2783)
+        self.assertEqual(layout.buildings_start, 2783)
+        self.assertEqual(layout.buildings_end, 5082)
+        self.assertEqual(layout.resource_start, 5082)
+        self.assertEqual(layout.resource_end, 5203)
+        self.assertEqual(layout.legacy_scalar_start, 5203)
+        self.assertEqual(layout.legacy_scalar_end, 5209)
+        self.assertEqual(layout.economy_scalar_start, 5209)
+        self.assertEqual(layout.economy_scalar_end, 5221)
+        self.assertEqual(layout.tech_vector_start, 5221)
+        self.assertEqual(layout.tech_vector_end, 5245)
+        self.assertEqual(layout.city_block_start, 5245)
+        self.assertEqual(layout.city_block_end, 5335)
+        self.assertEqual(layout.expected_obs_dim, 5335)
+        self.assertEqual(CITY_BLOCK_DIM, 90)
+        self.assertEqual(len(CITY_SLOT_FEATURE_NAMES), 10)
 
     # --- Test I: Checkpoint Incompatibility Test ---
     def test_i_historical_505_checkpoint_is_rejected(self):
-        """A historical 505-dim checkpoint metadata must fail validation under v4."""
+        """A historical 505-dim checkpoint metadata must fail validation under v5."""
         historical_meta = {
             "map_width": 11,
             "map_height": 11,
@@ -246,32 +261,35 @@ class TestParity001CityState(unittest.TestCase):
             "max_legal_actions": 256,
         }
 
-        v4_env_meta = dict(historical_meta)
-        v4_env_meta["observation_dim"] = 586
-        v4_env_meta["phase1_environment_version"] = "v4_exact_per_city_state"
+        v5_env_meta = dict(historical_meta)
+        v5_env_meta["observation_dim"] = 5335
+        v5_env_meta["phase1_environment_version"] = "v5_human_information_parity"
+        v5_env_meta["legal_action_feature_version"] = "v1_4_parity_spatial_and_cost"
+        v5_env_meta["legal_action_feature_dim"] = 47
 
         with self.assertRaises(CheckpointCompatibilityError) as ctx:
-            validate_checkpoint_compatibility(historical_meta, v4_env_meta)
+            validate_checkpoint_compatibility(historical_meta, v5_env_meta)
         err_msg = str(ctx.exception)
         self.assertIn("observation_dim", err_msg)
         self.assertIn("phase1_environment_version", err_msg)
 
-    # --- Test J: Capital Identity Exclusion from PARITY-001 ---
-    def test_j_capital_identity_exclusion(self):
-        """Assert OwnedCityState and decoded slots do not expose is_capital (STATE-MAP-003 is unresolved)."""
+    # --- Test J: Capital Identity Inclusion in PARITY-002 ---
+    def test_j_capital_identity_inclusion(self):
+        """Assert OwnedCityState and decoded slots expose is_capital (STATE-MAP-003 is resolved)."""
         import dataclasses
         field_names = [f.name for f in dataclasses.fields(OwnedCityState)]
-        self.assertNotIn("is_capital", field_names, "OwnedCityState must not contain is_capital")
-        self.assertEqual(len(field_names), 8)
+        self.assertIn("is_capital", field_names, "OwnedCityState must contain is_capital")
+        self.assertEqual(len(field_names), 9)
 
-        # Test decoded slots do not contain is_capital
+        # Test decoded slots contain is_capital
         encoded = encode_owned_city_slots(
-            [OwnedCityState(x=3, y=4, level=1, population=0, population_need=2, production=2, supported_unit_count=0, unit_capacity=2)],
+            [OwnedCityState(x=3, y=4, level=1, population=0, population_need=2, production=2, supported_unit_count=0, unit_capacity=2, is_capital=True)],
             width=self.width,
             height=self.height,
         )
         decoded = decode_owned_city_slots(encoded, width=self.width, height=self.height)
-        self.assertNotIn("is_capital", decoded[0], "Decoded slot dictionary must not expose is_capital")
+        self.assertIn("is_capital", decoded[0], "Decoded slot dictionary must expose is_capital")
+        self.assertTrue(decoded[0]["is_capital"])
 
     # --- Test K: Decision-Time Human Visibility ---
     def test_k_decision_time_human_visibility(self):
@@ -281,27 +299,29 @@ class TestParity001CityState(unittest.TestCase):
 
         env = FakeEnv()
         # Put 2 cities in the FakeEnv observation:
-        # Slot 0: (3, 4), Lv 1, pop 0/2, prod 2, units 1/2
-        env.obs[505] = 1.0
-        env.obs[506] = 3.0 / 10.0
-        env.obs[507] = 4.0 / 10.0
-        env.obs[508] = 1.0
-        env.obs[509] = 0.0
-        env.obs[510] = 2.0
-        env.obs[511] = 2.0
-        env.obs[512] = 1.0
-        env.obs[513] = 2.0
+        # Slot 0: (3, 4), Lv 1, pop 0/2, prod 2, units 1/2, is_capital=True
+        env.obs[5245] = 1.0
+        env.obs[5246] = 3.0 / 10.0
+        env.obs[5247] = 4.0 / 10.0
+        env.obs[5248] = 1.0
+        env.obs[5249] = 0.0
+        env.obs[5250] = 2.0
+        env.obs[5251] = 2.0
+        env.obs[5252] = 1.0
+        env.obs[5253] = 2.0
+        env.obs[5254] = 1.0
 
-        # Slot 1: (6, 8), Lv 2, pop 2/3, prod 3, units 2/3
-        env.obs[514] = 1.0
-        env.obs[515] = 6.0 / 10.0
-        env.obs[516] = 8.0 / 10.0
-        env.obs[517] = 2.0
-        env.obs[518] = 2.0
-        env.obs[519] = 3.0
-        env.obs[520] = 3.0
-        env.obs[521] = 2.0
-        env.obs[522] = 3.0
+        # Slot 1: (6, 8), Lv 2, pop 2/3, prod 3, units 2/3, is_capital=False
+        env.obs[5255] = 1.0
+        env.obs[5256] = 6.0 / 10.0
+        env.obs[5257] = 8.0 / 10.0
+        env.obs[5258] = 2.0
+        env.obs[5259] = 2.0
+        env.obs[5260] = 3.0
+        env.obs[5261] = 3.0
+        env.obs[5262] = 2.0
+        env.obs[5263] = 3.0
+        env.obs[5264] = 0.0
 
         captured_lines: list[str] = []
         observed_states: list[dict] = []
@@ -332,11 +352,12 @@ class TestParity001CityState(unittest.TestCase):
         self.assertEqual(first_state["owned_cities"][0]["production"], 2)
         self.assertEqual(first_state["owned_cities"][0]["supported_unit_count"], 1)
         self.assertEqual(first_state["owned_cities"][0]["unit_capacity"], 2)
+        self.assertTrue(first_state["owned_cities"][0]["is_capital"])
 
         # Confirm output_fn printed the human-readable owned cities block
         full_text = "\n".join(captured_lines)
         self.assertIn("Owned Cities (2/9):", full_text)
-        self.assertIn("City #1 @ (3, 4): Level 1 | Pop 0/2 | Production +2 SPT | Units 1/2", full_text)
+        self.assertIn("City #1 @ (3, 4): Level 1 | Pop 0/2 | Production +2 SPT | Units 1/2 | Capital", full_text)
         self.assertIn("City #2 @ (6, 8): Level 2 | Pop 2/3 | Production +3 SPT | Units 2/3", full_text)
 
     # --- Test L: Live End-to-End City Parity Invariant ---
@@ -345,23 +366,26 @@ class TestParity001CityState(unittest.TestCase):
         from tools.validate_human_benchmark_parity import assert_live_city_parity
 
         canonical = [
-            OwnedCityState(x=2, y=3, level=1, population=1, population_need=2, production=2, supported_unit_count=1, unit_capacity=2),
-            OwnedCityState(x=5, y=5, level=2, population=0, population_need=3, production=3, supported_unit_count=0, unit_capacity=3),
+            OwnedCityState(x=2, y=3, level=1, population=1, population_need=2, production=2, supported_unit_count=1, unit_capacity=2, is_capital=True),
+            OwnedCityState(x=5, y=5, level=2, population=0, population_need=3, production=3, supported_unit_count=0, unit_capacity=3, is_capital=False),
         ]
         decoded = [
-            {"slot": 0, "x": 2, "y": 3, "level": 1, "population": 1, "population_need": 2, "production": 2, "supported_unit_count": 1, "unit_capacity": 2},
-            {"slot": 1, "x": 5, "y": 5, "level": 2, "population": 0, "population_need": 3, "production": 3, "supported_unit_count": 0, "unit_capacity": 3},
+            {"slot": 0, "x": 2, "y": 3, "level": 1, "population": 1, "population_need": 2, "production": 2, "supported_unit_count": 1, "unit_capacity": 2, "is_capital": True},
+            {"slot": 1, "x": 5, "y": 5, "level": 2, "population": 0, "population_need": 3, "production": 3, "supported_unit_count": 0, "unit_capacity": 2, "is_capital": False},
         ]
         human = list(decoded)
 
-        # Perfect match must pass
+        # Perfect match must pass (with equal unit_capacity)
+        decoded[1]["unit_capacity"] = 3
+        human[1]["unit_capacity"] = 3
         assert_live_city_parity(canonical, decoded, human)
 
         # Discrepancy must raise RuntimeError
-        bad_decoded = [dict(decoded[0])]
-        bad_decoded[0]["population"] = 99
+        decoded_bad = list(decoded)
+        decoded_bad[0] = dict(decoded[0])
+        decoded_bad[0]["level"] = 99
         with self.assertRaises(RuntimeError) as ctx:
-            assert_live_city_parity(canonical, bad_decoded, human)
+            assert_live_city_parity(canonical, decoded_bad, human)
         self.assertIn("PARITY-001 Live Discrepancy", str(ctx.exception))
 
 

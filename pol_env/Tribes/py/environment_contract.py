@@ -21,10 +21,12 @@ class ObservationContractError(RuntimeError):
     """Raised when an observation violates the environment interface contract."""
 
 
-PHASE1_ENVIRONMENT_VERSION = "v4_exact_per_city_state"
+PHASE1_ENVIRONMENT_VERSION = "v5_human_information_parity"
+
+ACTION_STAR_COST_SCALE = 50.0
 
 MAX_OWNED_CITIES = 9
-CITY_SLOT_FEATURE_DIM = 9
+CITY_SLOT_FEATURE_DIM = 10
 CITY_SLOT_FEATURE_NAMES = (
     "city_present",
     "city_x",
@@ -35,8 +37,80 @@ CITY_SLOT_FEATURE_NAMES = (
     "city_production",
     "city_supported_unit_count",
     "city_unit_capacity",
+    "city_is_capital",
 )
-CITY_BLOCK_DIM = MAX_OWNED_CITIES * CITY_SLOT_FEATURE_DIM  # 81
+CITY_BLOCK_DIM = MAX_OWNED_CITIES * CITY_SLOT_FEATURE_DIM  # 90
+
+SUPPORTED_UNIT_TYPES = (
+    "WARRIOR",
+    "RIDER",
+    "DEFENDER",
+    "SWORDMAN",
+    "ARCHER",
+    "CATAPULT",
+    "KNIGHT",
+    "MIND_BENDER",
+    "BOAT",
+    "SHIP",
+    "BATTLESHIP",
+    "SUPERUNIT",
+)
+NUM_UNIT_TYPE_CHANNELS = len(SUPPORTED_UNIT_TYPES)  # 12
+
+SUPPORTED_BUILDINGS = (
+    "PORT",
+    "MINE",
+    "FORGE",
+    "FARM",
+    "WINDMILL",
+    "CUSTOMS_HOUSE",
+    "LUMBER_HUT",
+    "SAWMILL",
+    "TEMPLE",
+    "WATER_TEMPLE",
+    "FOREST_TEMPLE",
+    "MOUNTAIN_TEMPLE",
+    "ALTAR_OF_PEACE",
+    "EMPERORS_TOMB",
+    "EYE_OF_GOD",
+    "GATE_OF_POWER",
+    "GRAND_BAZAR",
+    "PARK_OF_FORTUNE",
+    "TOWER_OF_WISDOM",
+)
+NUM_BUILDING_CHANNELS = len(SUPPORTED_BUILDINGS)  # 19
+
+TECHNOLOGY_ORDER = (
+    "CLIMBING",
+    "FISHING",
+    "HUNTING",
+    "ORGANIZATION",
+    "RIDING",
+    "ARCHERY",
+    "FARMING",
+    "FORESTRY",
+    "FREE_SPIRIT",
+    "MEDITATION",
+    "MINING",
+    "ROADS",
+    "SAILING",
+    "SHIELDS",
+    "WHALING",
+    "AQUATISM",
+    "CHIVALRY",
+    "CONSTRUCTION",
+    "MATHEMATICS",
+    "NAVIGATION",
+    "SMITHERY",
+    "SPIRITUALISM",
+    "TRADE",
+    "PHILOSOPHY",
+)
+NUM_TECHNOLOGIES = len(TECHNOLOGY_ORDER)  # 24
+
+NUM_CITY_TERRITORY_CHANNELS = MAX_OWNED_CITIES  # 9
+LEGACY_SCALAR_DIM = 6
+ECONOMY_SCALAR_DIM = 12
 
 
 @dataclass(frozen=True)
@@ -49,6 +123,7 @@ class OwnedCityState:
     production: int
     supported_unit_count: int
     unit_capacity: int
+    is_capital: bool
 
 
 def extract_owned_cities(
@@ -86,6 +161,7 @@ def extract_owned_cities(
             units = city_info.get("units", [])
             supported_unit_count = len(units) if isinstance(units, (list, tuple)) else 0
             unit_capacity = level + 1
+            is_capital = bool(city_info.get("isCapital", False))
         except Exception as exc:
             raise ObservationContractError(
                 f"Malformed city record for actor {raw_actor_id}: {exc}"
@@ -101,6 +177,7 @@ def extract_owned_cities(
                 production=production,
                 supported_unit_count=supported_unit_count,
                 unit_capacity=unit_capacity,
+                is_capital=is_capital,
             )
         )
     # Sort deterministically by spatial coordinates (x, y) ascending: primary key x, secondary key y
@@ -143,6 +220,7 @@ def encode_owned_city_slots(
                 float(city.production),
                 float(city.supported_unit_count),
                 float(city.unit_capacity),
+                1.0 if city.is_capital else 0.0,
             ])
         else:
             features.extend([0.0] * CITY_SLOT_FEATURE_DIM)
@@ -154,7 +232,7 @@ def decode_owned_city_slots(
     width: int,
     height: int,
     max_cities: int = MAX_OWNED_CITIES,
-) -> list[dict[str, Any]]:
+) -> list[dict]:
     """Decode exact integer city primitives from a flattened city-slot feature block."""
     import numpy as np
 
@@ -166,7 +244,7 @@ def decode_owned_city_slots(
         )
     max_x = max(1, width - 1)
     max_y = max(1, height - 1)
-    cities: list[dict[str, Any]] = []
+    cities: list[dict] = []
     for i in range(max_cities):
         offset = i * CITY_SLOT_FEATURE_DIM
         present = bool(block[offset + 0] >= 0.5)
@@ -180,6 +258,7 @@ def decode_owned_city_slots(
         production = int(round(float(block[offset + 6])))
         supported_unit_count = int(round(float(block[offset + 7])))
         unit_capacity = int(round(float(block[offset + 8])))
+        is_capital = bool(block[offset + 9] >= 0.5)
         cities.append(
             {
                 "slot": i,
@@ -191,6 +270,7 @@ def decode_owned_city_slots(
                 "production": production,
                 "supported_unit_count": supported_unit_count,
                 "unit_capacity": unit_capacity,
+                "is_capital": is_capital,
             }
         )
     return cities
@@ -201,15 +281,27 @@ class ObservationLayout:
     width: int
     height: int
     n_tiles: int
-    legacy_obs_dim: int
-    resource_block_dim: int
-    scalar_start: int
-    scalar_end: int
+    terrain_start: int
+    terrain_end: int
+    unit_types_start: int
+    unit_types_end: int
+    city_territory_start: int
+    city_territory_end: int
+    road_start: int
+    road_end: int
+    buildings_start: int
+    buildings_end: int
+    resource_start: int
+    resource_end: int
+    legacy_scalar_start: int
+    legacy_scalar_end: int
+    economy_scalar_start: int
+    economy_scalar_end: int
+    tech_vector_start: int
+    tech_vector_end: int
     city_block_start: int
     city_block_end: int
     expected_obs_dim: int
-    resource_start: int
-    resource_end: int
     city_slots: int = MAX_OWNED_CITIES
     city_slot_dim: int = CITY_SLOT_FEATURE_DIM
 
@@ -220,28 +312,75 @@ def observation_layout(width: int, height: int) -> ObservationLayout:
     if width <= 0 or height <= 0:
         raise ValueError(f"Invalid observation geometry: {width}x{height}")
     n_tiles = width * height
-    legacy_obs_dim = 3 * n_tiles + 6
-    resource_block_dim = n_tiles
-    scalar_start = legacy_obs_dim + resource_block_dim
-    scalar_dim = 15
-    scalar_end = scalar_start + scalar_dim
-    city_block_start = scalar_end
-    city_block_dim = MAX_OWNED_CITIES * CITY_SLOT_FEATURE_DIM  # 81
-    city_block_end = city_block_start + city_block_dim
-    expected_obs_dim = city_block_end
+
+    cur = 0
+    terrain_start = cur
+    cur += n_tiles
+    terrain_end = cur
+
+    unit_types_start = cur
+    cur += NUM_UNIT_TYPE_CHANNELS * n_tiles
+    unit_types_end = cur
+
+    city_territory_start = cur
+    cur += NUM_CITY_TERRITORY_CHANNELS * n_tiles
+    city_territory_end = cur
+
+    road_start = cur
+    cur += n_tiles
+    road_end = cur
+
+    buildings_start = cur
+    cur += NUM_BUILDING_CHANNELS * n_tiles
+    buildings_end = cur
+
+    resource_start = cur
+    cur += n_tiles
+    resource_end = cur
+
+    legacy_scalar_start = cur
+    cur += LEGACY_SCALAR_DIM
+    legacy_scalar_end = cur
+
+    economy_scalar_start = cur
+    cur += ECONOMY_SCALAR_DIM
+    economy_scalar_end = cur
+
+    tech_vector_start = cur
+    cur += NUM_TECHNOLOGIES
+    tech_vector_end = cur
+
+    city_block_start = cur
+    cur += MAX_OWNED_CITIES * CITY_SLOT_FEATURE_DIM
+    city_block_end = cur
+
+    expected_obs_dim = cur
+
     return ObservationLayout(
         width=width,
         height=height,
         n_tiles=n_tiles,
-        legacy_obs_dim=legacy_obs_dim,
-        resource_block_dim=resource_block_dim,
-        scalar_start=scalar_start,
-        scalar_end=scalar_end,
+        terrain_start=terrain_start,
+        terrain_end=terrain_end,
+        unit_types_start=unit_types_start,
+        unit_types_end=unit_types_end,
+        city_territory_start=city_territory_start,
+        city_territory_end=city_territory_end,
+        road_start=road_start,
+        road_end=road_end,
+        buildings_start=buildings_start,
+        buildings_end=buildings_end,
+        resource_start=resource_start,
+        resource_end=resource_end,
+        legacy_scalar_start=legacy_scalar_start,
+        legacy_scalar_end=legacy_scalar_end,
+        economy_scalar_start=economy_scalar_start,
+        economy_scalar_end=economy_scalar_end,
+        tech_vector_start=tech_vector_start,
+        tech_vector_end=tech_vector_end,
         city_block_start=city_block_start,
         city_block_end=city_block_end,
         expected_obs_dim=expected_obs_dim,
-        resource_start=legacy_obs_dim,
-        resource_end=scalar_start,
         city_slots=MAX_OWNED_CITIES,
         city_slot_dim=CITY_SLOT_FEATURE_DIM,
     )

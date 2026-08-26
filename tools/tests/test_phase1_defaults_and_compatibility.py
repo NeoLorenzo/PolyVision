@@ -59,7 +59,7 @@ class TestRewardDefaults(unittest.TestCase):
 
 
 class TestPPOActorDefaults(unittest.TestCase):
-    def _make_dummy_env_adapter(self, action_n: int = 63913, obs_dim: int = 586):
+    def _make_dummy_env_adapter(self, action_n: int = 63913, obs_dim: int = 5335):
         return SimpleNamespace(
             single_observation_space=gym.spaces.Box(low=-1e5, high=1e5, shape=(obs_dim,)),
             single_action_space=gym.spaces.Discrete(action_n),
@@ -91,13 +91,13 @@ class TestPPOActorDefaults(unittest.TestCase):
 
 
 class TestCheckpointMetadataCompatibility(unittest.TestCase):
-    def _make_dummy_env_adapter(self, action_n: int = 63913, obs_dim: int = 586):
+    def _make_dummy_env_adapter(self, action_n: int = 63913, obs_dim: int = 5335):
         return SimpleNamespace(
             single_observation_space=gym.spaces.Box(low=-1e5, high=1e5, shape=(obs_dim,)),
             single_action_space=gym.spaces.Discrete(action_n),
         )
 
-    def test_frozen_reference_checkpoint_is_rejected_by_current_v4_environment(self):
+    def test_frozen_reference_checkpoint_is_rejected_by_current_v5_environment(self):
         ckpt_path = (
             REPO_ROOT
             / "runs"
@@ -112,16 +112,16 @@ class TestCheckpointMetadataCompatibility(unittest.TestCase):
         self.assertEqual(int(meta.get("observation_dim")), 505)
         self.assertEqual(meta.get("phase1_environment_version"), "v3_corrected_turn_economy")
 
-        # Current v4 environment metadata has observation_dim=586 and phase1_environment_version=v4_exact_per_city_state
+        # Current v5 environment metadata has observation_dim=5335 and phase1_environment_version=v5_human_information_parity
         wrapper = object.__new__(TribesGymWrapper)
         wrapper._catalog = SimpleNamespace(width=11, height=11)
-        wrapper.observation_space = gym.spaces.Box(low=-1e5, high=1e5, shape=(586,))
+        wrapper.observation_space = gym.spaces.Box(low=-1e5, high=1e5, shape=(5335,))
         wrapper.action_space = gym.spaces.Discrete(63913)
         wrapper._catalog_fingerprint = meta["action_catalog_fingerprint"]
         wrapper._max_legal_actions = 256
-        wrapper.PHASE1_ENVIRONMENT_VERSION = "v4_exact_per_city_state"
-        wrapper.LEGAL_ACTION_FEATURE_VERSION = meta["legal_action_feature_version"]
-        wrapper.ACTION_FEATURE_DIM = meta["legal_action_feature_dim"]
+        wrapper.PHASE1_ENVIRONMENT_VERSION = "v5_human_information_parity"
+        wrapper.LEGAL_ACTION_FEATURE_VERSION = "v1_4_parity_spatial_and_cost"
+        wrapper.ACTION_FEATURE_DIM = 47
         wrapper.CATALOG_VERSION = meta["catalog_version"]
         wrapper.CANONICALIZER_VERSION = meta["canonicalizer_version"]
         wrapper.PHASE1_OPENING_VERSION = meta["phase1_opening_version"]

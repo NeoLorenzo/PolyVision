@@ -1,45 +1,52 @@
 # Observations
 
 ```text
-PARITY-001 — Exact Per-City State
-Status: CLOSED / FROZEN
-Environment contract: v4_exact_per_city_state
-Observation dimension: 586
+PARITY-002 — Phase-1 Human Information Parity
+Status: CLOSED
+Environment contract: v5_human_information_parity
+Observation dimension: 5335
 ```
 
-`Tribes-v0` exposes a one-dimensional `float32` observation. For the active 11×11 Phase-1 contract (`v4_exact_per_city_state`), its dimension is:
+`Tribes-v0` exposes a one-dimensional `float32` observation tensor. For the active 11×11 Phase-1 contract (`v5_human_information_parity`), its dimension is:
 
 ```text
-observation_dim = 4 × (width × height) + 21 + (MAX_OWNED_CITIES × CITY_SLOT_FEATURE_DIM)
-                = 4 × 121 + 21 + (9 × 9)
-                = 484 + 21 + 81
-                = 586
+spatial_dim  = (1 terrain + 12 unit types + 9 city territory + 1 road + 19 buildings + 1 resource) × (11 × 11)
+             = 43 channels × 121 tiles
+             = 5203
+
+scalar_dim   = 6 legacy + 12 economy + 24 technologies + (9 city slots × 10 features)
+             = 132
+
+observation_dim = 5203 + 132 = 5335
 ```
 
-The active 11×11 pool therefore produces **586 values**.
+The active 11×11 pool produces **5,335 values**.
 
 ## Layout
 
-The vector preserves the legacy and scalar prefix and appends the exact per-city state block introduced in `PARITY-001`:
+The vector layout contains 43 fog-masked spatial channels followed by scalar and structured entity blocks:
 
-| Block | Range (11×11) | Size | Contents |
-|---|---|---:|---|
-| Terrain | `0..120` | 121 | Java observation terrain IDs, including fog markers. |
-| Unit IDs | `121..241` | 121 | Board unit identifiers from the visible observation. |
-| City IDs | `242..362` | 121 | Board city identifiers from the visible observation. |
-| Legacy scalars | `363..368` | 6 | Bardur stars, score, city count, kills, engine tick, and active tribe ID. |
-| Visible resources | `369..489` | 121 | Resource IDs normalized to `[0,1]`; fogged tiles are masked before normalization. |
-| Economy/state scalars | `490..504` | 15 | Normalized stars/SPT/turn timing, key technologies, research count, city levels, and upgrade progress/readiness. |
-| **Exact Per-City Slots** | `505..585` | 81 | 9 deterministic city slots (9 features each) preserving exact unclipped entity state. |
+| Block | Channel Count | Range (11×11) | Size | Contents |
+|---|:---:|---|---:|---|
+| **Terrain** | 1 | `0..120` | 121 | Terrain IDs (0..7, where 7 = FOG). |
+| **Categorical Unit Types** | 12 | `121..1572` | 1452 | One binary spatial channel per unit type in `SUPPORTED_UNIT_TYPES` order (`WARRIOR`, `RIDER`, `DEFENDER`, `SWORDMAN`, `ARCHER`, `CATAPULT`, `KNIGHT`, `MIND_BENDER`, `BOAT`, `SHIP`, `BATTLESHIP`, `SUPERUNIT`). |
+| **Deterministic City Territory** | 9 | `1573..2661` | 1089 | One binary spatial channel per deterministic city slot (0..8) representing claimed territory tiles. |
+| **Road Grid** | 1 | `2662..2782` | 121 | Binary road plane (`1.0` if visible road present on tile, `0.0` otherwise). |
+| **Categorical Buildings** | 19 | `2783..5081` | 2299 | One binary spatial channel per building type in `SUPPORTED_BUILDINGS` order (`PORT`, `MINE`, `TEMPLE`, `WATER_TEMPLE`, `FOREST_TEMPLE`, `MOUNTAIN_TEMPLE`, `FARM`, `WINDMILL`, `SAWMILL`, `CUSTOMS_HOUSE`, `FORGE`, `LUMBER_HUT`, `MONUMENT`, `GRAND_BAZAR`, `EMPERORS_TOMB`, `EYE_OF_GOD`, `GATE_OF_POWER`, `PARK_OF_FORTUNE`, `TOWER_OF_WISDOM`). |
+| **Visible Resources** | 1 | `5082..5202` | 121 | Resource IDs normalized to `[0,1]`; fogged tiles masked to `0.0`. |
+| **Legacy Scalars** | — | `5203..5208` | 6 | Stars, score, city count, kills, engine tick, active tribe ID. |
+| **Economy Scalars** | — | `5209..5220` | 12 | Normalized stars/SPT/turn timing, city count, average/max city level, mean/max upgrade progress, upgrade ready fraction, level-up available flag. |
+| **Researched Technologies** | 24 | `5221..5244` | 24 | Full binary indicator vector for all 24 technologies in `TECHNOLOGY_ORDER` order. |
+| **Exact Per-City Slots** | 9 slots | `5245..5334` | 90 | 9 deterministic city slots (10 features each) preserving exact unclipped entity state and capital identity. |
 
-## Exact Per-City State Block (`PARITY-001`)
+## Exact Per-City State Block (`PARITY-001` & `PARITY-002`)
 
-Under the `v4_exact_per_city_state` contract, exact state for every owned city is preserved across 9 fixed slots (`MAX_OWNED_CITIES = 9`, matching the empirical maximum on 11×11 maps).
+Under `v5_human_information_parity`, exact state for every owned city is preserved across 9 fixed slots (`MAX_OWNED_CITIES = 9`).
 
 ### Slot Ordering
-Owned cities are extracted exclusively from the fog-respecting POV observation JSON (`obs_dict["city"]` where `tribeID == controlled_tribe_id`) and sorted deterministically by spatial coordinates $(x, y)$ ascending (primary key $x$, secondary key $y$). Raw engine actor IDs are never exposed in the city slots.
+Owned cities are extracted exclusively from the fog-respecting POV observation JSON (`obs_dict["city"]` where `tribeID == controlled_tribe_id`) and sorted deterministically by spatial coordinates $(x, y)$ ascending (primary key $x$, secondary key $y$). Raw engine actor IDs are completely excluded.
 
-### Slot Schema (9 Features per Slot)
+### Slot Schema (10 Features per Slot)
 For each slot $i \in \{0 \dots 8\}$:
 1. `city_present`: `1.0` if city exists in slot $i$, `0.0` if empty slot.
 2. `city_x`: `float(x) / float(width - 1)` (normalized to $[0, 1]$ by board geometry).
@@ -50,15 +57,16 @@ For each slot $i \in \{0 \dots 8\}$:
 7. `city_production`: Exact unclipped `float(production)` (city SPT contribution).
 8. `city_supported_unit_count`: Exact unclipped `float(len(city["units"]))`.
 9. `city_unit_capacity`: Exact unclipped `float(level + 1)`.
+10. `city_is_capital`: `1.0` if capital city, `0.0` otherwise (`STATE-MAP-003`).
 
-Unused slots ($K < 9$) are strictly padded with `0.0` across all 9 values. Any observation producing more than 9 owned cities violates the contract and raises `ObservationContractError`.
+Unused slots ($K < 9$) are strictly padded with `0.0` across all 10 values. Any observation producing more than 9 owned cities violates the contract and raises `ObservationContractError`.
 
-## Visibility boundary
+## Defense-in-Depth Fog Masking
 
-Policy observations come from Java's normal `observationJson()` and respect fog of war. The visible resource block explicitly masks fogged resources. `TribesGymEnv.get_observation(full_visibility=True)` exists for diagnostics and audits; it must not be treated as the training observation or used by a fair visible-information baseline.
+All spatial channels (unit types, city territory, road, buildings, resources) are explicitly fog-masked in Python (`fog_mask = (terrain == 7)`). No value contained in hidden tiles within Java serialization can influence the observation tensor.
 
-## Geometry and compatibility
+## Visibility Boundary & Compatibility
 
-The wrapper derives the observation space and global action catalog from the map pool and enforces square, dimension-homogeneous pools. Changing geometry or interface contract changes observation dimension and catalog fingerprint, so checkpoints are interface-specific. Historical 505-dimensional checkpoints (`v3_corrected_turn_economy`) are cleanly rejected by `validate_checkpoint_compatibility()`.
+Policy observations come from Java's fog-respecting `observationJson()`. Changing geometry or interface contract changes observation dimension and catalog fingerprint, so checkpoints are interface-specific. Historical checkpoints (`v3_corrected_turn_economy` with 505 dims, and `v4_exact_per_city_state` with 586 dims) are cleanly rejected by `validate_checkpoint_compatibility()`.
 
 See [Actions](actions.md) for the policy interface and [Reproducibility](reproducibility.md) for checkpoint contract fields.

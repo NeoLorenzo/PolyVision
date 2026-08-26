@@ -2,6 +2,39 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-PARITY_002_Human_Information_Parity-043] - (2026-08-26)
+
+### Scope
+- Implemented **`PARITY-002 — Phase-1 Human Information Parity`**, closing all 8 confirmed Phase-1 information and representation disparities identified in the Human–AI Information Parity Audit.
+- Defined and froze the new Phase-1 environment contract:
+  - `PHASE1_ENVIRONMENT_VERSION = "v5_human_information_parity"`
+  - Observation dimension: **5,335 values** (43 fog-masked spatial channels × 121 tiles + 132 scalar/structured features)
+  - Legal action feature version: `LEGAL_ACTION_FEATURE_VERSION = "v1_4_parity_spatial_and_cost"` (47 dimensions)
+  - Legal action star cost scale constant: `ACTION_STAR_COST_SCALE = 50.0`
+- **Disparities Resolved:**
+  1. `STATE-MAP-001` (Building Placement & Types): Added 19 categorical binary spatial channels in `SUPPORTED_BUILDINGS` order (`PORT`, `MINE`, `TEMPLE`, `WATER_TEMPLE`, `FOREST_TEMPLE`, `MOUNTAIN_TEMPLE`, `FARM`, `WINDMILL`, `SAWMILL`, `CUSTOMS_HOUSE`, `FORGE`, `LUMBER_HUT`, `MONUMENT`, `GRAND_BAZAR`, `EMPERORS_TOMB`, `EYE_OF_GOD`, `GATE_OF_POWER`, `PARK_OF_FORTUNE`, `TOWER_OF_WISDOM`).
+  2. `STATE-MAP-002` (Road Grid): Added binary road plane from Java `Board.isRoad(x, y)` on POV state.
+  3. `STATE-MAP-003` (Capital Identity): Added `city_is_capital` boolean to city slot feature index 9 (expanding slot feature dimension to 10 and city block to 90 values).
+  4. `FEAT-MISS-001` (Action Star Cost): Exposed authoritative Java `star_cost` in action feature index 42 as `action_star_cost_norm` (`star_cost / 50.0`).
+  5. `STATE-TECH-001` (Full 24-Tech Researched Vector): Added 24 binary researched flags in `TECHNOLOGY_ORDER` order.
+  6. `STATE-ID-001` (Eliminate Raw Actor IDs): Completely removed raw continuous actor ID floats (`unitID`, `cityID`, `actorIDcounter`) from the observation vector; policy observation is 100% actor-ID invariant.
+  7. `STATE-UNIT-001` (Categorical Unit Types): Replaced unit presence with 12 categorical binary spatial channels matching `SUPPORTED_UNIT_TYPES` (`WARRIOR`, `RIDER`, `DEFENDER`, `SWORDMAN`, `ARCHER`, `CATAPULT`, `KNIGHT`, `MIND_BENDER`, `BOAT`, `SHIP`, `BATTLESHIP`, `SUPERUNIT`).
+  8. `FEAT-SPAT-001` (Action Spatial Coordinates): Exposed normalized source `(src_x / 10.0, src_y / 10.0)` and destination `(target_x / 10.0, target_y / 10.0)` in action feature indices 43..46 across all spatial action families.
+- **Architectural & Safety Hardening:**
+  - Applied defense-in-depth explicit Python fog mask (`fog_mask = (terrain == 7)`) across all 43 spatial channels.
+  - Implemented strict deterministic city territory mapping asserting every visible territory tile corresponds to a deterministic city slot; unmatched territory raises `ObservationContractError`.
+  - Added cross-language contract tests validating 1:1 match between Java `Types.java` enums/ordinals and Python contract vocabularies.
+  - Enforced clean rejection of historical v3 (505 dims) and v4 (586 dims) checkpoints with `CheckpointCompatibilityError`.
+  - Updated Human Benchmark presentation layer (`tools/human_policy_interface.py`, `HUMAN_INTERFACE_VERSION = "v5_human_information_parity"`) to decode the 5,335-dim observation and display 47-dim action feature annotations.
+- **Validation & Test Coverage:**
+  - Authored comprehensive test suite `pol_env/Tribes/py/tests/test_parity_002_human_information_parity.py` (10 tests covering all core invariants, cross-language vocabularies, actor ID invariance, fog defense-in-depth, strict territory mapping, star cost, and spatial action coordinates).
+  - Validated full training map pool (5,000 maps tested with 0 contract failures).
+  - Validated live human benchmark parity (`tools/validate_human_benchmark_parity.py`).
+  - Ran full test suite across `pol_env/Tribes/py/tests` (42 tests) and `tools/tests` (52 tests) with 100% pass rate.
+
+### Rationale
+- Completes the milestone for full Human–AI Information Parity in the Phase-1 environment, ensuring that the PPO policy and human players have identical perceptual access to all map structures, road infrastructure, tech tree state, unit compositions, and action costs before initiating Phase-1 retraining.
+
 ## [Phase1-V4_PARITY001_Seed3_16M_TerminalSPT_Reference_Run_and_Freeze-042] - (2026-08-26)
 
 ### Scope

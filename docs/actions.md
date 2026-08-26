@@ -37,13 +37,15 @@ The fixed legal-slot capacity defaults to **256** (`POLYVISION_MAX_LEGAL_ACTIONS
 
 ## Current action features
 
-`legal_features` uses version `v1_3_move_focus_plus_semantic_econ`, a **42-dimensional** vector per legal slot. It combines:
+`legal_features` uses version `v1_4_parity_spatial_and_cost`, a **47-dimensional** vector per legal slot. It combines:
 
-- movement and exploration signals, including predicted reveal, adjacent fog, backtracking, capital distance, and village targeting;
-- one-hot action-family indicators;
-- normalized research, resource, building, and level-up identities;
-- semantic flags for Organization, Forestry, common resources/buildings, and Workshop;
-- predicted population/SPT effects and city-upgrade readiness/progress.
+- movement and exploration signals, including predicted reveal, adjacent fog, backtracking, capital distance, and village targeting (features 0..13);
+- one-hot action-family indicators (features 14..23);
+- normalized research, resource, building, and level-up identities (features 24..27);
+- semantic flags for Organization, Forestry, common resources/buildings, and Workshop (features 28..35);
+- predicted population/SPT effects and city-upgrade readiness/progress (features 36..41);
+- **action star cost**: `float(star_cost) / ACTION_STAR_COST_SCALE` (scale $= 50.0$) (feature 42, `FEAT-MISS-001`);
+- **action spatial coordinates**: normalized source `(src_x / 10.0, src_y / 10.0)` and destination `(target_x / 10.0, target_y / 10.0)` across spatial action families (`MOVE`, `CAPTURE`, `SPAWN`, `BUILD`, `RESOURCE_GATHERING`, `CLEAR_FOREST`, `GROW_FOREST`, `LEVEL_UP`, `EXAMINE`) (features 43..46, `FEAT-SPAT-001`).
 
 Features are derived from policy-visible state plus the legal action's structured metadata. Full-visibility observations are diagnostic-only and are not fed into these features.
 
@@ -54,7 +56,7 @@ Features are derived from policy-visible state plus the legal action's structure
 - `legal_global_ids_padded`: length 256 by default;
 - `legal_action_valid_mask`: which slots are populated;
 - `legal_action_count`: number of populated slots;
-- `legal_action_features_padded`: shape `(256, 42)` by default;
+- `legal_action_features_padded`: shape `(256, 47)` by default;
 - feature/catalog versions and fingerprints.
 
 Checkpoint loading validates geometry, observation/action dimensions, actor mode, catalog fingerprint, canonicalizer/catalog versions, feature version/dimension, and legal-slot capacity before model tensors are used.

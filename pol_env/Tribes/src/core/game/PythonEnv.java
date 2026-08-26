@@ -140,6 +140,7 @@ public class PythonEnv {
 
     private void addStructuredActionFields(JSONObject jo, Action a) {
         if (a == null) return;
+        jo.put("star_cost", computeActionStarCost(a));
 
         if (a instanceof Move) {
             Move m = (Move) a;
@@ -152,6 +153,8 @@ public class PythonEnv {
             if (m.getDestination() != null) {
                 jo.put("dst_x", m.getDestination().x);
                 jo.put("dst_y", m.getDestination().y);
+                jo.put("target_x", m.getDestination().x);
+                jo.put("target_y", m.getDestination().y);
             }
             return;
         }
@@ -184,6 +187,13 @@ public class PythonEnv {
             Spawn s = (Spawn) a;
             addCityFields(jo, s);
             jo.put("unit_type", s.getUnitType() != null ? s.getUnitType().toString() : JSONObject.NULL);
+            City city = safeGetCity(s.getCityId());
+            if (city != null) {
+                jo.put("src_x", city.getPosition().x);
+                jo.put("src_y", city.getPosition().y);
+                jo.put("target_x", city.getPosition().x);
+                jo.put("target_y", city.getPosition().y);
+            }
             return;
         }
 
@@ -222,6 +232,15 @@ public class PythonEnv {
             addCityFields(jo, lu);
             jo.put("levelup_choice", lu.getBonus() != null ? lu.getBonus().toString() : JSONObject.NULL);
             putTargetFieldsFromCityAction(jo, lu);
+            City city = safeGetCity(lu.getCityId());
+            if (city != null) {
+                jo.put("src_x", city.getPosition().x);
+                jo.put("src_y", city.getPosition().y);
+                if (!jo.has("target_x")) {
+                    jo.put("target_x", city.getPosition().x);
+                    jo.put("target_y", city.getPosition().y);
+                }
+            }
             return;
         }
 
@@ -239,8 +258,66 @@ public class PythonEnv {
             if (u != null) {
                 jo.put("src_x", u.getPosition().x);
                 jo.put("src_y", u.getPosition().y);
+                jo.put("target_x", u.getPosition().x);
+                jo.put("target_y", u.getPosition().y);
+            }
+            return;
+        }
+
+        if (a instanceof core.actions.tribeactions.BuildRoad) {
+            core.actions.tribeactions.BuildRoad br = (core.actions.tribeactions.BuildRoad) a;
+            if (br.getPosition() != null) {
+                jo.put("src_x", br.getPosition().x);
+                jo.put("src_y", br.getPosition().y);
+                jo.put("target_x", br.getPosition().x);
+                jo.put("target_y", br.getPosition().y);
             }
         }
+    }
+
+    private int computeActionStarCost(Action a) {
+        if (a == null) return 0;
+        if (a instanceof Spawn) {
+            Spawn s = (Spawn) a;
+            return s.getUnitType() != null ? s.getUnitType().getCost() : 0;
+        }
+        if (a instanceof Build) {
+            Build b = (Build) a;
+            return b.getBuildingType() != null ? b.getBuildingType().getCost() : 0;
+        }
+        if (a instanceof ResearchTech) {
+            ResearchTech rt = (ResearchTech) a;
+            if (rt.getTech() != null) {
+                Tribe t = gs.getTribe(rt.getTribeId());
+                if (t != null) {
+                    return rt.getTech().getCost(t.getNumCities(), t.getTechTree());
+                }
+            }
+            return 0;
+        }
+        if (a instanceof ResourceGathering) {
+            ResourceGathering rg = (ResourceGathering) a;
+            return rg.getResource() != null ? rg.getResource().getCost() : 0;
+        }
+        if (a instanceof GrowForest) {
+            return core.TribesConfig.GROW_FOREST_COST;
+        }
+        if (a instanceof core.actions.cityactions.BurnForest) {
+            return core.TribesConfig.BURN_FOREST_COST;
+        }
+        if (a instanceof core.actions.tribeactions.BuildRoad) {
+            return core.TribesConfig.ROAD_COST;
+        }
+        if (a instanceof core.actions.unitactions.Upgrade) {
+            core.actions.unitactions.Upgrade u = (core.actions.unitactions.Upgrade) a;
+            Unit unit = safeGetUnit(u.getUnitId());
+            if (unit != null) {
+                if (unit.getType() == Types.UNIT.BOAT) return Types.UNIT.SHIP.getCost();
+                if (unit.getType() == Types.UNIT.SHIP) return Types.UNIT.BATTLESHIP.getCost();
+            }
+            return 0;
+        }
+        return 0;
     }
 
     private void addCityFields(JSONObject jo, CityAction action) {
@@ -250,6 +327,8 @@ public class PythonEnv {
         if (city != null) {
             jo.put("city_x", city.getPosition().x);
             jo.put("city_y", city.getPosition().y);
+            jo.put("src_x", city.getPosition().x);
+            jo.put("src_y", city.getPosition().y);
             jo.put("city_tile", city.getPosition().x * gs.getBoard().getSize() + city.getPosition().y);
         }
     }
@@ -327,6 +406,7 @@ public class PythonEnv {
         JSONArray city2D = new JSONArray();
         JSONArray building2D = new JSONArray();
         JSONArray network2D = new JSONArray();
+        JSONArray road2D = new JSONArray();
 
         Board b = state.getBoard();
         for (int i = 0; i < b.getSize(); i++) {
@@ -336,6 +416,7 @@ public class PythonEnv {
             JSONArray cities = new JSONArray();
             JSONArray buildings = new JSONArray();
             JSONArray networks = new JSONArray();
+            JSONArray roads = new JSONArray();
 
             for (int j = 0; j < b.getSize(); j++) {
                 terrain.put(b.getTerrainAt(i, j).getKey());
@@ -344,6 +425,7 @@ public class PythonEnv {
                 cities.put(b.getCityIdAt(i, j));
                 buildings.put(b.getBuildingAt(i, j) != null ? b.getBuildingAt(i, j).getKey() : -1);
                 networks.put(b.getNetworkTilesAt(i, j));
+                roads.put(b.isRoad(i, j) ? 1 : 0);
             }
 
             terrain2D.put(terrain);
@@ -352,6 +434,7 @@ public class PythonEnv {
             city2D.put(cities);
             building2D.put(buildings);
             network2D.put(networks);
+            road2D.put(roads);
         }
 
         // Unit INFO
@@ -373,6 +456,7 @@ public class PythonEnv {
             uInfo.put("cityID", u.getCityId());
             uInfo.put("tribeId", u.getTribeId());
             uInfo.put("currentHP", u.getCurrentHP());
+            uInfo.put("status", u.getStatus() != null ? u.getStatus().toString() : "FRESH");
             unit.put(String.valueOf(u.getActorId()), uInfo);
         }
 
@@ -423,6 +507,19 @@ public class PythonEnv {
             tribeInfo.put("extraUnits", t.getExtraUnits());
             tribeInfo.put("nKills", t.getnKills());
             tribeInfo.put("nPacifistCount", t.getnPacifistCount());
+
+            JSONObject techJson = new JSONObject();
+            JSONArray researchedArr = new JSONArray();
+            if (t.getTechTree() != null) {
+                for (boolean res : t.getTechTree().getResearched()) {
+                    researchedArr.put(res);
+                }
+                techJson.put("everythingResearched", t.getTechTree().isEverythingResearched());
+            }
+            techJson.put("researched", researchedArr);
+            tribeInfo.put("technology", techJson);
+            tribeInfo.put("techTree", techJson);
+
             tribesINFO.put(String.valueOf(t.getActorId()), tribeInfo);
         }
 
@@ -431,6 +528,7 @@ public class PythonEnv {
         board.put("unitID", unit2D);
         board.put("cityID", city2D);
         board.put("network", network2D);
+        board.put("road", road2D);
         board.put("building", building2D);
         board.put("actorIDcounter", b.getActorIDcounter());
 
