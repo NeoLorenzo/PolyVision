@@ -16,9 +16,9 @@ All notable changes to this project are documented in this file.
   - Opening version: `v2_guaranteed_two_unit`
   - Action space: 63,913 global IDs, 256 legal slots, 42-d action features (`v1_3_move_focus_plus_semantic_econ`, fingerprint `c849a4abf7b0bee073ccc56b63ae65917ea30e77068ad648c472130693dfe6e4`)
   - Reward: Terminal-SPT ($w_{\text{base}}=1.0, w_{>10}=2.0, w_{>15}=3.0$) + step shaping
-- **W&B Training Archival & Diagnostics:**
-  - Archived raw W&B export `outputs/training/phase1_v4_parity001_seed3_16m_terminal_spt_wandb.csv` (SHA-256: `7e2d29ed77f6efc18db51a2783e7911883ad3b0fb727fba3487322bea3861d7b`).
-  - Generated structured provenance summary `outputs/training/phase1_v4_parity001_seed3_16m_terminal_spt_summary.json` capturing throughput (363 SPS, 12.28 h runtime), optimization metrics (explained variance 0.694, entropy 0.935, value loss 71.002, policy loss $5.96 \times 10^{-9}$), and step-level diagnostics.
+- **W&B Runs-Table Telemetry Archival & Diagnostics:**
+  - Archived raw W&B runs-table export `outputs/training/phase1_v4_parity001_seed3_16m_terminal_spt_wandb.csv` (SHA-256: `7e2d29ed77f6efc18db51a2783e7911883ad3b0fb727fba3487322bea3861d7b`).
+  - Generated structured provenance summary `outputs/training/phase1_v4_parity001_seed3_16m_terminal_spt_summary.json` recording run-level configuration and summary metrics from the runs-table export (throughput 363 SPS, 12.28 h runtime, final recorded value loss 71.002, policy entropy 0.935, explained variance 0.694, policy loss metric $\approx 5.96 \times 10^{-9}$, and rollout summary metrics).
 - **Canonical Validation Evaluation:**
   - Evaluated on 250 held-out validation maps (3,000 episodes total, `outputs/evaluations/20260826_phase1_v4_parity001_seed3_16m_terminal_spt_validation_canonical`):
     - PPO argmax: Mean 19.78 Turn-10 SPT (95% CI [19.30, 20.26]), Median 20.00

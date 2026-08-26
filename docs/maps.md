@@ -37,7 +37,7 @@ Held-out means held out by canonical map identity and exact CSV content hash, no
 
 `levels/phase1_pool_bardur_real/test/*.csv` is the fixed 250-map held-out scientific benchmark. It is strictly held out from PPO gradient training and must never be used for gradient updates, hyperparameter tuning, or routine checkpoint selection. However, because this fixed pool has established baseline results from prior development cycles (including v3), it is accurately characterized as a fixed held-out test benchmark rather than a newly pristine or never-before-inspected pool.
 
-**Post-Freeze Test Protocol Rule:** After freezing a reference model, held-out test benchmark results must not be used as a selection criterion for subsequent models. Next-generation model development and selection must rely strictly on training dynamics and validation evidence. A candidate model should be evaluated on the fixed test benchmark only after its weights and architecture are deliberately frozen.
+**Post-Freeze Test Protocol Rule:** After freezing a reference model, held-out test benchmark results must not be used as a selection criterion for subsequent models. Next-generation model development and selection must rely strictly on training and validation evidence. A candidate model should be evaluated on the fixed test benchmark only after its weights and architecture are deliberately frozen.
 
 ### Human benchmark
 

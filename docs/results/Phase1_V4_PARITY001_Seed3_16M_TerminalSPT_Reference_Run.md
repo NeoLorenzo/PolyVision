@@ -147,28 +147,30 @@ The dataset split is fixed across all 5,517 maps (`split_manifest.json` SHA-256:
 
 ---
 
-## W&B Training Dynamics & Telemetry
+## Run-Level W&B Training Telemetry Summary
 
-Derived from archived training export `outputs/training/phase1_v4_parity001_seed3_16m_terminal_spt_wandb.csv` (SHA-256: `7e2d29ed77f6efc18db51a2783e7911883ad3b0fb727fba3487322bea3861d7b`):
+The archived W&B artifact (`outputs/training/phase1_v4_parity001_seed3_16m_terminal_spt_wandb.csv`, SHA-256: `7e2d29ed77f6efc18db51a2783e7911883ad3b0fb727fba3487322bea3861d7b`) is a **runs-table export** containing run-level config and summary metrics, not per-step training history. Consequently, the values below are reported strictly as final/summary telemetry snapshots and are not used to infer learning-curve shape, convergence, stabilization, or temporal dynamics.
 
-| Metric Category | Metric | Final Training Value | Description |
+Structured derived provenance is recorded in `outputs/training/phase1_v4_parity001_seed3_16m_terminal_spt_summary.json`.
+
+| Metric Category | Summary Metric | Final Recorded Value | Description |
 |---|---|---:|---|
-| **Throughput** | Training SPS | 363 | System transitions per second |
+| **Throughput** | Training SPS | 363 | Final recorded system transitions per second |
 | | Total Runtime | 44,197 s (12.28 h) | Total wall-clock time over 16M steps |
-| **Optimization** | Value loss | 71.002 | Final clipped value function loss |
-| | Policy loss | $5.96 \times 10^{-9}$ | Surrogate policy objective loss |
-| | Policy entropy | 0.935 | Policy action distribution entropy |
-| | Explained variance | 0.694 | Value function explained variance ($R^2$) |
-| | Approx KL | $-3.73 \times 10^{-10}$ | Approximate KL divergence between old/new policy |
-| | Learning rate | $4.00 \times 10^{-8}$ | Linearly decayed learning rate |
-| **Training Rollouts** | Rollout final SPT (T10) | 17.0 | Episode-end SPT during training rollouts |
-| | Rollout final cities | 4.0 | Mean cities at Turn 10 during rollouts |
-| | Forestry adoption rate | 100.0% | Fraction of rollout episodes researching Forestry |
-| | Organization adoption rate | 100.0% | Fraction of rollout episodes researching Organization |
-| | Mean lumber huts | 9.0 | Mean lumber huts built by Turn 10 during rollouts |
-| | Mean sawmills | 3.0 | Mean sawmills built by Turn 10 during rollouts |
-| | Non-endturn action rate | 88.1% | Proportion of policy actions that are productive non-end-turn actions |
-| | Mean valid legal actions | 17.33 | Average number of legal action slots per decision state |
+| **Optimization** | Value loss | 71.002 | Final recorded clipped value function loss metric |
+| | Policy loss | $5.96 \times 10^{-9}$ | Final recorded surrogate policy loss metric |
+| | Policy entropy | 0.935 | Final recorded policy action distribution entropy |
+| | Explained variance | 0.694 | PPO value-function explained variance ($1 - \text{Var}(y - \hat{y}) / \text{Var}(y)$) |
+| | Approx KL | $-3.73 \times 10^{-10}$ | Final recorded approximate KL divergence metric |
+| | Learning rate | $4.00 \times 10^{-8}$ | Final annealed learning rate |
+| **Training Rollouts** | Rollout final SPT (T10) | 17.0 | Final recorded episode-end SPT during training rollouts |
+| | Rollout final cities | 4.0 | Final recorded mean cities at Turn 10 during rollouts |
+| | Forestry adoption rate | 100.0% | Final recorded fraction of rollout episodes researching Forestry |
+| | Organization adoption rate | 100.0% | Final recorded fraction of rollout episodes researching Organization |
+| | Mean lumber huts | 9.0 | Final recorded mean lumber huts built by Turn 10 |
+| | Mean sawmills | 3.0 | Final recorded mean sawmills built by Turn 10 |
+| | Non-endturn action rate | 88.1% | Final recorded proportion of productive non-end-turn actions |
+| | Mean valid legal actions | 17.33 | Final recorded average legal action slots per decision state |
 
 ---
 
