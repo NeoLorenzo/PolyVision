@@ -5177,13 +5177,16 @@ class TribesGymWrapper(gym.Env):
                     continue
                 if 0 <= ux < width and 0 <= uy < height and u_tribe == controlled_tribe:
                     if not fog_mask[ux, uy]:
-                        if u_cid not in city_actor_to_slot:
+                        if u_cid == -1:
+                            pass  # Legitimate explicit NO_HOME_CITY state (e.g. ruin extra unit / superunit)
+                        elif u_cid in city_actor_to_slot:
+                            slot_i = city_actor_to_slot[u_cid]
+                            if slot_i < MAX_OWNED_CITIES:
+                                unit_home_city_channels[slot_i][ux, uy] = 1.0
+                        else:
                             raise ObservationContractError(
                                 f"Visible owned unit at ({ux}, {uy}) has cityID={u_cid} which cannot be mapped to any owned city slot"
                             )
-                        slot_i = city_actor_to_slot[u_cid]
-                        if slot_i < MAX_OWNED_CITIES:
-                            unit_home_city_channels[slot_i][ux, uy] = 1.0
         for i in range(MAX_OWNED_CITIES):
             uhc_chan = unit_home_city_channels[i]
             uhc_chan[fog_mask] = 0.0  # explicit fog defense

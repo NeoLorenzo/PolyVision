@@ -31,7 +31,7 @@ The vector layout contains 52 fog-masked spatial channels followed by scalar and
 | **Terrain** | 1 | `0..120` | 121 | Terrain IDs (0..7, where 7 = FOG). |
 | **Categorical Unit Types** | 12 | `121..1572` | 1452 | One binary spatial channel per unit type in `SUPPORTED_UNIT_TYPES` order (`WARRIOR`, `RIDER`, `DEFENDER`, `SWORDMAN`, `ARCHER`, `CATAPULT`, `KNIGHT`, `MIND_BENDER`, `BOAT`, `SHIP`, `BATTLESHIP`, `SUPERUNIT`). |
 | **Deterministic City Territory** | 9 | `1573..2661` | 1089 | One binary spatial channel per deterministic city slot (0..8) representing claimed territory tiles. |
-| **Unit Home City Association** | 9 | `2662..3750` | 1089 | One binary spatial channel per deterministic city slot (0..8) mapping unit locations to their supporting home city. |
+| **Unit Home City Association** | 9 | `2662..3750` | 1089 | One binary spatial channel per deterministic city slot (0..8) mapping unit locations to their supporting home city. Legitimate no-home-city extra units (`cityID == -1`) have all 9 channels set to `0.0`. |
 | **Road Grid** | 1 | `3751..3871` | 121 | Binary road plane (`1.0` if visible road present on tile, `0.0` otherwise). |
 | **Categorical Buildings** | 19 | `3872..6170` | 2299 | One binary spatial channel per building type in `SUPPORTED_BUILDINGS` order (`PORT`, `MINE`, `FORGE`, `FARM`, `WINDMILL`, `CUSTOMS_HOUSE`, `LUMBER_HUT`, `SAWMILL`, `TEMPLE`, `WATER_TEMPLE`, `FOREST_TEMPLE`, `MOUNTAIN_TEMPLE`, `ALTAR_OF_PEACE`, `EMPERORS_TOMB`, `EYE_OF_GOD`, `GATE_OF_POWER`, `GRAND_BAZAR`, `PARK_OF_FORTUNE`, `TOWER_OF_WISDOM`). |
 | **Visible Resources** | 1 | `6171..6291` | 121 | Resource IDs normalized to `[0,1]`; fogged tiles masked to `0.0`. |

@@ -435,7 +435,45 @@ class TestParity002HumanInformationParity(unittest.TestCase):
         tensor_permuted = wrapper._dict_to_array(obs_permuted)
         np.testing.assert_array_equal(tensor, tensor_permuted)
 
-        # Fail closed: visible owned unit with unmapped cityID raises ObservationContractError
+        # Legitimate NO_HOME_CITY unit: visible owned unit with tribeId=0, cityID=-1, type=SUPERUNIT (idx 11)
+        obs_no_home_city = {
+            "board": {
+                "terrain": [[0] * 11 for _ in range(11)],
+                "unitID": [[-1] * 11 for _ in range(11)],
+                "cityID": [[-1] * 11 for _ in range(11)],
+                "building": [[-1] * 11 for _ in range(11)],
+                "road": [[0] * 11 for _ in range(11)],
+                "resource": [[-1] * 11 for _ in range(11)],
+            },
+            "unit": {
+                "30": {"x": 3, "y": 6, "type": 11, "tribeId": 0, "cityID": -1},  # SUPERUNIT extra unit
+            },
+            "city": {
+                "100": {"x": 1, "y": 1, "level": 1, "population": 0, "population_need": 2, "production": 2, "tribeID": 0, "units": [], "isCapital": True},
+            },
+            "tribes": {"0": {"star": 5, "score": 100, "citiesID": [100], "nKills": 0}},
+            "tick": 1,
+            "activeTribeID": 0,
+        }
+        tensor_no_home_city = wrapper._dict_to_array(obs_no_home_city)
+
+        # Correct SUPERUNIT spatial channel is 1.0 at (3, 6)
+        superunit_idx = SUPPORTED_UNIT_TYPES.index("SUPERUNIT")
+        su_chan = tensor_no_home_city[
+            self.layout.unit_types_start + superunit_idx * 121 : self.layout.unit_types_start + (superunit_idx + 1) * 121
+        ]
+        self.assertEqual(su_chan[3 * 11 + 6], 1.0)
+        self.assertEqual(np.sum(su_chan), 1.0)
+
+        # All 9 home-city channels at (3, 6) are exactly 0.0
+        for s in range(MAX_OWNED_CITIES):
+            uhc_slot = tensor_no_home_city[
+                self.layout.unit_home_city_start + s * 121 : self.layout.unit_home_city_start + (s + 1) * 121
+            ]
+            self.assertEqual(uhc_slot[3 * 11 + 6], 0.0)
+            self.assertEqual(np.sum(uhc_slot), 0.0)
+
+        # Fail closed: visible owned unit with unmapped non--1 cityID raises ObservationContractError
         obs_unmapped = {
             "board": {
                 "terrain": [[0] * 11 for _ in range(11)],
@@ -458,7 +496,7 @@ class TestParity002HumanInformationParity(unittest.TestCase):
         with self.assertRaises(ObservationContractError):
             wrapper._dict_to_array(obs_unmapped)
 
-        # Fog defense-in-depth: unit under fog does not raise and its channels remain 0.0
+        # Fog defense-in-depth: unit under fog (with unmapped cityID or cityID=-1) does not raise and its channels remain 0.0
         obs_fogged = {
             "board": {
                 "terrain": [[7] * 11 for _ in range(11)],  # all fog
@@ -470,6 +508,7 @@ class TestParity002HumanInformationParity(unittest.TestCase):
             },
             "unit": {
                 "10": {"x": 3, "y": 3, "type": 0, "tribeId": 0, "cityID": 999},
+                "30": {"x": 3, "y": 6, "type": 11, "tribeId": 0, "cityID": -1},
             },
             "city": {},
             "tribes": {"0": {"star": 5, "score": 100, "citiesID": [], "nKills": 0}},
@@ -479,6 +518,10 @@ class TestParity002HumanInformationParity(unittest.TestCase):
         tensor_fogged = wrapper._dict_to_array(obs_fogged)
         uhc_all_fog = tensor_fogged[self.layout.unit_home_city_start : self.layout.unit_home_city_end]
         self.assertEqual(np.sum(uhc_all_fog), 0.0)
+        su_chan_fog = tensor_fogged[
+            self.layout.unit_types_start + superunit_idx * 121 : self.layout.unit_types_start + (superunit_idx + 1) * 121
+        ]
+        self.assertEqual(np.sum(su_chan_fog), 0.0)
 
     # --- Test 7: Strict City Territory Association ---
     def test_07_strict_city_territory_association_and_unmapped_assertion(self):
@@ -921,6 +964,87 @@ class TestParity002HumanInformationParity(unittest.TestCase):
             self.assertIn("GROW_FOREST", observed_families)
         finally:
             env.close()
+
+    # --- Test 12: Ruin Examine SuperUnit Engine Contract & No-Home-City Parity ---
+    def test_12_ruin_examine_superunit_no_home_city_contract_regression(self):
+        """Verify Java engine ExamineCommand creates SuperUnit with cityId == -1 (extra unit) and wrapper encodes it losslessly."""
+        examine_java_path = REPO_ROOT / "pol_env" / "Tribes" / "src" / "core" / "actions" / "unitactions" / "command" / "ExamineCommand.java"
+        board_java_path = REPO_ROOT / "pol_env" / "Tribes" / "src" / "core" / "game" / "Board.java"
+        self.assertTrue(examine_java_path.is_file(), f"ExamineCommand.java not found at {examine_java_path}")
+        self.assertTrue(board_java_path.is_file(), f"Board.java not found at {board_java_path}")
+
+        with open(examine_java_path, "r", encoding="utf-8") as f:
+            examine_src = f.read()
+        with open(board_java_path, "r", encoding="utf-8") as f:
+            board_src = f.read()
+
+        # Confirm ExamineCommand constructs superunit with cityId = -1
+        self.assertIn("Types.UNIT.createUnit(spawnPos, 0, false, -1, unit.getTribeId(), unitType)", examine_src)
+
+        # Confirm Board.addUnit treats cityId == -1 as Tribe extra unit
+        self.assertIn("if(u.getCityId() != -1)", board_src)
+        self.assertIn("tribes[u.getTribeId()].addExtraUnit(u)", board_src)
+
+        # Dynamic wrapper test: Full observation containing both a normal warrior in City 10 and a ruin SuperUnit with cityID = -1
+        wrapper = object.__new__(TribesGymWrapper)
+        wrapper._turn_count = 0
+        wrapper.MAX_TURNS = 10
+        wrapper._researched_techs_t10 = set()
+        wrapper._controlled_tribe_id = 0
+        wrapper._board_dimensions_from_obs = lambda obs: (11, 11)
+        wrapper._get_bardur_stars = lambda obs: 5.0
+        wrapper._compute_bardur_spt = lambda obs: 2.0
+        wrapper._get_effective_researched_techs = lambda obs, tribe_id=0: set()
+
+        obs_ruin_superunit = {
+            "board": {
+                "terrain": [[0] * 11 for _ in range(11)],
+                "unitID": [[-1] * 11 for _ in range(11)],
+                "cityID": [[-1] * 11 for _ in range(11)],
+                "building": [[-1] * 11 for _ in range(11)],
+                "road": [[0] * 11 for _ in range(11)],
+                "resource": [[-1] * 11 for _ in range(11)],
+            },
+            "unit": {
+                "1": {"x": 2, "y": 2, "type": 0, "tribeId": 0, "cityID": 10},   # Warrior supported by City 10
+                "2": {"x": 5, "y": 7, "type": 11, "tribeId": 0, "cityID": -1},  # Ruin SuperUnit (no home city)
+            },
+            "city": {
+                "10": {"x": 2, "y": 2, "level": 1, "population": 0, "population_need": 2, "production": 2, "tribeID": 0, "units": [1], "isCapital": True},
+            },
+            "tribes": {"0": {"star": 5, "score": 100, "citiesID": [10], "nKills": 0}},
+            "tick": 3,
+            "activeTribeID": 0,
+        }
+
+        tensor = wrapper._dict_to_array(obs_ruin_superunit)
+        self.assertEqual(tensor.shape, (6424,))
+
+        # Warrior spatial plane (idx 0) has 1.0 at (2, 2)
+        warrior_chan = tensor[self.layout.unit_types_start : self.layout.unit_types_start + 121]
+        self.assertEqual(warrior_chan[2 * 11 + 2], 1.0)
+        self.assertEqual(np.sum(warrior_chan), 1.0)
+
+        # SuperUnit spatial plane (idx 11) has 1.0 at (5, 7)
+        superunit_idx = SUPPORTED_UNIT_TYPES.index("SUPERUNIT")
+        su_chan = tensor[
+            self.layout.unit_types_start + superunit_idx * 121 : self.layout.unit_types_start + (superunit_idx + 1) * 121
+        ]
+        self.assertEqual(su_chan[5 * 11 + 7], 1.0)
+        self.assertEqual(np.sum(su_chan), 1.0)
+
+        # Home-city slot 0 (City 10) has 1.0 at (2, 2) and 0.0 at (5, 7)
+        uhc_slot0 = tensor[self.layout.unit_home_city_start : self.layout.unit_home_city_start + 121]
+        self.assertEqual(uhc_slot0[2 * 11 + 2], 1.0)
+        self.assertEqual(uhc_slot0[5 * 11 + 7], 0.0)
+        self.assertEqual(np.sum(uhc_slot0), 1.0)
+
+        # All remaining home-city slots 1..8 are 0.0 everywhere
+        for s in range(1, MAX_OWNED_CITIES):
+            uhc_slot = tensor[
+                self.layout.unit_home_city_start + s * 121 : self.layout.unit_home_city_start + (s + 1) * 121
+            ]
+            self.assertEqual(np.sum(uhc_slot), 0.0)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-PARITY_002_3_No_Home_City_Parity_Fix-046] - (2026-08-27)
+
+### Scope
+- Fixed unit home-city encoding semantics to legitimately support `cityID == -1` (extra units belonging directly to the tribe, such as ruin-spawned SuperUnits) without raising `ObservationContractError`.
+- **Key Fixes & Audit Reconciliations:**
+  1. **Unit Home-City Semantic Contract Fix (`STATE-UNIT-003`):** Updated `TribesGymWrapper._dict_to_array()` so that visible owned units with `cityID == -1` leave all 9 `unit_home_city_slot_*` channels `0.0` at the unit position. Continued strict fail-closed enforcement for unmapped positive/non--1 city IDs.
+  2. **Unit HP Parity Audit Correction (`STATE-UNIT-002`):** Corrected `docs/Human_Information_Parity_Audit.md` to classify unit HP as `PARITY` via deterministic derivation from the visible unit type plus static engine rules (`TribesConfig` max HP: 10, 15, 40) under Phase-1 no-combat invariants, replacing the outdated 10/10 invariant claim.
+  3. **Regression Testing:** Added explicit unit and engine-level regression tests for legitimate no-home-city units, normal city-supported units, unmapped city IDs, and fog defense.
+
 ## [Phase1-PARITY_002_2_Final_Contract_Verification-045] - (2026-08-26)
 
 ### Scope
