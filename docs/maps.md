@@ -35,7 +35,9 @@ Held-out means held out by canonical map identity and exact CSV content hash, no
 
 ### Test
 
-`levels/phase1_pool_bardur_real/test/*.csv` is the pristine scientific held-out set. Do not train on it, tune against it, select checkpoints with it, or repeatedly inspect it during development. Use it only after the model and configuration have been selected. If test results cause a model or configuration change, the test set is contaminated for that development cycle and the resulting result must not be described as pristine.
+`levels/phase1_pool_bardur_real/test/*.csv` is the fixed 250-map held-out scientific benchmark. It is strictly held out from PPO gradient training and must never be used for gradient updates, hyperparameter tuning, or routine checkpoint selection. However, because this fixed pool has established baseline results from prior development cycles (including v3), it is accurately characterized as a fixed held-out test benchmark rather than a newly pristine or never-before-inspected pool.
+
+**Post-Freeze Test Protocol Rule:** After freezing a reference model, held-out test benchmark results must not be used as a selection criterion for subsequent models. Next-generation model development and selection must rely strictly on training dynamics and validation evidence. A candidate model should be evaluated on the fixed test benchmark only after its weights and architecture are deliberately frozen.
 
 ### Human benchmark
 
@@ -122,6 +124,6 @@ python tools/validate_environment_contract.py `
     --expected-width 11 --expected-height 11
 ```
 
-Use `--max-maps 1` for a small live smoke check. Substitute `validation`, `test`, or `human_benchmark` explicitly when validating those pools. All pools must preserve the same 11×11, 505-observation, 63,913-action Phase 1 environment contract.
+Use `--max-maps 1` for a small live smoke check. Substitute `validation`, `test`, or `human_benchmark` explicitly when validating those pools. All pools must preserve the same 11×11, 586-observation, 63,913-action Phase 1 environment contract (`v4_exact_per_city_state`).
 
 The optional [harvester manual](../tools/polytopia_harvester/README.md), [state converter manual](../tools/polytopia_state_converter/README.md), and [map converter manual](../tools/polytopia_map_converter/README.md) describe the preceding ingestion stages.

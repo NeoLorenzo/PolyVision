@@ -150,4 +150,4 @@ Tests cover schema rejection, every mapping, precedence, unsupported IDs, capita
 
 The current 5,517 version-122 maps contain only Field, Mountain, Forest, Game, Metal, Fruit, cities/villages, ruins, and corner lighthouses. Coast/Ocean/Crop/Fish/Whale mappings are implemented and tested but not exercised by this Drylands corpus. Unknown IDs always fail.
 
-The active genuine pools are 11×11. The current environment derives a 505-value observation and 63,913-ID global action catalog from that geometry, and checkpoint sidecars enforce geometry/interface compatibility. The wrapper defaults to `POLYVISION_LEVEL_POOL_GLOB=levels/phase1_pool_bardur_real/train/*.csv`; evaluation must select another canonical pool explicitly.
+The active genuine pools are 11×11. The current environment derives a 586-value observation (under `v4_exact_per_city_state`) and 63,913-ID global action catalog from that geometry, and checkpoint sidecars enforce geometry/interface compatibility. The wrapper defaults to `POLYVISION_LEVEL_POOL_GLOB=levels/phase1_pool_bardur_real/train/*.csv`; evaluation must select another canonical pool explicitly.

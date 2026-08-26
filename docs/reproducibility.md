@@ -58,9 +58,36 @@ Validation is development evidence and may influence later decisions. Test evalu
 
 The [evaluation guide](evaluation.md) lists recommended metrics. The [historical benchmark registry](history/model-run-benchmark-log.md) illustrates why interface and protocol metadata are necessary.
 
-## Frozen Reference Benchmark Provenance (Phase 1 v3 Seed3 16M Terminal-SPT)
+## Frozen Reference Benchmark Provenance (Phase 1 v4 PARITY001 Seed3 16M Terminal-SPT)
 
 The authoritative active frozen reference benchmark for Phase 1 optimization is fully specified by the following provenance records:
+
+| Parameter | Authoritative Value |
+|---|---|
+| **Run directory** | `runs/Tribes-v0__Phase1-Scientific-Train-V4-PARITY001-Seed3-TerminalSPT__3__1787705342` |
+| **Canonical model checkpoint** | `runs/Tribes-v0__Phase1-Scientific-Train-V4-PARITY001-Seed3-TerminalSPT__3__1787705342/model_checkpoint_16000000.cleanrl_model` |
+| **Model SHA-256** | `bda59c9eb4603734c3ed599922174890c5b5a1d4a4fad3fd998c289dd3f53574` |
+| **Sidecar SHA-256** | `b490bcaf686394d8ee0050a05b10a708ad2f1b8726eca11593036bc265f6d752` |
+| **Training seed** | `3` |
+| **Total timesteps** | 16,000,000 |
+| **Training commit** | `88af310c2a73e23f1a8e0d80d07cbd0e2ecb2bad` |
+| **Environment version** | `v4_exact_per_city_state` |
+| **Observation dimension** | 586 |
+| **Opening version** | `v2_guaranteed_two_unit` |
+| **Reward configuration** | `POLYVISION_TERMINAL_SPT_REWARD_ENABLED=1` ($w_{\text{base}}=1.0, w_{>10}=2.0, w_{>15}=3.0$) |
+| **Train split identity (5,000 maps)** | `a99b309a3020704e4a95886d5ab3f8b6f7ed00931ee111e3117702009605e8c4` |
+| **Validation split identity (250 maps)** | `a56e74c952ad3b08d4645fc16d66ce0f17e0589fea2fe9042f7cd293669eac72` |
+| **Test split identity (250 maps)** | `8a8e0f784535e8169ffb829f2e3058b60bcd7493277912dd995ff17b217f4b94` |
+| **Human benchmark split identity (17 maps)** | `adbe5a707392aad15342f3c595a78abeeb85cb0ce77b91a8d9339276a2674a69` |
+| **Split manifest SHA-256** | `c8721cd0fcb636d9ddb483745585e5b69eca9ca501950a1ddec6a51d0c763690` |
+| **Canonical validation evaluation** | `outputs/evaluations/20260826_phase1_v4_parity001_seed3_16m_terminal_spt_validation_canonical` |
+| **Canonical held-out test evaluation** | `outputs/evaluations/20260826_phase1_v4_parity001_seed3_16m_terminal_spt_pristine_test` |
+
+See [Phase 1 v4 PARITY001 Seed3 16M Terminal-SPT Reference Run](results/Phase1_V4_PARITY001_Seed3_16M_TerminalSPT_Reference_Run.md) for complete evaluation metrics, paired comparisons, and secondary diagnostic distributions.
+
+### Historical Frozen Reference Benchmark Provenance (Phase 1 v3 Seed3 16M Terminal-SPT — Superseded)
+
+The historical reference benchmark for the superseded 505-dimensional contract (`v3_corrected_turn_economy`) is preserved below:
 
 | Parameter | Authoritative Value |
 |---|---|
@@ -71,18 +98,12 @@ The authoritative active frozen reference benchmark for Phase 1 optimization is 
 | **Training seed** | `3` |
 | **Total timesteps** | 16,000,000 |
 | **Training commit** | `d14c14fb3ac31b4d8632ffe6610ba69e005a653f` |
-| **Environment version** | `v3_corrected_turn_economy` |
+| **Environment version** | `v3_corrected_turn_economy` (505-d observation) |
 | **Opening version** | `v2_guaranteed_two_unit` |
-| **Reward configuration** | `POLYVISION_TERMINAL_SPT_REWARD_ENABLED=1` ($w_{\text{base}}=1.0, w_{>10}=2.0, w_{>15}=3.0$) |
-| **Train split identity (5,000 maps)** | `a99b309a3020704e4a95886d5ab3f8b6f7ed00931ee111e3117702009605e8c4` |
-| **Validation split identity (250 maps)** | `a56e74c952ad3b08d4645fc16d66ce0f17e0589fea2fe9042f7cd293669eac72` |
-| **Test split identity (250 maps)** | `8a8e0f784535e8169ffb829f2e3058b60bcd7493277912dd995ff17b217f4b94` |
-| **Human benchmark split identity (17 maps)** | `adbe5a707392aad15342f3c595a78abeeb85cb0ce77b91a8d9339276a2674a69` |
-| **Split manifest SHA-256** | `c8721cd0fcb636d9ddb483745585e5b69eca9ca501950a1ddec6a51d0c763690` |
 | **Canonical validation evaluation** | `outputs/evaluations/20260825_phase1_v3_seed3_16m_terminal_spt_validation_canonical` |
-| **Canonical pristine test evaluation** | `outputs/evaluations/20260825_phase1_v3_seed3_16m_terminal_spt_pristine_test` |
+| **Canonical test evaluation** | `outputs/evaluations/20260825_phase1_v3_seed3_16m_terminal_spt_pristine_test` |
 
-See [Phase 1 v3 Seed3 16M Terminal-SPT Reference Run](results/Phase1_V3_Seed3_16M_TerminalSPT_Reference_Run.md) for complete evaluation metrics, paired comparisons, and secondary diagnostic distributions. The superseded baseline run without Terminal-SPT is documented in [Phase 1 v3 Seed3 16M Reference Run](results/Phase1_V3_Seed3_16M_Reference_Run.md) and [Phase 1 v3 Seed3 16M Behavioral Failure Analysis](results/Phase1_V3_Seed3_16M_Behavioral_Failure_Analysis.md).
+See [Phase 1 v3 Seed3 16M Terminal-SPT Reference Run](results/Phase1_V3_Seed3_16M_TerminalSPT_Reference_Run.md) and [Phase 1 v3 Seed3 16M Reference Run](results/Phase1_V3_Seed3_16M_Reference_Run.md).
 
 ## Reproducing Historical Pre-Terminal-SPT Runs
 

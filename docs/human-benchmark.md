@@ -64,11 +64,11 @@ It creates paired wrappers for identical map/seed inputs, compares observations 
 
 ## Information boundary
 
-Official benchmark mode derives its state display solely from the 505-value flattened policy observation and the policy-visible legal action tensors (`legal_global_ids_padded`, `legal_action_valid_mask`, `legal_action_features_padded`).
+Official benchmark mode derives its state display solely from the 586-value flattened policy observation (under `v4_exact_city_terminal`) and the policy-visible legal action tensors (`legal_global_ids_padded`, `legal_action_valid_mask`, `legal_action_features_padded`).
 
 It shows:
-- fog-respecting terrain, visible resources, and unit occupancy reconstructed from the observation array;
-- complete model-visible economy/city scalars (stars, SPT, city levels, upgrade progress, upgrade-ready fraction, level-up availability, and researched technologies);
+- fog-respecting terrain, visible resources, unit occupancy, and exact owned city slots reconstructed from the observation array;
+- complete model-visible economy/city scalars and exact per-city state (stars, SPT, city levels, population, population need, production, unit capacity, and researched technologies);
 - action annotations derived deterministically from that action's exact feature row in `legal_action_features_padded`.
 
 It does not display recommendations, rankings, logits, values, oracle distances, predicted rewards, or hidden-map facts. This is strict informational parity with the PPO actor, not ordinary unrestricted Polytopia play.

@@ -1,0 +1,510 @@
+{
+  "provenance": {
+    "v3_reference_id": "20260825_phase1_v3_seed3_16m_terminal_spt",
+    "v3_environment_version": "v3_corrected_turn_economy",
+    "v3_observation_dim": 505,
+    "v3_validation_dir": "outputs/evaluations/20260825_phase1_v3_seed3_16m_terminal_spt_validation_canonical",
+    "v3_test_dir": "outputs/evaluations/20260825_phase1_v3_seed3_16m_terminal_spt_pristine_test",
+    "v4_reference_id": "20260826_phase1_v4_parity001_seed3_16m_terminal_spt",
+    "v4_environment_version": "v4_exact_per_city_state",
+    "v4_observation_dim": 586,
+    "v4_validation_dir": "outputs/evaluations/20260826_phase1_v4_parity001_seed3_16m_terminal_spt_validation_canonical",
+    "v4_test_dir": "outputs/evaluations/20260826_phase1_v4_parity001_seed3_16m_terminal_spt_pristine_test",
+    "generated_at": "2026-08-26T18:35:36.723685+00:00",
+    "scientific_caveat": "Single-training-seed comparison (Seed 3). Observed differences and paired confidence intervals characterize performance across identical fixed map pools but do not constitute causal proof that the observation change caused the difference."
+  },
+  "paired_comparisons": {
+    "validation": {
+      "ppo_argmax": {
+        "policy": "ppo_argmax",
+        "map_count": 250,
+        "v3_mean_spt": 19.872,
+        "v4_mean_spt": 19.784,
+        "mean_paired_delta": -0.088,
+        "median_paired_delta": 0.0,
+        "std_paired_delta": 3.737395953609441,
+        "se_paired_delta": 0.23637367462605663,
+        "ci95_paired_delta": [
+          -0.544,
+          0.388
+        ],
+        "wins_v4": 103,
+        "ties": 31,
+        "losses_v4": 116,
+        "win_rate_v4": 0.412,
+        "min_delta": -10.0,
+        "max_delta": 12.0,
+        "p25_delta": -2.75,
+        "p75_delta": 2.0
+      },
+      "ppo_sampled": {
+        "policy": "ppo_sampled",
+        "map_count": 250,
+        "v3_mean_spt": 19.532799999999998,
+        "v4_mean_spt": 19.471199999999996,
+        "mean_paired_delta": -0.06159999999999991,
+        "median_paired_delta": 0.0,
+        "std_paired_delta": 2.006706987013029,
+        "se_paired_delta": 0.126915293510702,
+        "ci95_paired_delta": [
+          -0.30401999999999996,
+          0.18720000000000006
+        ],
+        "wins_v4": 113,
+        "ties": 13,
+        "losses_v4": 124,
+        "win_rate_v4": 0.452,
+        "min_delta": -6.0,
+        "max_delta": 6.0,
+        "p25_delta": -1.5999999999999979,
+        "p75_delta": 1.1999999999999993
+      },
+      "visible_greedy": {
+        "policy": "visible_greedy",
+        "map_count": 250,
+        "v3_mean_spt": 7.932,
+        "v4_mean_spt": 7.932,
+        "mean_paired_delta": 0.0,
+        "median_paired_delta": 0.0,
+        "std_paired_delta": 0.0,
+        "se_paired_delta": 0.0,
+        "ci95_paired_delta": [
+          0.0,
+          0.0
+        ],
+        "wins_v4": 0,
+        "ties": 250,
+        "losses_v4": 0,
+        "win_rate_v4": 0.0,
+        "min_delta": 0.0,
+        "max_delta": 0.0,
+        "p25_delta": 0.0,
+        "p75_delta": 0.0
+      },
+      "random_legal": {
+        "policy": "random_legal",
+        "map_count": 250,
+        "v3_mean_spt": 6.668,
+        "v4_mean_spt": 6.668,
+        "mean_paired_delta": 0.0,
+        "median_paired_delta": 0.0,
+        "std_paired_delta": 0.0,
+        "se_paired_delta": 0.0,
+        "ci95_paired_delta": [
+          0.0,
+          0.0
+        ],
+        "wins_v4": 0,
+        "ties": 250,
+        "losses_v4": 0,
+        "win_rate_v4": 0.0,
+        "min_delta": 0.0,
+        "max_delta": 0.0,
+        "p25_delta": 0.0,
+        "p75_delta": 0.0
+      }
+    },
+    "test": {
+      "ppo_argmax": {
+        "policy": "ppo_argmax",
+        "map_count": 250,
+        "v3_mean_spt": 19.344,
+        "v4_mean_spt": 19.776,
+        "mean_paired_delta": 0.432,
+        "median_paired_delta": 1.0,
+        "std_paired_delta": 3.4287609433184025,
+        "se_paired_delta": 0.21685388266227287,
+        "ci95_paired_delta": [
+          0.004,
+          0.8400999999999985
+        ],
+        "wins_v4": 128,
+        "ties": 37,
+        "losses_v4": 85,
+        "win_rate_v4": 0.512,
+        "min_delta": -9.0,
+        "max_delta": 8.0,
+        "p25_delta": -2.0,
+        "p75_delta": 3.0
+      },
+      "ppo_sampled": {
+        "policy": "ppo_sampled",
+        "map_count": 250,
+        "v3_mean_spt": 18.956,
+        "v4_mean_spt": 19.255200000000002,
+        "mean_paired_delta": 0.2992,
+        "median_paired_delta": 0.3999999999999986,
+        "std_paired_delta": 1.927792753279873,
+        "se_paired_delta": 0.1219243191426287,
+        "ci95_paired_delta": [
+          0.062379999999999956,
+          0.5280000000000001
+        ],
+        "wins_v4": 139,
+        "ties": 12,
+        "losses_v4": 99,
+        "win_rate_v4": 0.556,
+        "min_delta": -4.600000000000001,
+        "max_delta": 5.600000000000001,
+        "p25_delta": -1.0,
+        "p75_delta": 1.600000000000001
+      },
+      "visible_greedy": {
+        "policy": "visible_greedy",
+        "map_count": 250,
+        "v3_mean_spt": 7.956,
+        "v4_mean_spt": 7.956,
+        "mean_paired_delta": 0.0,
+        "median_paired_delta": 0.0,
+        "std_paired_delta": 0.0,
+        "se_paired_delta": 0.0,
+        "ci95_paired_delta": [
+          0.0,
+          0.0
+        ],
+        "wins_v4": 0,
+        "ties": 250,
+        "losses_v4": 0,
+        "win_rate_v4": 0.0,
+        "min_delta": 0.0,
+        "max_delta": 0.0,
+        "p25_delta": 0.0,
+        "p75_delta": 0.0
+      },
+      "random_legal": {
+        "policy": "random_legal",
+        "map_count": 250,
+        "v3_mean_spt": 6.7016,
+        "v4_mean_spt": 6.7016,
+        "mean_paired_delta": 0.0,
+        "median_paired_delta": 0.0,
+        "std_paired_delta": 0.0,
+        "se_paired_delta": 0.0,
+        "ci95_paired_delta": [
+          0.0,
+          0.0
+        ],
+        "wins_v4": 0,
+        "ties": 250,
+        "losses_v4": 0,
+        "win_rate_v4": 0.0,
+        "min_delta": 0.0,
+        "max_delta": 0.0,
+        "p25_delta": 0.0,
+        "p75_delta": 0.0
+      }
+    }
+  },
+  "generalization_shift": {
+    "v3": {
+      "ppo_argmax": {
+        "val_mean": 19.872,
+        "test_mean": 19.344,
+        "val_to_test_drop": -0.5279999999999987
+      },
+      "ppo_sampled": {
+        "val_mean": 19.532799999999998,
+        "test_mean": 18.956,
+        "val_to_test_drop": -0.5767999999999986
+      }
+    },
+    "v4": {
+      "ppo_argmax": {
+        "val_mean": 19.784,
+        "test_mean": 19.776,
+        "val_to_test_drop": -0.007999999999999119
+      },
+      "ppo_sampled": {
+        "val_mean": 19.471199999999996,
+        "test_mean": 19.255200000000002,
+        "val_to_test_drop": -0.21599999999999397
+      }
+    }
+  },
+  "behavioral_diagnostics": {
+    "validation": {
+      "v3": {
+        "ppo_argmax": {
+          "episodes": 250,
+          "mean_final_spt": 19.872,
+          "mean_final_cities": 4.3,
+          "mean_final_units": 7.22,
+          "mean_unspent_stars": 21.796,
+          "mean_fog_cleared": 55.132,
+          "forestry_adoption_count": 248,
+          "forestry_adoption_rate": 0.992,
+          "mean_lumber_huts": 11.032,
+          "organization_adoption_count": 250,
+          "organization_adoption_rate": 1.0,
+          "mean_fruit_harvested": 8.568,
+          "mean_animals_harvested": 4.468,
+          "mean_sawmills_built": 0.06,
+          "mean_techs_researched": 4.968
+        },
+        "ppo_sampled": {
+          "episodes": 1250,
+          "mean_final_spt": 19.5328,
+          "mean_final_cities": 4.4176,
+          "mean_final_units": 6.4744,
+          "mean_unspent_stars": 21.5536,
+          "mean_fog_cleared": 56.0456,
+          "forestry_adoption_count": 1157,
+          "forestry_adoption_rate": 0.9256,
+          "mean_lumber_huts": 9.9664,
+          "organization_adoption_count": 1156,
+          "organization_adoption_rate": 0.9248,
+          "mean_fruit_harvested": 7.6776,
+          "mean_animals_harvested": 4.6072,
+          "mean_sawmills_built": 0.2848,
+          "mean_techs_researched": 4.9368
+        },
+        "random_legal": {
+          "episodes": 1250,
+          "mean_final_spt": 6.668,
+          "mean_final_cities": 2.0008,
+          "mean_final_units": 5.4408,
+          "mean_unspent_stars": 9.5512,
+          "mean_fog_cleared": 31.1288,
+          "forestry_adoption_count": 660,
+          "forestry_adoption_rate": 0.528,
+          "mean_lumber_huts": 0.8672,
+          "organization_adoption_count": 1012,
+          "organization_adoption_rate": 0.8096,
+          "mean_fruit_harvested": 2.3048,
+          "mean_animals_harvested": 1.0904,
+          "mean_sawmills_built": 0.0768,
+          "mean_techs_researched": 6.2432
+        },
+        "visible_greedy": {
+          "episodes": 250,
+          "mean_final_spt": 7.932,
+          "mean_final_cities": 3.82,
+          "mean_final_units": 2.0,
+          "mean_unspent_stars": 53.836,
+          "mean_fog_cleared": 38.804,
+          "forestry_adoption_count": 0,
+          "forestry_adoption_rate": 0.0,
+          "mean_lumber_huts": 0.0,
+          "organization_adoption_count": 0,
+          "organization_adoption_rate": 0.0,
+          "mean_fruit_harvested": 0.0,
+          "mean_animals_harvested": 3.864,
+          "mean_sawmills_built": 0.0,
+          "mean_techs_researched": 1.0
+        }
+      },
+      "v4": {
+        "ppo_argmax": {
+          "episodes": 250,
+          "mean_final_spt": 19.784,
+          "mean_final_cities": 4.26,
+          "mean_final_units": 6.492,
+          "mean_unspent_stars": 24.1,
+          "mean_fog_cleared": 49.536,
+          "forestry_adoption_count": 250,
+          "forestry_adoption_rate": 1.0,
+          "mean_lumber_huts": 11.048,
+          "organization_adoption_count": 250,
+          "organization_adoption_rate": 1.0,
+          "mean_fruit_harvested": 8.568,
+          "mean_animals_harvested": 4.412,
+          "mean_sawmills_built": 3.296,
+          "mean_techs_researched": 3.96
+        },
+        "ppo_sampled": {
+          "episodes": 1250,
+          "mean_final_spt": 19.4712,
+          "mean_final_cities": 4.3704,
+          "mean_final_units": 6.5328,
+          "mean_unspent_stars": 23.2544,
+          "mean_fog_cleared": 52.8208,
+          "forestry_adoption_count": 1210,
+          "forestry_adoption_rate": 0.968,
+          "mean_lumber_huts": 10.4896,
+          "organization_adoption_count": 1216,
+          "organization_adoption_rate": 0.9728,
+          "mean_fruit_harvested": 8.44,
+          "mean_animals_harvested": 4.4088,
+          "mean_sawmills_built": 2.1728,
+          "mean_techs_researched": 4.344
+        },
+        "random_legal": {
+          "episodes": 1250,
+          "mean_final_spt": 6.668,
+          "mean_final_cities": 2.0008,
+          "mean_final_units": 5.4408,
+          "mean_unspent_stars": 9.5512,
+          "mean_fog_cleared": 31.1288,
+          "forestry_adoption_count": 660,
+          "forestry_adoption_rate": 0.528,
+          "mean_lumber_huts": 0.8672,
+          "organization_adoption_count": 1012,
+          "organization_adoption_rate": 0.8096,
+          "mean_fruit_harvested": 2.3048,
+          "mean_animals_harvested": 1.0904,
+          "mean_sawmills_built": 0.0768,
+          "mean_techs_researched": 6.2432
+        },
+        "visible_greedy": {
+          "episodes": 250,
+          "mean_final_spt": 7.932,
+          "mean_final_cities": 3.82,
+          "mean_final_units": 2.0,
+          "mean_unspent_stars": 53.836,
+          "mean_fog_cleared": 38.804,
+          "forestry_adoption_count": 0,
+          "forestry_adoption_rate": 0.0,
+          "mean_lumber_huts": 0.0,
+          "organization_adoption_count": 0,
+          "organization_adoption_rate": 0.0,
+          "mean_fruit_harvested": 0.0,
+          "mean_animals_harvested": 3.864,
+          "mean_sawmills_built": 0.0,
+          "mean_techs_researched": 1.0
+        }
+      }
+    },
+    "test": {
+      "v3": {
+        "ppo_argmax": {
+          "episodes": 250,
+          "mean_final_spt": 19.344,
+          "mean_final_cities": 4.208,
+          "mean_final_units": 7.368,
+          "mean_unspent_stars": 21.64,
+          "mean_fog_cleared": 53.324,
+          "forestry_adoption_count": 248,
+          "forestry_adoption_rate": 0.992,
+          "mean_lumber_huts": 10.772,
+          "organization_adoption_count": 250,
+          "organization_adoption_rate": 1.0,
+          "mean_fruit_harvested": 8.416,
+          "mean_animals_harvested": 4.46,
+          "mean_sawmills_built": 0.036,
+          "mean_techs_researched": 4.948
+        },
+        "ppo_sampled": {
+          "episodes": 1250,
+          "mean_final_spt": 18.956,
+          "mean_final_cities": 4.3,
+          "mean_final_units": 6.4856,
+          "mean_unspent_stars": 21.316,
+          "mean_fog_cleared": 54.7688,
+          "forestry_adoption_count": 1168,
+          "forestry_adoption_rate": 0.9344,
+          "mean_lumber_huts": 9.52,
+          "organization_adoption_count": 1182,
+          "organization_adoption_rate": 0.9456,
+          "mean_fruit_harvested": 7.7568,
+          "mean_animals_harvested": 4.3896,
+          "mean_sawmills_built": 0.212,
+          "mean_techs_researched": 4.9688
+        },
+        "random_legal": {
+          "episodes": 1250,
+          "mean_final_spt": 6.7016,
+          "mean_final_cities": 1.9992,
+          "mean_final_units": 5.48,
+          "mean_unspent_stars": 9.7056,
+          "mean_fog_cleared": 30.0312,
+          "forestry_adoption_count": 647,
+          "forestry_adoption_rate": 0.5176,
+          "mean_lumber_huts": 0.8432,
+          "organization_adoption_count": 998,
+          "organization_adoption_rate": 0.7984,
+          "mean_fruit_harvested": 2.4736,
+          "mean_animals_harvested": 1.048,
+          "mean_sawmills_built": 0.0808,
+          "mean_techs_researched": 6.2048
+        },
+        "visible_greedy": {
+          "episodes": 250,
+          "mean_final_spt": 7.956,
+          "mean_final_cities": 3.804,
+          "mean_final_units": 2.0,
+          "mean_unspent_stars": 53.908,
+          "mean_fog_cleared": 37.428,
+          "forestry_adoption_count": 0,
+          "forestry_adoption_rate": 0.0,
+          "mean_lumber_huts": 0.0,
+          "organization_adoption_count": 0,
+          "organization_adoption_rate": 0.0,
+          "mean_fruit_harvested": 0.0,
+          "mean_animals_harvested": 3.916,
+          "mean_sawmills_built": 0.0,
+          "mean_techs_researched": 1.0
+        }
+      },
+      "v4": {
+        "ppo_argmax": {
+          "episodes": 250,
+          "mean_final_spt": 19.776,
+          "mean_final_cities": 4.232,
+          "mean_final_units": 6.672,
+          "mean_unspent_stars": 24.1,
+          "mean_fog_cleared": 49.62,
+          "forestry_adoption_count": 250,
+          "forestry_adoption_rate": 1.0,
+          "mean_lumber_huts": 10.92,
+          "organization_adoption_count": 250,
+          "organization_adoption_rate": 1.0,
+          "mean_fruit_harvested": 8.652,
+          "mean_animals_harvested": 4.384,
+          "mean_sawmills_built": 3.312,
+          "mean_techs_researched": 3.944
+        },
+        "ppo_sampled": {
+          "episodes": 1250,
+          "mean_final_spt": 19.2552,
+          "mean_final_cities": 4.3192,
+          "mean_final_units": 6.4224,
+          "mean_unspent_stars": 23.1352,
+          "mean_fog_cleared": 51.868,
+          "forestry_adoption_count": 1225,
+          "forestry_adoption_rate": 0.98,
+          "mean_lumber_huts": 10.3272,
+          "organization_adoption_count": 1208,
+          "organization_adoption_rate": 0.9664,
+          "mean_fruit_harvested": 8.3328,
+          "mean_animals_harvested": 4.3752,
+          "mean_sawmills_built": 2.1976,
+          "mean_techs_researched": 4.32
+        },
+        "random_legal": {
+          "episodes": 1250,
+          "mean_final_spt": 6.7016,
+          "mean_final_cities": 1.9992,
+          "mean_final_units": 5.48,
+          "mean_unspent_stars": 9.7056,
+          "mean_fog_cleared": 30.0312,
+          "forestry_adoption_count": 647,
+          "forestry_adoption_rate": 0.5176,
+          "mean_lumber_huts": 0.8432,
+          "organization_adoption_count": 998,
+          "organization_adoption_rate": 0.7984,
+          "mean_fruit_harvested": 2.4736,
+          "mean_animals_harvested": 1.048,
+          "mean_sawmills_built": 0.0808,
+          "mean_techs_researched": 6.2048
+        },
+        "visible_greedy": {
+          "episodes": 250,
+          "mean_final_spt": 7.956,
+          "mean_final_cities": 3.804,
+          "mean_final_units": 2.0,
+          "mean_unspent_stars": 53.908,
+          "mean_fog_cleared": 37.428,
+          "forestry_adoption_count": 0,
+          "forestry_adoption_rate": 0.0,
+          "mean_lumber_huts": 0.0,
+          "organization_adoption_count": 0,
+          "organization_adoption_rate": 0.0,
+          "mean_fruit_harvested": 0.0,
+          "mean_animals_harvested": 3.916,
+          "mean_sawmills_built": 0.0,
+          "mean_techs_researched": 1.0
+        }
+      }
+    }
+  }
+}

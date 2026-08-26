@@ -2,6 +2,51 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-V4_PARITY001_Seed3_16M_TerminalSPT_Reference_Run_and_Freeze-042] - (2026-08-26)
+
+### Scope
+- Completed, evaluated, and froze the **Phase 1 v4 PARITY001 Seed3 16M Terminal-SPT** training run as the active **CURRENT FROZEN REFERENCE BENCHMARK** for ongoing PolyVision Phase 1 development.
+- **Canonical Checkpoint & Provenance:**
+  - Checkpoint: `runs/Tribes-v0__Phase1-Scientific-Train-V4-PARITY001-Seed3-TerminalSPT__3__1787705342/model_checkpoint_16000000.cleanrl_model`
+  - Checkpoint SHA-256: `bda59c9eb4603734c3ed599922174890c5b5a1d4a4fad3fd998c289dd3f53574` (16,754,668 bytes)
+  - Sidecar: `model_checkpoint_16000000.cleanrl_model.action_interface.json` (SHA-256: `b490bcaf686394d8ee0050a05b10a708ad2f1b8726eca11593036bc265f6d752`, 716 bytes)
+  - Duplicate final model: `Phase1-Scientific-Train-V4-PARITY001-Seed3-TerminalSPT.cleanrl_model` (SHA-256: `26932969a0839773804104055d7dc31d29a9ffa1e7179e9db0ec9c5646440f6a`, 16,755,521 bytes)
+  - Training commit: `88af310c2a73e23f1a8e0d80d07cbd0e2ecb2bad` (clean working tree during training)
+  - Environment contract: `v4_exact_per_city_state` (586-dimensional observation)
+  - Opening version: `v2_guaranteed_two_unit`
+  - Action space: 63,913 global IDs, 256 legal slots, 42-d action features (`v1_3_move_focus_plus_semantic_econ`, fingerprint `c849a4abf7b0bee073ccc56b63ae65917ea30e77068ad648c472130693dfe6e4`)
+  - Reward: Terminal-SPT ($w_{\text{base}}=1.0, w_{>10}=2.0, w_{>15}=3.0$) + step shaping
+- **W&B Training Archival & Diagnostics:**
+  - Archived raw W&B export `outputs/training/phase1_v4_parity001_seed3_16m_terminal_spt_wandb.csv` (SHA-256: `7e2d29ed77f6efc18db51a2783e7911883ad3b0fb727fba3487322bea3861d7b`).
+  - Generated structured provenance summary `outputs/training/phase1_v4_parity001_seed3_16m_terminal_spt_summary.json` capturing throughput (363 SPS, 12.28 h runtime), optimization metrics (explained variance 0.694, entropy 0.935, value loss 71.002, policy loss $5.96 \times 10^{-9}$), and step-level diagnostics.
+- **Canonical Validation Evaluation:**
+  - Evaluated on 250 held-out validation maps (3,000 episodes total, `outputs/evaluations/20260826_phase1_v4_parity001_seed3_16m_terminal_spt_validation_canonical`):
+    - PPO argmax: Mean 19.78 Turn-10 SPT (95% CI [19.30, 20.26]), Median 20.00
+    - PPO sampled: Mean 19.47 Turn-10 SPT (95% CI [19.16, 19.79]), Median 19.40
+    - Visible greedy: Mean 7.93 Turn-10 SPT (95% CI [7.78, 8.09]), Median 8.00
+    - Random legal: Mean 6.67 Turn-10 SPT (95% CI [6.58, 6.75]), Median 6.60
+    - Paired comparisons: PPO argmax beat visible greedy on 250/250 maps (250 W / 0 T / 0 L, +11.85 SPT mean difference).
+- **Canonical Fixed Held-Out Test Evaluation:**
+  - Evaluated on 250 fixed held-out test maps (`outputs/evaluations/20260826_phase1_v4_parity001_seed3_16m_terminal_spt_pristine_test`):
+    - PPO argmax: Mean 19.78 Turn-10 SPT (95% CI [19.30, 20.25]), Median 20.00
+    - PPO sampled: Mean 19.26 Turn-10 SPT (95% CI [18.92, 19.58]), Median 19.40
+    - Visible greedy: Mean 7.96 Turn-10 SPT (95% CI [7.82, 8.10]), Median 8.00
+    - Random legal: Mean 6.70 Turn-10 SPT (95% CI [6.62, 6.79]), Median 6.60
+    - Paired comparisons: PPO argmax beat visible greedy on 250/250 maps (250 W / 0 T / 0 L, +11.82 SPT mean difference).
+- **v3 $\rightarrow$ v4 Paired Comparison & Behavioral Analysis:**
+  - Created machine-readable comparison artifacts `outputs/comparisons/phase1_v3_terminal_spt_vs_v4_parity001.json` and `.csv`.
+  - On the fixed held-out test pool, deterministic PPO argmax achieved +0.432 mean paired Δ SPT over the v3 reference (95% CI [+0.004, +0.840], median +1.000, 128 W / 37 T / 85 L).
+  - Generalization flatness: Validation-to-test shift for argmax was $-0.008$ SPT in v4 (compared to $-0.528$ in v3).
+  - Secondary diagnostics: Sawmill construction under deterministic argmax rose from 0.04 to 3.31 per map on test; Forestry adoption reached 100.0% (250/250 maps).
+- **Artifact Manifests & Documentation:**
+  - Generated SHA-256 `manifest.json` for validation and test evaluation directories.
+  - Created authoritative run card `docs/results/Phase1_V4_PARITY001_Seed3_16M_TerminalSPT_Reference_Run.md`.
+  - Updated `docs/results/Phase1_V3_Seed3_16M_TerminalSPT_Reference_Run.md` status to `SUPERSEDED FROZEN REFERENCE BENCHMARK` while preserving historical validity.
+  - Updated `README.md`, `docs/evaluation.md`, `docs/training.md`, `docs/reproducibility.md`, `docs/maps.md`, and `docs/rewards.md` to reference the v4 586-d contract and current frozen reference benchmark.
+
+### Rationale
+- Freezing the Phase 1 v4 PARITY001 16M model establishes the new durable, reproducible reference benchmark (19.78 test argmax SPT) for subsequent Phase 1 optimization, confirming that exact per-city state representation supports strong economic development (including Sawmill infrastructure) and flat held-out generalization across identical fixed map pools.
+
 ## [Phase1-PARITY_001_Exact_Per_City_State-041] - (2026-08-25)
 
 ### Scope
