@@ -2,20 +2,20 @@
 
 The primary trainer is `py_rl/cleanrl/cleanrl/ppo.py`. It is based on CleanRL PPO but contains PolyVision-specific actor paths, asynchronous JVM orchestration, validation, telemetry, and checkpoint metadata.
 
-## Authoritative Phase 1 v4 PARITY001 Seed3 16M Terminal-SPT Reference Run
+## Authoritative Phase 1 v5 PARITY002 Seed3 16M Terminal-SPT Reference Run
 
-The authoritative command used to produce the active **Phase 1 v4 PARITY001 Seed3 16M Terminal-SPT frozen reference benchmark** (`model_checkpoint_16000000.cleanrl_model`, SHA-256 `bda59c9eb4603734c3ed599922174890c5b5a1d4a4fad3fd998c289dd3f53574`, completed 2026-08-26) is:
+The authoritative command used to produce the active **Phase 1 v5 PARITY002 Seed3 16M Terminal-SPT frozen reference benchmark** (`model_checkpoint_16000000.cleanrl_model`, SHA-256 `924d4603fa5038b3ca11081cdfcb5c7a00063949dab44f50f05989e5c9dab061`, completed 2026-08-27) is:
 
 ```powershell
 cd C:\PolyVision; $env:POLYVISION_LEVEL_POOL_GLOB='levels/phase1_pool_bardur_real/train/*.csv'; $env:POLYVISION_SOLO_NO_OPPONENT_MODE='1'; $env:POLYVISION_INFO_MODE='fast'; $env:POLYVISION_BATCH_LEGAL_ACTION_FETCH='1'; $env:POLYVISION_DERIVE_OBS_METADATA='1'; $env:POLYVISION_TERMINAL_SPT_REWARD_ENABLED='1'; python py_rl/cleanrl/cleanrl/ppo.py `
-    --exp-name Phase1-Scientific-Train-V4-PARITY001-Seed3-TerminalSPT `
+    --exp-name Phase1-Scientific-Train-V5-PARITY002-Seed3-TerminalSPT `
     --seed 3 `
     --actor-mode legal_features `
     --total-timesteps 16000000 `
     --num-envs 20 `
     --num-steps 128 `
     --max-legal-actions 256 `
-    --legal-action-feature-dim 42 `
+    --legal-action-feature-dim 47 `
     --enable-step-diagnostics `
     --step-diagnostics-log-every 3 `
     --track `
@@ -28,20 +28,20 @@ cd C:\PolyVision; $env:POLYVISION_LEVEL_POOL_GLOB='levels/phase1_pool_bardur_rea
 
 ### Reference Run Specifications
 
-- **Run Directory:** `runs/Tribes-v0__Phase1-Scientific-Train-V4-PARITY001-Seed3-TerminalSPT__3__1787705342`
-- **Canonical Checkpoint:** `runs/Tribes-v0__Phase1-Scientific-Train-V4-PARITY001-Seed3-TerminalSPT__3__1787705342/model_checkpoint_16000000.cleanrl_model`
-- **Sidecar File:** `runs/Tribes-v0__Phase1-Scientific-Train-V4-PARITY001-Seed3-TerminalSPT__3__1787705342/model_checkpoint_16000000.cleanrl_model.action_interface.json`
+- **Run Directory:** `runs/Tribes-v0__Phase1-Scientific-Train-V5-PARITY002-Seed3-TerminalSPT__3__1787788415`
+- **Canonical Checkpoint:** `runs/Tribes-v0__Phase1-Scientific-Train-V5-PARITY002-Seed3-TerminalSPT__3__1787788415/model_checkpoint_16000000.cleanrl_model`
+- **Sidecar File:** `runs/Tribes-v0__Phase1-Scientific-Train-V5-PARITY002-Seed3-TerminalSPT__3__1787788415/model_checkpoint_16000000.cleanrl_model.action_interface.json`
 - **Seed:** `3`
 - **Timesteps:** 16,000,000 global environment transitions
-- **Actor Mode:** `legal_features` (42-dimensional semantic action features, 256 legal slots, 586-d observation)
-- **Environment Contract:** `phase1_environment_version=v4_exact_per_city_state`, `phase1_opening_version=v2_guaranteed_two_unit`
-- **Observation Dimension:** 586 (including 9-slot exact per-city state block from `PARITY-001`)
+- **Actor Mode:** `legal_features` (47-dimensional semantic action features, 256 legal slots, 6,424-d observation)
+- **Environment Contract:** `phase1_environment_version=v5_human_information_parity`, `phase1_opening_version=v2_guaranteed_two_unit`
+- **Observation Dimension:** 6,424 (including 52 spatial channels and 132 scalar/structured features from `PARITY-002`)
 - **Reward Configuration:** `POLYVISION_TERMINAL_SPT_REWARD_ENABLED=1` (Terminal-SPT base weight 1.0, over-10 weight 2.0, over-15 weight 3.0) + standard step-level shaping
 - **Key PPO Settings:** LR 2.5e-4 with linear annealing, 20 parallel envs, 128 rollout steps per env, batch size 2560, minibatch size 640 (4 minibatches/epoch), 4 epochs, $\gamma=0.99$, $\lambda=0.95$, clip 0.2
-- **Completion Date:** 2026-08-26
-- **Authoritative Run Card:** [Phase 1 v4 PARITY001 Seed3 16M Terminal-SPT Reference Run](results/Phase1_V4_PARITY001_Seed3_16M_TerminalSPT_Reference_Run.md)
+- **Completion Date:** 2026-08-27
+- **Authoritative Run Card:** [Phase 1 v5 PARITY002 Seed3 16M Terminal-SPT Reference Run](results/Phase1_V5_PARITY002_Seed3_16M_TerminalSPT_Reference_Run.md)
 
-This 16M run represents the active frozen reference benchmark for Phase 1 optimization. (The superseded v3 references remain preserved as historical benchmarks in [Phase 1 v3 Seed3 16M Terminal-SPT Reference Run](results/Phase1_V3_Seed3_16M_TerminalSPT_Reference_Run.md) and [Phase 1 v3 Seed3 16M Reference Run](results/Phase1_V3_Seed3_16M_Reference_Run.md)).
+This 16M run represents the active frozen reference benchmark for Phase 1 optimization. (The superseded v4 and v3 references remain preserved as historical benchmarks in [Phase 1 v4 PARITY001 Seed3 16M Terminal-SPT Reference Run](results/Phase1_V4_PARITY001_Seed3_16M_TerminalSPT_Reference_Run.md), [Phase 1 v3 Seed3 16M Terminal-SPT Reference Run](results/Phase1_V3_Seed3_16M_TerminalSPT_Reference_Run.md), and [Phase 1 v3 Seed3 16M Reference Run](results/Phase1_V3_Seed3_16M_Reference_Run.md)).
 
 ## Representative development run
 

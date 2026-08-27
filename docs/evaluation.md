@@ -1,8 +1,8 @@
 # Evaluation
 
-> **Current Reference Benchmark:** The active reference baseline is the **Phase 1 v4 PARITY001 Seed3 16M Terminal-SPT frozen reference benchmark** (`model_checkpoint_16000000.cleanrl_model`, SHA-256 `bda59c9eb4603734c3ed599922174890c5b5a1d4a4fad3fd998c289dd3f53574`), evaluated under `phase1_environment_version=v4_exact_per_city_state` (586-d observation) and `phase1_opening_version=v2_guaranteed_two_unit` with Terminal-SPT reward shaping enabled. Phase 1 is **not** complete; active optimization continues.
+> **Current Reference Benchmark:** The active reference baseline is the **Phase 1 v5 PARITY002 Seed3 16M Terminal-SPT frozen reference benchmark** (`model_checkpoint_16000000.cleanrl_model`, SHA-256 `924d4603fa5038b3ca11081cdfcb5c7a00063949dab44f50f05989e5c9dab061`), evaluated under `phase1_environment_version=v5_human_information_parity` (6,424-d observation) and `phase1_opening_version=v2_guaranteed_two_unit` with Terminal-SPT reward shaping enabled. Phase 1 is **not** complete; active optimization continues.
 >
-> The previous [Phase 1 v3 Seed3 16M Terminal-SPT Reference Run](results/Phase1_V3_Seed3_16M_TerminalSPT_Reference_Run.md) (19.34 test argmax SPT, 505-d observation) and [Phase 1 v3 Seed3 16M Reference Run](results/Phase1_V3_Seed3_16M_Reference_Run.md) (16.88 test argmax SPT) are preserved as historical benchmarks. Historical Seed-1 remains shelved and valid only for historical `v1_mixed_capital_regression`.
+> The previous [Phase 1 v4 PARITY001 Seed3 16M Terminal-SPT Reference Run](results/Phase1_V4_PARITY001_Seed3_16M_TerminalSPT_Reference_Run.md) (19.78 test argmax SPT, 586-d observation), [Phase 1 v3 Seed3 16M Terminal-SPT Reference Run](results/Phase1_V3_Seed3_16M_TerminalSPT_Reference_Run.md) (19.34 test argmax SPT, 505-d observation), and [Phase 1 v3 Seed3 16M Reference Run](results/Phase1_V3_Seed3_16M_Reference_Run.md) (16.88 test argmax SPT) are preserved as historical benchmarks. Historical Seed-1 remains shelved and valid only for historical `v1_mixed_capital_regression`.
 
 PolyVision has checkpoint introspection, a canonical Phase 1 batch evaluator, fair policy-visible baselines, contract validators, and historical comparison artifacts. Current-interface multi-seed evidence remains an active research target.
 
@@ -27,17 +27,63 @@ python tools/evaluate_phase1.py `
 | Random legal | 5 | 250 | 1,250 |
 | **Total** |  |  | **3,000** |
 
-PPO argmax selects the highest-logit valid legal slot. PPO sampled uses a recorded per-episode PyTorch generator. Random legal samples uniformly from the policy-visible valid slots. Visible greedy consumes only the flattened observation and the padded legal IDs, validity mask, and 42-dimensional legal features; neither baseline reads raw Java actions, hidden state, or no-fog information. Every choice executes through `env.step(global_id)`.
+PPO argmax selects the highest-logit valid legal slot. PPO sampled uses a recorded per-episode PyTorch generator. Random legal samples uniformly from the policy-visible valid slots. Visible greedy consumes only the flattened observation and the padded legal IDs, validity mask, and 47-dimensional legal features; neither baseline reads raw Java actions, hidden state, or no-fog information. Every choice executes through `env.step(global_id)`.
 
 Final Turn-10 stars per turn is the primary capability metric; shaped return is diagnostic. The evaluator reports episode distributions, but stochastic headline means and confidence intervals aggregate the five replicates into one mean per map before inference. Policies share canonical map identities and environment seeds for the same replicate, and comparisons report paired map-level deltas, uncertainty, and win/tie/loss counts.
 
 Outputs are written to `outputs/evaluations/<evaluation_id>/`: `config.json`, `episodes.jsonl`, `per_map.csv`, `summary.json`, `summary.csv`, and `comparison.csv`. Configuration records manifest/pool identity, ordered map hashes, schedule/RNG rules, checkpoint and sidecar hashes, interface metadata, Git/runtime provenance, and relevant `POLYVISION_*` settings. `--max-maps` and nonstandard repeats produce an explicitly partial, smoke, noncanonical result.
 
-## Active Reference Benchmark Results (Phase 1 v4 PARITY001 Seed3 16M Terminal-SPT)
+## Active Reference Benchmark Results (Phase 1 v5 PARITY002 Seed3 16M Terminal-SPT)
 
-The authoritative run card is documented in [Phase 1 v4 PARITY001 Seed3 16M Terminal-SPT Reference Run](results/Phase1_V4_PARITY001_Seed3_16M_TerminalSPT_Reference_Run.md).
+The authoritative run card is documented in [Phase 1 v5 PARITY002 Seed3 16M Terminal-SPT Reference Run](results/Phase1_V5_PARITY002_Seed3_16M_TerminalSPT_Reference_Run.md).
 
-### Validation evaluation (`outputs/evaluations/20260826_phase1_v4_parity001_seed3_16m_terminal_spt_validation_canonical`)
+### Validation evaluation (`outputs/evaluations/20260827_phase1_v5_parity002_seed3_16m_terminal_spt_validation_canonical`)
+
+Evaluated on 250 held-out validation maps (3,000 episodes total):
+- **PPO argmax:** Mean 20.52 Turn-10 SPT (95% CI [19.98, 21.04]), Median 21.00
+- **PPO sampled:** Mean 19.53 Turn-10 SPT (95% CI [19.19, 19.88]), Median 19.60
+- **Visible greedy:** Mean 7.93 Turn-10 SPT (95% CI [7.78, 8.09]), Median 8.00
+- **Random legal:** Mean 6.67 Turn-10 SPT (95% CI [6.58, 6.75]), Median 6.60
+- **Paired comparisons:**
+  - PPO argmax vs visible greedy: 250 W / 0 T / 0 L (+12.58 SPT mean advantage, 95% CI [12.09, 13.11])
+  - PPO sampled vs random legal: 250 W / 0 T / 0 L (+12.86 SPT mean advantage, 95% CI [12.55, 13.18])
+  - PPO argmax vs random legal: 250 W / 0 T / 0 L (+13.85 SPT mean advantage, 95% CI [13.33, 14.36])
+
+### Fixed held-out test evaluation (`outputs/evaluations/20260827_phase1_v5_parity002_seed3_16m_terminal_spt_pristine_test`)
+
+Evaluated on 250 fixed held-out test maps after checkpoint freeze (3,000 episodes total):
+- **PPO argmax:** Mean 20.17 Turn-10 SPT (95% CI [19.67, 20.67]), Median 20.00
+- **PPO sampled:** Mean 19.36 Turn-10 SPT (95% CI [19.04, 19.69]), Median 19.40
+- **Visible greedy:** Mean 7.96 Turn-10 SPT (95% CI [7.82, 8.10]), Median 8.00
+- **Random legal:** Mean 6.70 Turn-10 SPT (95% CI [6.62, 6.79]), Median 6.60
+- **Paired comparisons:**
+  - PPO argmax vs visible greedy: 250 W / 0 T / 0 L (+12.22 SPT mean advantage, 95% CI [11.73, 12.68])
+  - PPO sampled vs random legal: 250 W / 0 T / 0 L (+12.66 SPT mean advantage, 95% CI [12.33, 12.97])
+  - PPO argmax vs random legal: 250 W / 0 T / 0 L (+13.47 SPT mean advantage, 95% CI [13.01, 13.96])
+- **Validation $\rightarrow$ Test deltas:** argmax $-0.35$ SPT, sampled $-0.17$ SPT, greedy $+0.03$ SPT, random $+0.03$ SPT.
+
+### Comparison: Active v5 PARITY002 Reference vs. Superseded v4 PARITY001 Reference
+
+| Split / Policy | Superseded v4 Reference (586-d) | Active v5 PARITY002 Reference (6,424-d) | Paired Mean Δ (v5 $-$ v4) | Paired 95% CI for Δ |
+|---|---:|---:|---:|---|
+| **Validation PPO argmax** | 19.78 SPT | **20.52 SPT** | **$+0.73$ SPT** | **[$+0.15$, $+1.34$]** |
+| **Validation PPO sampled** | 19.47 SPT | **19.53 SPT** | **$+0.06$ SPT** | [$-0.22$, $+0.33$] |
+| **Validation Visible greedy** | 7.93 SPT | **7.93 SPT** | 0.00 SPT | [$0.00$, $0.00$] |
+| **Validation Random legal** | 6.67 SPT | **6.67 SPT** | 0.00 SPT | [$0.00$, $0.00$] |
+| **Test PPO argmax** | 19.78 SPT | **20.17 SPT** | **$+0.40$ SPT** | [$-0.14$, $+0.94$] |
+| **Test PPO sampled** | 19.26 SPT | **19.36 SPT** | **$+0.11$ SPT** | [$-0.16$, $+0.38$] |
+| **Test Visible greedy** | 7.96 SPT | **7.96 SPT** | 0.00 SPT | [$0.00$, $0.00$] |
+| **Test Random legal** | 6.70 SPT | **6.70 SPT** | 0.00 SPT | [$0.00$, $0.00$] |
+
+On the fixed held-out test set, deterministic argmax scored +0.40 SPT higher than the v4 reference (+0.73 SPT on validation). Both models represent single training seeds (Seed 3), and because the 95% CI on the test split crosses zero and multiple parity modifications were introduced simultaneously, this comparison does not establish causality for individual interface features.
+
+---
+
+## Historical Phase 1 v4 PARITY001 Seed3 16M Terminal-SPT Reference Results (Superseded)
+
+The run card for this superseded reference is documented in [Phase 1 v4 PARITY001 Seed3 16M Terminal-SPT Reference Run](results/Phase1_V4_PARITY001_Seed3_16M_TerminalSPT_Reference_Run.md).
+
+### Historical v4 Validation evaluation (`outputs/evaluations/20260826_phase1_v4_parity001_seed3_16m_terminal_spt_validation_canonical`)
 
 Evaluated on 250 held-out validation maps (3,000 episodes total):
 - **PPO argmax:** Mean 19.78 Turn-10 SPT (95% CI [19.30, 20.26]), Median 20.00
@@ -49,7 +95,7 @@ Evaluated on 250 held-out validation maps (3,000 episodes total):
   - PPO sampled vs random legal: 250 W / 0 T / 0 L (+12.80 SPT mean advantage, 95% CI [12.50, 13.08])
   - PPO argmax vs random legal: 250 W / 0 T / 0 L (+13.12 SPT mean advantage, 95% CI [12.67, 13.57])
 
-### Fixed held-out test evaluation (`outputs/evaluations/20260826_phase1_v4_parity001_seed3_16m_terminal_spt_pristine_test`)
+### Historical v4 Test evaluation (`outputs/evaluations/20260826_phase1_v4_parity001_seed3_16m_terminal_spt_pristine_test`)
 
 Evaluated on 250 fixed held-out test maps after checkpoint freeze (3,000 episodes total):
 - **PPO argmax:** Mean 19.78 Turn-10 SPT (95% CI [19.30, 20.25]), Median 20.00
@@ -60,22 +106,6 @@ Evaluated on 250 fixed held-out test maps after checkpoint freeze (3,000 episode
   - PPO argmax vs visible greedy: 250 W / 0 T / 0 L (+11.82 SPT mean advantage, 95% CI [11.36, 12.26])
   - PPO sampled vs random legal: 250 W / 0 T / 0 L (+12.55 SPT mean advantage, 95% CI [12.23, 12.86])
   - PPO argmax vs random legal: 250 W / 0 T / 0 L (+13.07 SPT mean advantage, 95% CI [12.61, 13.54])
-- **Validation $\rightarrow$ Test deltas:** argmax $-0.01$ SPT (flat), sampled $-0.22$ SPT, greedy $+0.02$ SPT, random $+0.03$ SPT.
-
-### Comparison: Active v4 PARITY001 Reference vs. Superseded v3 Terminal-SPT Reference
-
-| Split / Policy | Superseded v3 Reference (505-d) | Active v4 PARITY001 Reference (586-d) | Paired Mean Δ (v4 $-$ v3) | Paired 95% CI for Δ |
-|---|---:|---:|---:|---|
-| **Validation PPO argmax** | 19.87 SPT | **19.78 SPT** | **$-0.09$ SPT** | [$-0.54$, $+0.39$] |
-| **Validation PPO sampled** | 19.53 SPT | **19.47 SPT** | **$-0.06$ SPT** | [$-0.30$, $+0.19$] |
-| **Validation Visible greedy** | 7.93 SPT | **7.93 SPT** | 0.00 SPT | [$0.00$, $0.00$] |
-| **Validation Random legal** | 6.67 SPT | **6.67 SPT** | 0.00 SPT | [$0.00$, $0.00$] |
-| **Test PPO argmax** | 19.34 SPT | **19.78 SPT** | **$+0.43$ SPT** | **[$+0.004$, $+0.84$]** |
-| **Test PPO sampled** | 18.96 SPT | **19.26 SPT** | **$+0.30$ SPT** | **[$+0.06$, $+0.53$]** |
-| **Test Visible greedy** | 7.96 SPT | **7.96 SPT** | 0.00 SPT | [$0.00$, $0.00$] |
-| **Test Random legal** | 6.70 SPT | **6.70 SPT** | 0.00 SPT | [$0.00$, $0.00$] |
-
-On the fixed held-out test set, deterministic argmax scored +0.43 SPT higher than the v3 reference, with a paired confidence interval strictly above zero (95% CI [+0.004, +0.840]). Both models represent single training seeds (Seed 3), and this comparison does not establish causality.
 
 ---
 
@@ -148,58 +178,3 @@ The first complete 3,000-episode suite, `20260814T110912Z_validation_canonical`,
 Opening-audit interpretation: the result remains internally valid for the historical mixed-opening task. Training used 55.02% two-unit and 44.98% one-unit maps; validation used 56.40% and 43.60%. Do not reinterpret this result as evaluation under a universal two-unit opening.
 
 Read the authoritative [Seed-1 mixed-opening reflection](results/Phase1_Seed1_Mixed_Opening_Validation_Reflection.md). This historical result is preserved but shelved; it is development evidence for v1, not the current Phase 1 reference candidate or a pristine-test result.
-
-## Inspect one checkpoint
-
-`evaluate_brain.py` is the current checkpoint-aware policy inspection tool. It requires the model's `.action_interface.json` sidecar and validates compatibility before loading weights.
-
-```powershell
-$env:POLYVISION_SOLO_NO_OPPONENT_MODE = '1'
-python evaluate_brain.py `
-    --model-path runs/<run>/ppo.cleanrl_model `
-    --level-pool-glob 'levels/phase1_pool_bardur_real/validation/*.csv' `
-    --seed 42
-```
-
-Add `--render-java` for the Swing viewer or `--manual-step` to pause between decisions. This is a one-episode introspection tool, not a statistical evaluator. Use validation for development inspection; do not repeatedly inspect test maps.
-
-## Dataset roles
-
-- Use `validation/*.csv` for repeated model/configuration comparison and checkpoint selection.
-- Use `test/*.csv` only after selection for a final generalization claim. Test-informed changes contaminate that test result for the development cycle.
-- Use `human_benchmark/*.csv` for human-versus-agent challenge results under the same wrapper contract. This challenge set may influence future development and is not a substitute for pristine test evidence.
-- Never call a result held out merely because the same map bytes were copied or renamed elsewhere; separation is enforced by canonical/content identity.
-
-## Human benchmark workflow
-
-Run `python tools/human_benchmark.py` for a persistent first-attempt human challenge on the separate 17-map pool. Official runs use `TribesGymWrapper`, the flattened policy observation, the legal-slot tensors, stable global IDs, and `env.step(global_id)`; diagnostic renderers and raw action details are blocked. Replays remain separate from the canonical first completion. See [Human benchmark](human-benchmark.md) for commands, registry format, parity validation, and interpretation.
-
-## Current baselines and audits
-
-- `py_rl/cleanrl/cleanrl/evaluate_visible_greedy_movement.py` evaluates a policy-visible greedy movement baseline over repeated episodes.
-- `py_rl/cleanrl/cleanrl/evaluate_no_fog_runtime_village_greedy.py` is explicitly a no-fog diagnostic; it is privileged and must not be presented as a fair policy baseline.
-- `py_rl/cleanrl/cleanrl/privileged_nearest_village_oracle.py` and `tools/eval_org_only_oracle_vs_ppo.py` are research/oracle infrastructure. The latter defaults to the development validation pool but remains a privileged diagnostic rather than a fair policy baseline.
-- `audit_*.py`, `validate_*features.py`, and `legal_features_diagnostics.py` under the active CleanRL directory target specific action and feature invariants.
-- `tools/validate_environment_contract.py` checks every map in a pool without evaluating policy quality.
-
-Inspect each tool's `--help` and its visibility assumptions before using its output as evidence.
-
-## Additional controlled-evaluation guidance
-
-For a defensible current comparison:
-
-1. select checkpoints and configurations only on validation, then evaluate the selected result on the pristine test pool;
-2. use identical ordered map IDs and episode seeds for every policy;
-3. record the commit SHA, dirty status, dependency environment, checkpoint hash, and action-interface sidecar;
-4. state whether actions are deterministic argmax or sampled;
-5. run multiple training seeds and enough evaluation episodes for uncertainty estimates;
-6. compare against visible-information random/scripted baselines and label privileged oracles separately;
-7. retain per-episode results plus a machine-readable summary.
-
-Report mean, median, standard deviation/confidence interval, and percentiles for final T10 SPT, along with city count, second-city timing, village capture, research, fog discovery, reward return, illegal/fallback rates, and runtime.
-
-## Interpreting existing evidence
-
-The historical W&B export includes the completed 10M training run for Seed-1. Its retained values are training snapshots; canonical evaluation evidence is documented in dedicated validation and test suites. The active reference baseline is the Phase 1 v3 Seed3 16M Terminal-SPT frozen reference benchmark (`model_checkpoint_16000000.cleanrl_model`), while Phase 1 optimization continues.
-
-The strongest committed repeated-episode comparison from early development is a historical 500-episode PPO-versus-Organization-oracle evaluation. It used an older map/action contract and a map sequence that was not strictly paired between policies. It is useful methodology and milestone evidence but is not directly comparable to current checkpoints. Details live in the clearly marked [historical benchmark registry](history/model-run-benchmark-log.md).

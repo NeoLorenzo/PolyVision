@@ -124,6 +124,6 @@ python tools/validate_environment_contract.py `
     --expected-width 11 --expected-height 11
 ```
 
-Use `--max-maps 1` for a small live smoke check. Substitute `validation`, `test`, or `human_benchmark` explicitly when validating those pools. All pools must preserve the same 11×11, 5,335-observation, 63,913-action Phase 1 environment contract (`v5_human_information_parity`).
+Use `--max-maps 1` for a small live smoke check. Substitute `validation`, `test`, or `human_benchmark` explicitly when validating those pools. All pools must preserve the same 11×11, 6,424-observation, 63,913-action Phase 1 environment contract (`v5_human_information_parity`).
 
 The optional [harvester manual](../tools/polytopia_harvester/README.md), [state converter manual](../tools/polytopia_state_converter/README.md), and [map converter manual](../tools/polytopia_map_converter/README.md) describe the preceding ingestion stages.

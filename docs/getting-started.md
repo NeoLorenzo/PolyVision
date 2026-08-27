@@ -66,7 +66,7 @@ $env:POLYVISION_SOLO_NO_OPPONENT_MODE = '1'
 python py_rl/cleanrl/cleanrl/ppo.py --total-timesteps 512 --num-envs 1 --num-steps 128 --validation-states 100 --no-cuda
 ```
 
-This run automatically uses the standard Phase-1 defaults: the `legal_features` actor mode (with 42-dimensional per-action semantic features) and core Terminal-SPT reward shaping. No manual actor flags or reward environment variables are required. Use the default validation budget for full research runs. See [Training](training.md) for ablations, checkpoints, tracking, and profiling.
+This run automatically uses the standard Phase-1 defaults: the `legal_features` actor mode (with 47-dimensional per-action semantic features) and core Terminal-SPT reward shaping. No manual actor flags or reward environment variables are required. Use the default validation budget for full research runs. See [Training](training.md) for ablations, checkpoints, tracking, and profiling.
 
 ## Next steps
 

@@ -2,11 +2,12 @@
 
 ## Overview and Status
 
-- **Status:** CURRENT FROZEN REFERENCE BENCHMARK
+- **Status:** SUPERSEDED FROZEN REFERENCE BENCHMARK
 - **Date:** 2026-08-26
-- **Disposition:** Active frozen reference benchmark for ongoing PolyVision Phase 1 development and optimization. (Phase 1 remains under active development; this run establishes the authoritative reference baseline to beat.)
+- **Disposition:** Historical frozen reference benchmark for PolyVision Phase 1 optimization under the historical 586-dimensional observation contract (`v4_exact_per_city_state`). Superseded as the active reference by [Phase 1 v5 PARITY002 Seed3 16M Terminal-SPT Reference Run](Phase1_V5_PARITY002_Seed3_16M_TerminalSPT_Reference_Run.md) (20.17 test argmax SPT, 6,424-d observation). Its results remain fully valid historical evidence for the v4 contract.
 - **Primary Capability Metric:** Final Turn-10 stars per turn (SPT) on held-out maps
 - **Previous Reference:** Supersedes [Phase 1 v3 Seed3 16M Terminal-SPT Reference Run](Phase1_V3_Seed3_16M_TerminalSPT_Reference_Run.md) (19.34 test argmax SPT)
+- **Subsequent Reference:** Superseded by [Phase 1 v5 PARITY002 Seed3 16M Terminal-SPT Reference Run](Phase1_V5_PARITY002_Seed3_16M_TerminalSPT_Reference_Run.md)
 
 > [!IMPORTANT]
 > **Preferred Scientific Headline:**

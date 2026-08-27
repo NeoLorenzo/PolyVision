@@ -58,9 +58,38 @@ Validation is development evidence and may influence later decisions. Test evalu
 
 The [evaluation guide](evaluation.md) lists recommended metrics. The [historical benchmark registry](history/model-run-benchmark-log.md) illustrates why interface and protocol metadata are necessary.
 
-## Frozen Reference Benchmark Provenance (Phase 1 v4 PARITY001 Seed3 16M Terminal-SPT)
+## Frozen Reference Benchmark Provenance (Phase 1 v5 PARITY002 Seed3 16M Terminal-SPT)
 
 The authoritative active frozen reference benchmark for Phase 1 optimization is fully specified by the following provenance records:
+
+| Parameter | Authoritative Value |
+|---|---|
+| **Run directory** | `runs/Tribes-v0__Phase1-Scientific-Train-V5-PARITY002-Seed3-TerminalSPT__3__1787788415` |
+| **Canonical model checkpoint** | `runs/Tribes-v0__Phase1-Scientific-Train-V5-PARITY002-Seed3-TerminalSPT__3__1787788415/model_checkpoint_16000000.cleanrl_model` |
+| **Model SHA-256** | `924d4603fa5038b3ca11081cdfcb5c7a00063949dab44f50f05989e5c9dab061` (19,744,556 bytes) |
+| **Sidecar SHA-256** | `06f25252f960717b60c72178819d755fcd85d3bcc83d8290bcce0f7626517dc0` (715 bytes) |
+| **Separately saved final model** | `runs/.../Phase1-Scientific-Train-V5-PARITY002-Seed3-TerminalSPT.cleanrl_model` (SHA-256: `022f45f6a648238f46126ac6a6a573b91164188a4b1a73622220a46a679b4d9a`, 19,745,409 bytes) |
+| **Training seed** | `3` |
+| **Total timesteps** | 16,000,000 |
+| **Training commit** | `977ad353ef4d8c95fea05eea905bd49e3c71db93` |
+| **Environment version** | `v5_human_information_parity` |
+| **Observation dimension** | 6,424 |
+| **Legal action features** | 47 dimensions (`v1_4_parity_spatial_and_cost`) |
+| **Opening version** | `v2_guaranteed_two_unit` |
+| **Reward configuration** | `POLYVISION_TERMINAL_SPT_REWARD_ENABLED=1` ($w_{\text{base}}=1.0, w_{>10}=2.0, w_{>15}=3.0$) |
+| **Train split identity (5,000 maps)** | `a99b309a3020704e4a95886d5ab3f8b6f7ed00931ee111e3117702009605e8c4` |
+| **Validation split identity (250 maps)** | `a56e74c952ad3b08d4645fc16d66ce0f17e0589fea2fe9042f7cd293669eac72` |
+| **Test split identity (250 maps)** | `8a8e0f784535e8169ffb829f2e3058b60bcd7493277912dd995ff17b217f4b94` |
+| **Human benchmark split identity (17 maps)** | `adbe5a707392aad15342f3c595a78abeeb85cb0ce77b91a8d9339276a2674a69` |
+| **Split manifest SHA-256** | `c8721cd0fcb636d9ddb483745585e5b69eca9ca501950a1ddec6a51d0c763690` |
+| **Canonical validation evaluation** | `outputs/evaluations/20260827_phase1_v5_parity002_seed3_16m_terminal_spt_validation_canonical` |
+| **Canonical held-out test evaluation** | `outputs/evaluations/20260827_phase1_v5_parity002_seed3_16m_terminal_spt_pristine_test` |
+
+See [Phase 1 v5 PARITY002 Seed3 16M Terminal-SPT Reference Run](results/Phase1_V5_PARITY002_Seed3_16M_TerminalSPT_Reference_Run.md) for complete evaluation metrics, paired comparisons, and secondary diagnostic distributions.
+
+### Historical Frozen Reference Benchmark Provenance (Phase 1 v4 PARITY001 Seed3 16M Terminal-SPT — Superseded)
+
+The historical reference benchmark for the superseded 586-dimensional contract (`v4_exact_per_city_state`) is preserved below:
 
 | Parameter | Authoritative Value |
 |---|---|
@@ -71,19 +100,12 @@ The authoritative active frozen reference benchmark for Phase 1 optimization is 
 | **Training seed** | `3` |
 | **Total timesteps** | 16,000,000 |
 | **Training commit** | `88af310c2a73e23f1a8e0d80d07cbd0e2ecb2bad` |
-| **Environment version** | `v4_exact_per_city_state` |
-| **Observation dimension** | 586 |
+| **Environment version** | `v4_exact_per_city_state` (586-d observation) |
 | **Opening version** | `v2_guaranteed_two_unit` |
-| **Reward configuration** | `POLYVISION_TERMINAL_SPT_REWARD_ENABLED=1` ($w_{\text{base}}=1.0, w_{>10}=2.0, w_{>15}=3.0$) |
-| **Train split identity (5,000 maps)** | `a99b309a3020704e4a95886d5ab3f8b6f7ed00931ee111e3117702009605e8c4` |
-| **Validation split identity (250 maps)** | `a56e74c952ad3b08d4645fc16d66ce0f17e0589fea2fe9042f7cd293669eac72` |
-| **Test split identity (250 maps)** | `8a8e0f784535e8169ffb829f2e3058b60bcd7493277912dd995ff17b217f4b94` |
-| **Human benchmark split identity (17 maps)** | `adbe5a707392aad15342f3c595a78abeeb85cb0ce77b91a8d9339276a2674a69` |
-| **Split manifest SHA-256** | `c8721cd0fcb636d9ddb483745585e5b69eca9ca501950a1ddec6a51d0c763690` |
 | **Canonical validation evaluation** | `outputs/evaluations/20260826_phase1_v4_parity001_seed3_16m_terminal_spt_validation_canonical` |
 | **Canonical held-out test evaluation** | `outputs/evaluations/20260826_phase1_v4_parity001_seed3_16m_terminal_spt_pristine_test` |
 
-See [Phase 1 v4 PARITY001 Seed3 16M Terminal-SPT Reference Run](results/Phase1_V4_PARITY001_Seed3_16M_TerminalSPT_Reference_Run.md) for complete evaluation metrics, paired comparisons, and secondary diagnostic distributions.
+See [Phase 1 v4 PARITY001 Seed3 16M Terminal-SPT Reference Run](results/Phase1_V4_PARITY001_Seed3_16M_TerminalSPT_Reference_Run.md).
 
 ### Historical Frozen Reference Benchmark Provenance (Phase 1 v3 Seed3 16M Terminal-SPT — Superseded)
 

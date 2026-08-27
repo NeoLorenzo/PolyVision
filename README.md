@@ -19,7 +19,7 @@ The policy interacts through stable global action IDs rather than state-local Ja
 - 11×11 genuine Bardur corpus with a reproducible, hash-verified experimental split
 - geometry-derived observations and global action catalog
 - legality-aware PPO actor modes: `legal_features` (default), `legal_only` (ablation/baseline), and `dense_debug`
-- 42-dimensional semantic/economic legal-action features
+- 47-dimensional semantic/economic legal-action features
 - shaped Phase 1 rewards for economy, expansion, exploration, and core Terminal-SPT bonus
 - strict pre-training action-interface validation with content-aware caching
 - checkpoint sidecars that enforce environment/interface compatibility
@@ -48,7 +48,7 @@ The policy controls Bardur after the fail-closed `v2_guaranteed_two_unit` openin
 
 `ATTACK` is deliberately unavailable to the Phase 1 policy. The environment prioritizes early village-expansion lines through active action filters and trains on shaped SPT, city capture, village discovery/progress, and fog-clearing signals. Final T10 SPT and other economy metrics are reported separately from shaped return.
 
-On the active maps, the observation has 586 values (under the `v4_exact_per_city_state` contract) and the global action space has 63,913 IDs. Only a small legal subset is selectable in a state; by default it is represented in 256 slots. See [Actions](docs/actions.md), [Observations](docs/observations.md), and [Rewards](docs/rewards.md) for the exact current contract.
+On the active maps, the observation has 6,424 values (under the `v5_human_information_parity` contract) and the global action space has 63,913 IDs. Only a small legal subset is selectable in a state; by default it is represented in 256 slots with 47 legal action features (`v1_4_parity_spatial_and_cost`). See [Actions](docs/actions.md), [Observations](docs/observations.md), and [Rewards](docs/rewards.md) for the exact current contract.
 
 ## Quick start
 
@@ -135,11 +135,11 @@ python tools/human_benchmark.py
 
 The command selects an unplayed human-benchmark map and presents exactly the wrapper-filtered stable global IDs available to PPO. Results remain separate from pristine test evidence; see [Human benchmark](docs/human-benchmark.md).
 
-The current frozen reference result is the **Phase 1 v4 PARITY001 Seed3 16M Terminal-SPT frozen reference benchmark**: on 250 fixed held-out test maps, deterministic PPO achieved **19.78 mean Turn-10 SPT** (95% CI 19.30–20.25, median 20.00), compared with **7.96** for the policy-visible greedy baseline and **19.78** on the 250 validation maps. PPO beat visible greedy on all 250 test maps (250 W / 0 T / 0 L), with a mean paired advantage of **+11.82 SPT**. See [Phase 1 v4 PARITY001 Seed3 16M Terminal-SPT Reference Run](docs/results/Phase1_V4_PARITY001_Seed3_16M_TerminalSPT_Reference_Run.md) for full metrics, validation/test distributions, paired comparisons, and scientific interpretation.
+The current frozen reference result is the **Phase 1 v5 PARITY002 Seed3 16M Terminal-SPT frozen reference benchmark**: on 250 fixed held-out test maps, deterministic PPO achieved **20.17 mean Turn-10 SPT** (95% CI 19.67–20.67, median 20.00), compared with **7.96** for the policy-visible greedy baseline and **20.52** on the 250 validation maps. PPO beat visible greedy on all 250 test maps (250 W / 0 T / 0 L), with a mean paired advantage of **+12.22 SPT**. See [Phase 1 v5 PARITY002 Seed3 16M Terminal-SPT Reference Run](docs/results/Phase1_V5_PARITY002_Seed3_16M_TerminalSPT_Reference_Run.md) for full metrics, validation/test distributions, paired comparisons, and scientific interpretation.
 
-Phase 1 is **not** complete; active optimization remains ongoing and 19.78 test argmax SPT serves as the current frozen reference benchmark to beat. This reference remains a single-seed training result (Seed 3), and the fixed test pool has been used for prior reference benchmarks (and is thus a fixed held-out benchmark rather than newly pristine evidence).
+Phase 1 is **not** complete; active optimization remains ongoing and 20.17 test argmax SPT serves as the current frozen reference benchmark to beat. This reference remains a single-seed training result (Seed 3), and the fixed test pool has been used for prior reference benchmarks (and is thus a fixed held-out benchmark rather than newly pristine evidence).
 
-Historical Seed-1, Seed-2, the previous baseline 16M reference run, and the superseded v3 Terminal-SPT reference run remain preserved for their respective historical task, interface, and reward definitions. See [Phase 1 v3 Seed3 16M Terminal-SPT Reference Run (Superseded)](docs/results/Phase1_V3_Seed3_16M_TerminalSPT_Reference_Run.md), [Phase 1 v3 Seed3 16M Reference Run](docs/results/Phase1_V3_Seed3_16M_Reference_Run.md), [Phase 1 Seed-1 mixed-opening reflection](docs/results/Phase1_Seed1_Mixed_Opening_Validation_Reflection.md), and [Phase 1 scripted-opening audit](docs/results/Phase1_Scripted_Opening_Audit.md).
+Historical Seed-1, Seed-2, the baseline 16M reference run, the superseded v3 Terminal-SPT reference run, and the superseded v4 PARITY001 reference run remain preserved for their respective historical task, interface, and reward definitions. See [Phase 1 v4 PARITY001 Seed3 16M Terminal-SPT Reference Run (Superseded)](docs/results/Phase1_V4_PARITY001_Seed3_16M_TerminalSPT_Reference_Run.md), [Phase 1 v3 Seed3 16M Terminal-SPT Reference Run (Superseded)](docs/results/Phase1_V3_Seed3_16M_TerminalSPT_Reference_Run.md), [Phase 1 v3 Seed3 16M Reference Run](docs/results/Phase1_V3_Seed3_16M_Reference_Run.md), [Phase 1 Seed-1 mixed-opening reflection](docs/results/Phase1_Seed1_Mixed_Opening_Validation_Reflection.md), and [Phase 1 scripted-opening audit](docs/results/Phase1_Scripted_Opening_Audit.md).
 
 ## Repository structure
 

@@ -41,7 +41,7 @@ The official UI is a presentation layer over `TribesGymWrapper`, the same author
 - every active Phase 1 action filter, because neither UI nor registry reimplements filtering;
 - execution through `env.step(global_id)` and the wrapper's maintained global-ID-to-Java-action mapping.
 
-For `actor_mode=legal_features` models (such as the Phase 1 v3 Seed3 reference model), the official interface translates both the flattened observation and each legal action's 42-dimensional feature row into concise, structured human-readable annotations.
+For `actor_mode=legal_features` models (such as the Phase 1 v5 PARITY002 reference model), the official interface translates both the flattened observation and each legal action's 47-dimensional feature row into concise, structured human-readable annotations.
 
 ### Tactical Map and Movement Display
 
@@ -64,7 +64,7 @@ It creates paired wrappers for identical map/seed inputs, compares observations 
 
 ## Information boundary
 
-Official benchmark mode derives its state display solely from the 586-value flattened policy observation (under `v4_exact_city_terminal`) and the policy-visible legal action tensors (`legal_global_ids_padded`, `legal_action_valid_mask`, `legal_action_features_padded`).
+Official benchmark mode derives its state display solely from the 6,424-value flattened policy observation (under `v5_human_information_parity`) and the policy-visible legal action tensors (`legal_global_ids_padded`, `legal_action_valid_mask`, `legal_action_features_padded`).
 
 It shows:
 - fog-respecting terrain, visible resources, unit occupancy, and exact owned city slots reconstructed from the observation array;

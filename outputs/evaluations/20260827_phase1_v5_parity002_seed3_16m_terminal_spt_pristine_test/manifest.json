@@ -1,0 +1,42 @@
+{
+  "evaluation_directory": "20260827_phase1_v5_parity002_seed3_16m_terminal_spt_pristine_test",
+  "schema_version": "polyvision-phase1-evaluation-manifest-v1",
+  "files": [
+    {
+      "filename": "config.json",
+      "relative_path": "config.json",
+      "size_bytes": 96075,
+      "sha256": "266feff6b30c1e1f1a491b270e46fad271fd9e332e9d7464f93750212ef51b15"
+    },
+    {
+      "filename": "episodes.jsonl",
+      "relative_path": "episodes.jsonl",
+      "size_bytes": 4654625,
+      "sha256": "843db49170c8fdb4da7b3517f190f984df4efe7ebb5397f8809c2e5e6a1e0971"
+    },
+    {
+      "filename": "per_map.csv",
+      "relative_path": "per_map.csv",
+      "size_bytes": 124896,
+      "sha256": "8301215eff2c1602dfeeea1e84b7681032bad2d2857923867ea27a8642b23b4d"
+    },
+    {
+      "filename": "summary.json",
+      "relative_path": "summary.json",
+      "size_bytes": 4864,
+      "sha256": "ac6b330606ea5e9eb60c4ef6ca9aa259a110756e793661802b88333eb8f7e0c5"
+    },
+    {
+      "filename": "summary.csv",
+      "relative_path": "summary.csv",
+      "size_bytes": 627,
+      "sha256": "ff26174e3a8997d5cf7a581444fc1c69971614b373d5a2d62d5c6582ed2a9632"
+    },
+    {
+      "filename": "comparison.csv",
+      "relative_path": "comparison.csv",
+      "size_bytes": 30063,
+      "sha256": "eca411dca1f7107f0893e184ae479e0d7e5df9844708ceb414abe5e1b5efea4e"
+    }
+  ]
+}

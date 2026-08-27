@@ -2,6 +2,53 @@
 
 All notable changes to this project are documented in this file.
 
+## [Phase1-V5_PARITY002_Seed3_16M_TerminalSPT_Reference_Run_and_Freeze-047] - (2026-08-27)
+
+### Scope
+- Completed, evaluated, and froze the **Phase 1 v5 PARITY002 Seed3 16M Terminal-SPT** training run as the active **CURRENT FROZEN REFERENCE BENCHMARK** for ongoing PolyVision Phase 1 development.
+- **Canonical Checkpoint & Provenance:**
+  - Checkpoint: `runs/Tribes-v0__Phase1-Scientific-Train-V5-PARITY002-Seed3-TerminalSPT__3__1787788415/model_checkpoint_16000000.cleanrl_model`
+  - Checkpoint SHA-256: `924d4603fa5038b3ca11081cdfcb5c7a00063949dab44f50f05989e5c9dab061` (19,744,556 bytes)
+  - Sidecar: `model_checkpoint_16000000.cleanrl_model.action_interface.json` (SHA-256: `06f25252f960717b60c72178819d755fcd85d3bcc83d8290bcce0f7626517dc0`, 715 bytes)
+  - Separately saved final model: `Phase1-Scientific-Train-V5-PARITY002-Seed3-TerminalSPT.cleanrl_model` (SHA-256: `022f45f6a648238f46126ac6a6a573b91164188a4b1a73622220a46a679b4d9a`, 19,745,409 bytes)
+  - Training commit: `977ad353ef4d8c95fea05eea905bd49e3c71db93` (clean working tree during training)
+  - Environment contract: `v5_human_information_parity` (6,424-dimensional observation: 52 spatial planes × 121 cells = 6,292 spatial values + 132 scalar/structured values)
+  - Opening version: `v2_guaranteed_two_unit`
+  - Action space: 63,913 global IDs, 256 legal slots, 47-d action features (`v1_4_parity_spatial_and_cost`, fingerprint `c849a4abf7b0bee073ccc56b63ae65917ea30e77068ad648c472130693dfe6e4`)
+  - Reward: Terminal-SPT ($w_{\text{base}}=1.0, w_{>10}=2.0, w_{>15}=3.0$) + step shaping
+  - Training steps: 16,000,000 / 16,000,000 (Seed 3, final SPS 577, runtime 27,814 s / 7.73 h)
+- **W&B Runs-Table Telemetry Archival & Diagnostics:**
+  - Archived raw W&B runs-table export `outputs/training/phase1_v5_parity002_seed3_16m_terminal_spt_wandb.csv` (SHA-256: `df75e8ef8c9d09cce6d2fbbf366ea20835f8c6ebae06c64188b839818816c7cb`).
+  - Generated structured provenance summary `outputs/training/phase1_v5_parity002_seed3_16m_terminal_spt_summary.json` recording run-level configuration and summary metrics from the runs-table export (throughput 577 SPS, 7.73 h runtime, final recorded value loss 45.760, policy entropy 1.317, explained variance 0.837, policy loss metric $\approx -3.73 \times 10^{-8}$, and rollout summary metrics).
+- **Canonical Validation Evaluation:**
+  - Evaluated on 250 held-out validation maps (3,000 episodes total, `outputs/evaluations/20260827_phase1_v5_parity002_seed3_16m_terminal_spt_validation_canonical`):
+    - PPO argmax: Mean 20.52 Turn-10 SPT (95% CI [19.98, 21.04]), Median 21.00
+    - PPO sampled: Mean 19.53 Turn-10 SPT (95% CI [19.19, 19.88]), Median 19.60
+    - Visible greedy: Mean 7.93 Turn-10 SPT (95% CI [7.78, 8.09]), Median 8.00
+    - Random legal: Mean 6.67 Turn-10 SPT (95% CI [6.58, 6.75]), Median 6.60
+    - Paired comparisons: PPO argmax beat visible greedy on 250/250 maps (250 W / 0 T / 0 L, +12.58 SPT mean difference).
+- **Canonical Fixed Held-Out Test Evaluation:**
+  - Evaluated on 250 fixed held-out test maps (`outputs/evaluations/20260827_phase1_v5_parity002_seed3_16m_terminal_spt_pristine_test`):
+    - PPO argmax: Mean 20.17 Turn-10 SPT (95% CI [19.67, 20.67]), Median 20.00
+    - PPO sampled: Mean 19.36 Turn-10 SPT (95% CI [19.04, 19.69]), Median 19.40
+    - Visible greedy: Mean 7.96 Turn-10 SPT (95% CI [7.82, 8.10]), Median 8.00
+    - Random legal: Mean 6.70 Turn-10 SPT (95% CI [6.62, 6.79]), Median 6.60
+    - Paired comparisons: PPO argmax beat visible greedy on 250/250 maps (250 W / 0 T / 0 L, +12.22 SPT mean difference).
+- **v4 $\rightarrow$ v5 Paired Comparison & Behavioral Analysis:**
+  - Created machine-readable comparison artifacts `outputs/comparisons/phase1_v4_terminal_spt_vs_v5_parity002.json` and `.csv`.
+  - Validation argmax paired Δ: +0.732 SPT (95% CI [+0.152, +1.344], 118 W / 24 T / 108 L).
+  - Held-out test argmax paired Δ: +0.396 SPT (95% CI [$-0.136$, $+0.944$], 120 W / 30 T / 100 L).
+  - Generalization shift: Validation-to-test drop for argmax was $-0.344$ SPT ($20.516 \rightarrow 20.172$).
+  - Secondary diagnostics: Rapid territorial expansion (mean 4.90 cities, 13.29 units, 61.91 fog tiles cleared on test, vs 4.23 cities, 6.67 units, 49.62 fog in v4); 100% Forestry adoption (250/250 maps).
+- **Artifact Manifests & Documentation:**
+  - Generated SHA-256 `manifest.json` for validation and test evaluation directories.
+  - Created authoritative run card `docs/results/Phase1_V5_PARITY002_Seed3_16M_TerminalSPT_Reference_Run.md`.
+  - Updated `docs/results/Phase1_V4_PARITY001_Seed3_16M_TerminalSPT_Reference_Run.md` status to `SUPERSEDED FROZEN REFERENCE BENCHMARK`.
+  - Updated `README.md`, `docs/evaluation.md`, `docs/training.md`, `docs/reproducibility.md`, `docs/maps.md`, `docs/rewards.md`, `docs/human-benchmark.md`, and `tools/polytopia_map_converter/README.md` to reference the v5 6,424-d contract and current frozen reference benchmark.
+
+### Rationale
+- Freezing the Phase 1 v5 PARITY002 16M model establishes the new durable, reproducible reference benchmark (20.17 test argmax SPT) for subsequent Phase 1 optimization, confirming that full Human–AI Information Parity representation supports strong macroeconomic growth and competitive held-out generalization across identical fixed map pools.
+
 ## [Phase1-PARITY_002_3_No_Home_City_Parity_Fix-046] - (2026-08-27)
 
 ### Scope
