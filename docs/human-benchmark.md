@@ -4,6 +4,8 @@
 
 The Phase 1 human benchmark is a persistent human-versus-agent challenge on the 17 maps in `levels/phase1_pool_bardur_real/human_benchmark/`. It measures decision quality inside PolyVision's constrained Bardur Turn-10 task. It is not the pristine scientific test set and does not measure unrestricted full-game Polytopia skill.
 
+This canonical benchmark is the prerequisite for the future current-interface multi-seed Phase 1 decision. It remains incomplete at 1/17 completed first attempts: GitHub issue #3 owns completing it, comparing the active frozen Phase 1 reference under this protocol, and defining the exact machine-readable human-relative gate rule. Until that issue establishes the gate and the relevant candidate passes it, multi-seed Phase 1 training remains deferred.
+
 Run the ordinary workflow from the repository root:
 
 ```powershell

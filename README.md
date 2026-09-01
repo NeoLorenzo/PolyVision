@@ -192,7 +192,7 @@ Focused manuals remain beside the [state converter](tools/polytopia_state_conver
 
 ## Roadmap
 
-Near-term work is to run reproducible multi-seed validation and pristine-test baselines on the frozen split. Later phases can broaden map distributions and tribes, relax curriculum filters, add combat and opponents, extend observations and action semantics, and evaluate full-game policies. Those items are future work, not current capabilities.
+Current-interface multi-seed Phase 1 training and evidence are deferred for the constrained Bardur Turn-10 task. They may begin only after the canonical human-benchmark gate is established under GitHub issue #3 and the applicable model or candidate passes it; see [Human benchmark](docs/human-benchmark.md) for the canonical workflow. Later phases can broaden map distributions and tribes, relax curriculum filters, add combat and opponents, extend observations and action semantics, and evaluate full-game policies. Those items are future work, not current capabilities.
 
 ## Attribution and licensing
 
