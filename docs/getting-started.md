@@ -35,6 +35,17 @@ Set-Location ../..
 
 Successful compilation creates `pol_env/Tribes/out/core/game/PythonEnv.class`.
 
+## Core Phase 1 CI checks
+
+To reproduce the GitHub Actions software regression gate locally, install the pinned dependencies, ensure JDK 11 (`javac`) is available on `PATH`, then run:
+
+```powershell
+python -m pip install -r requirements-lock.txt
+python tools/run_core_ci_checks.py
+```
+
+This runs the same cheap deterministic Phase 1 environment-contract and parity suite used in GitHub Actions. It is an interface-invariant check, not full scientific validation.
+
 ## Validate the current map contract
 
 First verify the complete frozen split cheaply, then optionally run the live Java contract over the training pool:
