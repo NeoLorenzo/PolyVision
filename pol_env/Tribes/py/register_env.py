@@ -469,16 +469,10 @@ class TribesGymWrapper(gym.Env):
             )
         except (MapGeometryError, ObservationContractError):
             raise
-        except Exception as e:
-            # Fallback to placeholders if initialization fails
-            print(f"Warning: Could not initialize environment properly: {e}")
-            self.action_space = gym.spaces.Discrete(200)  # safe fallback
-            self.observation_space = gym.spaces.Box(
-                low=-np.inf, 
-                high=np.inf, 
-                shape=(1000,), 
-                dtype=np.float32
-            )
+        except Exception as exc:
+            raise RuntimeError(
+                "TribesGymWrapper failed while establishing the real PolyVision interface."
+            ) from exc
     
     def reset(self, seed=None, options=None):
         t_reset_start = time.perf_counter() if self._profile_sps_enabled else None
