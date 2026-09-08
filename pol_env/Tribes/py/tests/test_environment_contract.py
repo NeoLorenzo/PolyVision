@@ -93,6 +93,29 @@ class GeometryContractTests(unittest.TestCase):
             validate_fixed_square_geometry(*dims, wrapper._catalog.width, wrapper._catalog.height)
 
 
+class BootstrapFailureTests(unittest.TestCase):
+    def test_unexpected_bootstrap_failure_is_chained_and_fails_closed(self):
+        bootstrap_failure = RuntimeError("distinctive reset bootstrap failure")
+        tribes_env = SimpleNamespace(reset=mock.Mock(side_effect=bootstrap_failure))
+
+        with mock.patch(
+            "pol_env.Tribes.py.register_env.make_default_env", return_value=tribes_env
+        ), mock.patch.object(
+            TribesGymWrapper, "_resolve_level_pool", return_value=["bootstrap.csv"]
+        ), mock.patch.object(
+            TribesGymWrapper, "_resolve_map_profile", return_value="BARDUR"
+        ), mock.patch.object(
+            TribesGymWrapper, "_validate_level_file_is_square"
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "establishing the real PolyVision interface"
+            ) as raised:
+                TribesGymWrapper()
+
+        self.assertIs(raised.exception.__cause__, bootstrap_failure)
+        tribes_env.reset.assert_called_once()
+
+
 class CheckpointCompatibilityTests(unittest.TestCase):
     def test_same_environment_is_accepted(self):
         meta = compatibility_metadata()
