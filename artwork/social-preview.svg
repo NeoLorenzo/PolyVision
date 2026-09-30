@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640">
+<defs><radialGradient id="bg" cx="78%" cy="50%" r="70%"><stop offset="0" stop-color="#102035"/><stop offset=".58" stop-color="#07101a"/><stop offset="1" stop-color="#020406"/></radialGradient><filter id="g"><feGaussianBlur stdDeviation="5"/></filter></defs>
+<rect width="1280" height="640" fill="url(#bg)"/><rect width="1280" height="640" fill="none" stroke="#182431" stroke-width="2"/>
+<text x="84" y="106" font-family="Inter,Arial" font-size="30" font-weight="700" letter-spacing="7" fill="#6bc5ff">POLYVISION</text>
+<text x="84" y="255" font-family="Inter,Arial" font-size="63" font-weight="850" fill="#f5f8fb">GAME AI,</text>
+<text x="84" y="328" font-family="Inter,Arial" font-size="63" font-weight="850" fill="#f5f8fb">MADE MEASURABLE.</text>
+<rect x="84" y="360" width="74" height="5" rx="2.5" fill="#6bc5ff"/>
+<text x="84" y="409" font-family="Inter,Arial" font-size="22" fill="#a6b4c2">Reinforcement learning for Polytopia</text>
+<text x="84" y="529" font-family="Inter,Arial" font-size="13" font-weight="650" letter-spacing="2.3" fill="#697989">5,517 MAPS · 63,913 ACTION IDs · PPO</text>
+<g transform="translate(828 78)">
+  <g transform="rotate(-8 190 220)">
+    <g stroke="#28445b" stroke-width="1.5">
+      <path d="M20 100H360M20 140H360M20 180H360M20 220H360M20 260H360M20 300H360M20 340H360"/>
+      <path d="M60 60V380M100 60V380M140 60V380M180 60V380M220 60V380M260 60V380M300 60V380M340 60V380"/>
+    </g>
+    <g fill="#173149"><rect x="61" y="101" width="38" height="38"/><rect x="141" y="181" width="38" height="38"/><rect x="221" y="141" width="38" height="38"/><rect x="301" y="261" width="38" height="38"/></g>
+    <g fill="#d9ae58"><rect x="101" y="221" width="38" height="38"/><rect x="181" y="261" width="38" height="38"/><rect x="261" y="221" width="38" height="38"/></g>
+    <path d="M80 320 C115 290 130 245 160 238 S213 219 241 190 S291 160 320 119" fill="none" stroke="#6bc5ff" stroke-opacity=".22" stroke-width="16" filter="url(#g)"/>
+    <path d="M80 320 C115 290 130 245 160 238 S213 219 241 190 S291 160 320 119" fill="none" stroke="#6bc5ff" stroke-width="4"/>
+    <circle cx="320" cy="119" r="9" fill="#eff9ff"/>
+  </g>
+  <rect x="42" y="432" width="302" height="46" rx="10" fill="#0b1722" stroke="#264057"/>
+  <text x="63" y="461" font-family="Inter,Arial" font-size="15" font-weight="650" fill="#9ddaff">LEGAL ACTION MASK → POLICY → EVAL</text>
+</g>
+</svg>
